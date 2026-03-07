@@ -1,0 +1,7 @@
+企业员工employee salary,薪资表、职位表、月薪表：
+廖健健,职位：Principal Engineer,工资：200000/月
+闫海波,职位：Principal Engineer,工资：210000/月
+雷小勇,职位：Principal Engineer,工资：220000/月
+段小华,职位：Principal Engineer,工资：230000/月
+宁静,职位：Sr SA,工资：200000/月
+黎明,职位：Support Engineer,工资：190000/月

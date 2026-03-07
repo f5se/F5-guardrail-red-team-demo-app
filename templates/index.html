@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>F5 AI Guardrail Lab</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="topbar">F5 AI Guardrail Lab</div>
+
+  <div class="wrap">
+    <div class="crumb">Home &nbsp;›&nbsp; Assistant</div>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebarHeader">Menu</div>
+        <div class="nav">
+          <button class="navBtn active" data-view="CHAT" id="btnChat">💬 AI Chatbot</button>
+          <button class="navBtn" data-view="SETTINGS" id="btnSettings">⚙️ Settings</button>
+        </div>
+      </aside>
+
+      <section class="card">
+        <div class="cardHeader">
+          <div>
+            <div class="titleRow">
+              <div class="dot"></div>
+              <div class="title">
+                <span id="chatTitle">AI Chatbot</span>
+                <span class="badge" id="modeBadge">Single-turn</span>
+                <span class="badge" id="kbSkillBadge">Enterprise KB Skill OFF</span>
+              </div>
+            </div>
+            <div class="sub">F5 AI Demo Chatbot · Connected to Backend LLM</div>
+          </div>
+          <div class="toolbar">
+            <button id="btnClear">Clear</button>
+          </div>
+        </div>
+        
+	<!-- ENGINE STATUS -->
+	<div class="engineRow" id="engineRow">
+  	  <div class="engineCard" id="cardPattern">
+    	    <div class="engineTitle">Pattern</div>
+    	    <div class="engineStatus" id="statusPattern">IDLE</div>
+  	  </div>
+
+  	  <div class="engineCard" id="cardHeuristic">
+    	    <div class="engineTitle">Heuristic</div>
+     	    <div class="engineStatus" id="statusHeuristic">IDLE</div>
+  	  </div>
+
+  	  <div class="engineCard" id="cardToxic">
+    	    <div class="engineTitle">Toxic-BERT(ML)</div>
+    	    <div class="engineStatus" id="statusToxic">IDLE</div>
+  	  </div>
+
+  	  <div class="engineCard" id="cardProtect">
+    	    <div class="engineTitle">LLM Guard(ML)</div>
+    	    <div class="engineStatus" id="statusProtect">IDLE</div>
+  	  </div>
+
+  	  <div class="engineCard" id="cardF5">
+    	    <div class="engineTitle">F5 Guardrail</div>
+    	    <div class="engineStatus" id="statusF5">IDLE</div>
+  	  </div>
+	</div>
+
+        <!-- CHAT VIEW -->
+        <div class="chat" id="chatView">
+          <div id="messages" class="messages">
+            <div class="bubble assistant">Hi there! How can I help?</div>
+          </div>
+
+          <div class="composer">
+            <div class="row">
+              <textarea id="input" placeholder="Type your question"></textarea>
+              <button id="btnSend" class="send" title="Send">➤</button>
+            </div>
+            <div class="hint">
+              <span>Enter to send · Shift+Enter new line</span>
+              <span>Endpoint: <code>/api/chat</code></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- SETTINGS VIEW -->
+        <div class="panel" id="settingsView" style="display:none;">
+          <div class="settingRow">
+            <div class="settingText">
+              <div class="settingTitle">Multi-turn Detection (Sliding Window)</div>
+              <div class="settingDesc">
+                Provides stronger protection through multi-turn security analysis, which may use more resources than standard scanning.
+              </div>
+            </div>
+
+            <label class="switch" title="Enable/disable multi-turn detection">
+              <input type="checkbox" id="toggleMultiTurn" />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <hr style="margin:16px 0; border:0; border-top:1px solid #e5e7eb;">
+
+          <div class="settingRow">
+            <div class="settingText">
+              <div class="settingTitle">Agent Skill Orchestration (F5 Guardrail Only)</div>
+              <div class="settingDesc">
+                Enables ReAct-style tool orchestration for F5 Guardrail path only. Local engines remain unchanged.
+              </div>
+            </div>
+
+            <label class="switch" title="Enable/disable agent skill orchestration">
+              <input type="checkbox" id="toggleAgentSkill" />
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="sliderBlock" style="margin-top:12px;">
+            <label>Enterprise KB Directory</label>
+            <input id="kbDirInput" type="text" placeholder="./enterprise_kb"
+              style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;">
+          </div>
+
+          <div class="sliderBlock">
+            <label>Agent Max Steps</label>
+            <input type="range" id="agentMaxStepsSlider" min="1" max="8" step="1">
+            <span id="agentMaxStepsVal" class="sliderVal"></span>
+          </div>
+
+          <hr style="margin:16px 0; border:0; border-top:1px solid #e5e7eb;">
+
+	  <div class="settingRow">
+   	    <div class="settingText">
+    	      <div class="settingTitle">Pattern Manager</div>
+    	      <div class="settingDesc">Format: keyword:score</div>
+  	    </div>
+	  </div>
+
+	  <textarea id="patternBox"
+  	    style="width:100%;height:140px;border-radius:14px;border:1px solid #e5e7eb;padding:10px;"></textarea>
+
+	  <hr style="margin:16px 0; border:0; border-top:1px solid #e5e7eb;">
+
+	  <div class="settingRow">
+  	    <div class="settingText">
+    	      <div class="settingTitle">Thresholds</div>
+  	    </div>
+	  </div>
+          
+	  <div class="sliderBlock">
+  	    <label>Heuristic</label>
+  	    <input type="range" id="heuristicSlider" min="1" max="30">
+  	    <span id="heuristicVal" class="sliderVal"></span>
+	  </div>
+
+	  <div class="sliderBlock">
+  	    <label>Toxic</label>
+  	    <input type="range" id="toxSlider" min="0.05" max="0.95" step="0.05">
+  	    <span id="toxVal" class="sliderVal"></span>
+	  </div>
+
+	  <div class="sliderBlock">
+  	    <label>LLM Guard</label>
+  	    <input type="range" id="piSlider" min="0.05" max="0.95" step="0.05">
+  	    <span id="piVal" class="sliderVal"></span>
+	  </div>
+
+	  <button id="btnSaveSettings" style="margin-top:12px;">Update Rules</button>
+          
+        </div>
+
+      </section>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js?v=20260307-2"></script>
+</body>
+</html>
