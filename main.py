@@ -3,7 +3,7 @@ import time
 import json
 import re
 from collections import defaultdict, deque
-from typing import Any, Deque, Dict, List, Optional, Tuple
+from typing import Deque, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 load_dotenv()  # 从项目目录 .env 加载环境变量
@@ -22,6 +22,9 @@ from pydantic import BaseModel
 
 from calypsoai import CalypsoAI
 from transformers import pipeline
+
+from skills import get_all_tool_definitions, dispatch_tool
+from skills.utils import to_bool, to_int, to_float, normalize_extensions, agent_debug_log
 
 # Project-root anchored paths to avoid cwd mismatch.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -209,49 +212,6 @@ def parse_patterns(raw: str) -> dict:
             pass
     return result
 
-def to_bool(v: Any) -> bool:
-    if isinstance(v, bool):
-        return v
-    if isinstance(v, str):
-        return v.strip().lower() in {"1", "true", "yes", "on"}
-    return bool(v)
-
-def to_int(v: Any, default: int, min_value: Optional[int] = None, max_value: Optional[int] = None) -> int:
-    try:
-        value = int(v)
-    except Exception:
-        value = default
-    if min_value is not None:
-        value = max(min_value, value)
-    if max_value is not None:
-        value = min(max_value, value)
-    return value
-
-def to_float(v: Any, default: float, min_value: Optional[float] = None, max_value: Optional[float] = None) -> float:
-    try:
-        value = float(v)
-    except Exception:
-        value = default
-    if min_value is not None:
-        value = max(min_value, value)
-    if max_value is not None:
-        value = min(max_value, value)
-    return value
-
-def normalize_extensions(raw: Any) -> List[str]:
-    if isinstance(raw, list):
-        parts = [str(x).strip().lower() for x in raw]
-    else:
-        parts = [x.strip().lower() for x in str(raw or "").split(",")]
-    clean = []
-    for p in parts:
-        if not p:
-            continue
-        if not p.startswith("."):
-            p = "." + p
-        clean.append(p)
-    return clean or [".txt", ".md", ".json", ".csv"]
-
 def get_runtime_settings(raw: dict) -> dict:
     patterns = raw.get("patterns", DEFAULT_SETTINGS["patterns"])
     if not isinstance(patterns, str):
@@ -270,10 +230,6 @@ def get_runtime_settings(raw: dict) -> dict:
         "kb_max_file_chars": to_int(raw.get("kb_max_file_chars", 8000), 8000, 500, 50000),
         "kb_max_result_chars": to_int(raw.get("kb_max_result_chars", 5000), 5000, 500, 20000),
     }
-
-def agent_debug_log(settings: dict, message: str):
-    if settings.get("agent_debug_enabled"):
-        print(f"[AGENT-DEBUG] {message}")
 
 def format_guardrail_reply(data: dict) -> str:
     guardrail_result = (data.get("result") or {})
@@ -316,167 +272,6 @@ def extract_json_object(text: str) -> Tuple[Optional[dict], Optional[str]]:
         return None, "json object must be dict"
     return obj, None
 
-def normalize_for_match(text: str) -> str:
-    lowered = (text or "").lower()
-    # Keep CJK and word chars, drop spaces/punctuation to make CSV/text matching more robust.
-    return re.sub(r"[^\w\u4e00-\u9fff]+", "", lowered, flags=re.UNICODE)
-
-def split_keywords(text: str) -> List[str]:
-    lowered = (text or "").lower()
-    tokens = [t for t in re.findall(r"[\w\-]{2,}", lowered, flags=re.UNICODE) if t]
-
-    # Add CJK n-grams so queries like "企业员工工资" can match files that only contain
-    # partial business terms such as "员工" or "工资" in nearby text.
-    cjk_chunks = re.findall(r"[\u4e00-\u9fff]{2,}", lowered)
-    for chunk in cjk_chunks:
-        for n in (2, 3):
-            if len(chunk) < n:
-                continue
-            for i in range(0, len(chunk) - n + 1):
-                tokens.append(chunk[i:i + n])
-
-    unique = []
-    seen = set()
-    for t in tokens:
-        if t in seen:
-            continue
-        seen.add(t)
-        unique.append(t)
-    return unique[:40]
-
-def score_document(query: str, content: str, keywords: List[str]) -> int:
-    q = query.lower().strip()
-    c = content.lower()
-    q_norm = normalize_for_match(q)
-    c_norm = normalize_for_match(c)
-    score = 0
-    if q and q in c:
-        score += 5
-    # Normalized exact match: ignores separators/punctuation in source documents.
-    if q_norm and q_norm in c_norm:
-        score += 5
-    for kw in keywords:
-        if not kw:
-            continue
-        if re.search(r"[\u4e00-\u9fff]", kw):
-            score += c_norm.count(kw)
-        else:
-            score += c.count(kw)
-    return score
-
-def extract_snippet(content: str, keywords: List[str], max_chars: int) -> str:
-    if not content:
-        return ""
-    lower = content.lower()
-    idx = -1
-    for kw in keywords:
-        pos = lower.find(kw)
-        if pos != -1:
-            idx = pos
-            break
-    if idx == -1:
-        return content[:max_chars]
-    half = max_chars // 2
-    start = max(0, idx - half)
-    end = min(len(content), start + max_chars)
-    return content[start:end]
-
-def safe_join_under_base(base_dir: str, target_path: str) -> bool:
-    base = os.path.realpath(base_dir)
-    target = os.path.realpath(target_path)
-    return target == base or target.startswith(base + os.sep)
-
-def execute_read_enterprise_kb_tool(arguments: dict, settings: dict) -> dict:
-    raw_kb_dir = str(settings["kb_dir"])
-    kb_dir = raw_kb_dir if os.path.isabs(raw_kb_dir) else os.path.join(BASE_DIR, raw_kb_dir)
-    kb_dir = os.path.abspath(kb_dir)
-    agent_debug_log(settings, f"tool=read_enterprise_kb start kb_dir={kb_dir}")
-    if not os.path.isdir(kb_dir):
-        agent_debug_log(settings, "tool=read_enterprise_kb kb_dir_not_found")
-        return {"ok": False, "error": f"kb_dir not found: {kb_dir}"}
-
-    query = str(arguments.get("query", "")).strip()
-    if not query:
-        agent_debug_log(settings, "tool=read_enterprise_kb missing_query")
-        return {"ok": False, "error": "query is required"}
-
-    top_k = to_int(arguments.get("top_k", settings["kb_top_k"]), settings["kb_top_k"], 1, 8)
-    allowed_ext = settings["kb_allowed_extensions"]
-    max_file_chars = settings["kb_max_file_chars"]
-    max_result_chars = settings["kb_max_result_chars"]
-    keywords = split_keywords(query)
-
-    ranked = []
-    scanned_files = 0
-    for root, _, files in os.walk(kb_dir):
-        for name in files:
-            file_path = os.path.join(root, name)
-            if not safe_join_under_base(kb_dir, file_path):
-                continue
-            ext = os.path.splitext(name)[1].lower()
-            if ext not in allowed_ext:
-                continue
-            scanned_files += 1
-            try:
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read(max_file_chars)
-            except Exception:
-                continue
-            if not content.strip():
-                continue
-            score = score_document(query, content, keywords)
-            if score <= 0:
-                continue
-            ranked.append((score, file_path, content))
-
-    ranked.sort(key=lambda x: x[0], reverse=True)
-    hits = []
-    total_chars = 0
-    for score, path, content in ranked[:top_k]:
-        rel_path = os.path.relpath(path, kb_dir)
-        snippet = extract_snippet(content, keywords, 800)
-        candidate = len(snippet)
-        if total_chars + candidate > max_result_chars:
-            remaining = max_result_chars - total_chars
-            if remaining <= 0:
-                break
-            snippet = snippet[:remaining]
-            candidate = len(snippet)
-        total_chars += candidate
-        hits.append({
-            "path": rel_path,
-            "score": score,
-            "snippet": snippet,
-        })
-
-    agent_debug_log(
-        settings,
-        f"tool=read_enterprise_kb done scanned={scanned_files} ranked={len(ranked)} hits={len(hits)}",
-    )
-    return {
-        "ok": True,
-        "kb_dir": kb_dir,
-        "scanned_files": scanned_files,
-        "hits": hits,
-    }
-
-def get_tool_definitions() -> List[dict]:
-    return [
-        {
-            "name": "read_enterprise_kb",
-            "description": "Read local enterprise knowledge base files and return relevant snippets",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "top_k": {"type": "integer", "minimum": 1, "maximum": 8},
-                },
-                "required": ["query"],
-            },
-            "permission": "local_read_kb_only",
-        }
-    ]
-
 def build_agent_prompt(user_input: str, scratchpad: str, tool_defs: List[dict], step: int, max_steps: int) -> str:
     tools_json = json.dumps(tool_defs, ensure_ascii=False, indent=2)
     return (
@@ -500,7 +295,7 @@ def build_agent_prompt(user_input: str, scratchpad: str, tool_defs: List[dict], 
 
 async def run_agent_skill_loop(user_input: str, send_kwargs: dict, settings: dict) -> dict:
     max_steps = settings["agent_max_steps"]
-    tool_defs = get_tool_definitions()
+    tool_defs = get_all_tool_definitions()
     scratchpad_entries: List[str] = []
     trace: List[dict] = []
     tool_calls: List[dict] = []
@@ -565,10 +360,7 @@ async def run_agent_skill_loop(user_input: str, send_kwargs: dict, settings: dic
         tool_calls.append({"step": step, "name": tool_name, "arguments": arguments})
         agent_debug_log(settings, f"skill_loop tool_call step={step} name={tool_name}")
 
-        if tool_name != "read_enterprise_kb":
-            tool_result = {"ok": False, "error": f"unknown tool: {tool_name}"}
-        else:
-            tool_result = execute_read_enterprise_kb_tool(arguments, settings)
+        tool_result = dispatch_tool(tool_name, arguments, settings)
 
         compact_result = json.dumps(tool_result, ensure_ascii=False)
         agent_debug_log(

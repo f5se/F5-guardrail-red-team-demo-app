@@ -141,6 +141,21 @@ function escapeHtml(s){
     .replaceAll("'","&#039;");
 }
 
+/** 将 Markdown 转为安全 HTML；无库时退回纯文本+换行 */
+function renderMarkdown(text){
+  const s = String(text || "").trim();
+  if (!s) return "";
+  if (typeof marked === "undefined" || typeof DOMPurify === "undefined") {
+    return escapeHtml(s).replace(/\n/g, "<br/>");
+  }
+  try {
+    const raw = (typeof marked.parse === "function" ? marked.parse(s) : marked(s));
+    return DOMPurify.sanitize(raw);
+  } catch (e) {
+    return escapeHtml(s).replace(/\n/g, "<br/>");
+  }
+}
+
 function isRejected(text){
   const t = (text || "").trim();
   return t.startsWith("Prompt Rejected") || t.startsWith("Response Rejected");
@@ -211,7 +226,10 @@ async function send(){
       return;
     }
 
-    await typeIntoBubble(assistantBubble, reply, 10);
+    assistantBubble.textContent = "";
+    assistantBubble.classList.add("md");
+    assistantBubble.innerHTML = renderMarkdown(reply);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
 
   }catch(e){
     assistantBubble.textContent = "Failed to reach backend: " + e.message;

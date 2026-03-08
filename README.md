@@ -2,14 +2,15 @@
 
 基于 F5 AI Guardrail（CalypsoAI）与本地 ML 引擎的多引擎 AI 护栏演示Agent应用，提供 Web 对话界面与可配置的提示/响应检测策略，结合Skills能力模拟企业内部系统对接能力。
 
-![image-20260307214535413](README.assets/image-20260307214535413.png)
+![image-20260308163826054](README.assets/image-20260308163826054.png)
 
 感谢：本App是在James Lee的Demo基础上进行的改进，包括但不限于：
 
 1. 修正了多轮对话中的bug
-2. 增加了Skills能力
+2. 增加了Skills能力，可随时增加新的Skills并自动注册Skill
 3. 增加了HF的代理下载能力
 4. 将env文件直接加载，无需设置环境变量
+5. 增加了前端Markdown响应的渲染
 
 ---
 
