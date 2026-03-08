@@ -4,6 +4,8 @@
 
 ![image-20260308163826054](README.assets/image-20260308163826054.png)
 
+![F5-Red-Team-DevSecOps-pass](README.assets/F5-Red-Team-DevSecOps-pass.png)
+
 感谢：本App是在James Lee的Demo基础上进行的改进，包括但不限于：
 
 1. 修正了多轮对话中的bug
@@ -11,6 +13,7 @@
 3. 增加了HF的代理下载能力
 4. 将env文件直接加载，无需设置环境变量
 5. 增加了前端Markdown响应的渲染
+6. 增加了F5 Red Team与DevSecOps的集成流水线演示
 
 ---
 
@@ -100,6 +103,7 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 - **可配置策略**：通过 `settings.json` 与 UI 设置检测阈值、规则权重、企业知识库路径等。
 - **可选本地知识库Skill**：支持通过Skills模拟连接本地企业知识库（本演示环境采用本地目录读取)，可配置目录与文件类型。
 - **可设定Reasoning轮次**：ReAct风格Agent模拟多轮推理。
+- **F5 Red Team DevSecOps 集成**：提供模拟 CI/CD 流水线视图，在构建/部署流程中集成 F5 AI Red Team 自动化对抗攻击测试，便于在安全开发运维流程中验证 AI 应用韧性。
 
 ---
 

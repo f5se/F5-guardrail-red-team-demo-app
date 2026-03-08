@@ -104,19 +104,36 @@ toggleMultiTurnEl.addEventListener("change", () => {
   addBubble("assistant","Hi there! How can I help?");
 });
 
+const redteamView = document.getElementById("redteamView");
+const engineRow = document.getElementById("engineRow");
+
 function setActiveView(view){
   activeView = view;
   navButtons.forEach(b => b.classList.toggle("active", b.dataset.view === view));
 
+  chatView.style.display = "none";
+  settingsView.style.display = "none";
+  redteamView.style.display = "none";
+
+  const chatOnlyEls = [engineRow, modeBadgeEl, kbSkillBadgeEl, btnClear];
+  chatOnlyEls.forEach(el => { if(el) el.style.display = "none"; });
+
+  const subEl = document.querySelector(".sub");
+
   if (view === "CHAT"){
-    chatTitleEl.textContent = "AI Chatbot";
+    chatTitleEl.textContent = "AI Assistant";
     chatView.style.display = "";
-    settingsView.style.display = "none";
+    chatOnlyEls.forEach(el => { if(el) el.style.display = ""; });
+    if (subEl) subEl.textContent = "F5 AI Demo Chatbot · Connected to Backend LLM";
     inputEl.focus();
-  } else {
+  } else if (view === "SETTINGS"){
     chatTitleEl.textContent = "Settings";
-    chatView.style.display = "none";
     settingsView.style.display = "";
+    if (subEl) subEl.textContent = "Configure detection engines and thresholds";
+  } else if (view === "REDTEAM"){
+    chatTitleEl.textContent = "Red Team Pipeline";
+    redteamView.style.display = "";
+    if (subEl) subEl.textContent = "Simulated DevSecOps pipeline with F5 AI Red Team";
   }
 }
 navButtons.forEach(btn => {
@@ -342,3 +359,630 @@ bindSliderValue("heuristicSlider", "heuristicVal");
 bindSliderValue("toxSlider", "toxVal");
 bindSliderValue("piSlider", "piVal");
 bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
+
+// =========================
+// RED TEAM PIPELINE ENGINE
+// =========================
+(function(){
+  const btnRun = document.getElementById("btnRunPipeline");
+  const btnApprove = document.getElementById("btnApprove");
+  const btnReject = document.getElementById("btnReject");
+  const btnViewReport = document.getElementById("btnViewReport");
+  if (!btnRun) return;
+
+  let pipelineRunning = false;
+  let pipelineRunCount = 0;
+
+  const delay = ms => new Promise(r => setTimeout(r, ms));
+
+  /** 演示用：三档分值轮流出现，便于展示 >90 / 85-90 / <85 三种结果 */
+  function getDemoScore(){
+    const zone = pipelineRunCount % 3;
+    pipelineRunCount += 1;
+    if (zone === 0) return 91 + Math.floor(Math.random() * 8);   // 91–98 通过
+    if (zone === 1) return 85 + Math.floor(Math.random() * 5); // 85–89 需人工确认
+    return 75 + Math.floor(Math.random() * 10);                 // 75–84 不通过
+  }
+
+  function fakeUUID(){
+    return "0199" + Math.random().toString(16).slice(2,6) + "-" +
+      Math.random().toString(16).slice(2,6) + "-70" +
+      Math.random().toString(16).slice(2,4) + "-" +
+      Math.random().toString(16).slice(2,6) + "-" +
+      Math.random().toString(16).slice(2,14);
+  }
+
+  function updateStepStatus(stepNum, status){
+    const step = document.getElementById("step" + stepNum);
+    const badge = document.getElementById("badge" + stepNum);
+    if (!step || !badge) return;
+    step.dataset.status = status;
+
+    badge.className = "step-badge " + status;
+    const labels = {pending:"Pending", running:"Running", success:"Success", fail:"Failed", warning:"Review"};
+    badge.textContent = labels[status] || status;
+  }
+
+  function updateConnector(connNum, status){
+    const conn = document.getElementById("conn" + connNum);
+    if (!conn) return;
+    conn.className = "step-connector " + status;
+  }
+
+  async function typeLogLine(logEl, html, cssClass){
+    const line = document.createElement("div");
+    line.className = "log-line" + (cssClass ? " " + cssClass : "");
+    line.innerHTML = html;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+    await delay(100);
+  }
+
+  function openLog(stepNum){
+    const log = document.getElementById("log" + stepNum);
+    if (log) log.classList.add("open");
+    const wrap = document.getElementById("wrapLog" + stepNum);
+    const toggle = wrap && wrap.querySelector(".step-log-toggle");
+    if (toggle){
+      toggle.style.display = "inline-flex";
+      toggle.setAttribute("aria-expanded", "true");
+      toggle.querySelector(".log-toggle-icon").textContent = "▲";
+      const text = toggle.querySelector(".log-toggle-text");
+      if (text) text.textContent = "收起日志";
+      const zhSpan = toggle.querySelector(".zh");
+      if (zhSpan) zhSpan.textContent = "Collapse";
+    }
+  }
+
+  function collapseLog(stepNum){
+    const log = document.getElementById("log" + stepNum);
+    if (log) log.classList.remove("open");
+    const wrap = document.getElementById("wrapLog" + stepNum);
+    const toggle = wrap && wrap.querySelector(".step-log-toggle");
+    if (toggle){
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.querySelector(".log-toggle-icon").textContent = "▼";
+      const text = toggle.querySelector(".log-toggle-text");
+      if (text) text.textContent = "展开日志";
+      const zhSpan = toggle.querySelector(".zh");
+      if (zhSpan) zhSpan.textContent = "Expand log";
+    }
+  }
+
+  function clearLog(stepNum){
+    const log = document.getElementById("log" + stepNum);
+    if (log){ log.innerHTML = ""; log.classList.remove("open"); }
+    const wrap = document.getElementById("wrapLog" + stepNum);
+    const toggle = wrap && wrap.querySelector(".step-log-toggle");
+    if (toggle){
+      toggle.style.display = "none";
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.querySelector(".log-toggle-icon").textContent = "▼";
+      const text = toggle.querySelector(".log-toggle-text");
+      if (text) text.textContent = "展开日志";
+    }
+  }
+
+  function updateSubStepStatus(subId, status){
+    const el = document.getElementById(subId);
+    const badge = document.getElementById("subBadge" + subId.replace("sub",""));
+    if (el) el.dataset.status = status;
+    if (badge){
+      badge.className = "substep-badge " + status;
+      const labels = {pending:"Pending", running:"Running", success:"Success", fail:"Failed"};
+      badge.textContent = labels[status] || status;
+    }
+  }
+
+  function openSubLog(subId){
+    const logId = "subLog" + subId.replace("sub","");
+    const log = document.getElementById(logId);
+    if (log) log.classList.add("open");
+    const toggle = document.querySelector('.substep-log-toggle[data-target="' + logId + '"]');
+    if (toggle){
+      toggle.style.display = "inline-flex";
+      toggle.setAttribute("aria-expanded", "true");
+      toggle.querySelector(".log-toggle-icon").textContent = "▲";
+      const text = toggle.querySelector(".log-toggle-text");
+      if (text) text.textContent = "收起";
+    }
+  }
+
+  function collapseSubLog(subId){
+    const logId = "subLog" + subId.replace("sub","");
+    const log = document.getElementById(logId);
+    if (log) log.classList.remove("open");
+    const toggle = document.querySelector('.substep-log-toggle[data-target="' + logId + '"]');
+    if (toggle){
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.querySelector(".log-toggle-icon").textContent = "▼";
+      const text = toggle.querySelector(".log-toggle-text");
+      if (text) text.textContent = "展开";
+    }
+  }
+
+  function clearSubLog(subId){
+    const logId = "subLog" + subId.replace("sub","");
+    const log = document.getElementById(logId);
+    if (log){ log.innerHTML = ""; log.classList.remove("open"); }
+    const toggle = document.querySelector('.substep-log-toggle[data-target="' + logId + '"]');
+    if (toggle){
+      toggle.style.display = "none";
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.querySelector(".log-toggle-icon").textContent = "▼";
+      const text = toggle.querySelector(".log-toggle-text");
+      if (text) text.textContent = "展开";
+    }
+  }
+
+  function resetPipeline(){
+    for (let i = 1; i <= 5; i++){
+      updateStepStatus(i, "pending");
+      clearLog(i);
+      if (i < 5) updateConnector(i, "");
+    }
+    // Reset sub-steps
+    document.getElementById("substepsPanel").style.display = "none";
+    ["sub4_1","sub4_2","sub4_3","sub4_4"].forEach(id => {
+      updateSubStepStatus(id, "pending");
+      clearSubLog(id);
+    });
+
+    document.getElementById("scorePanel").style.display = "none";
+    document.getElementById("scoreValue").className = "score-value";
+    document.getElementById("scoreValue").textContent = "--";
+    document.getElementById("scoreDetail").textContent = "";
+    document.getElementById("reviewPanel").style.display = "none";
+    document.getElementById("failPanel").style.display = "none";
+    document.getElementById("step5Title").innerHTML = "Security Decision <span class=\"zh\">安全决策</span>";
+    document.getElementById("step5Desc").innerHTML = "Automatic decision based on CASI Score threshold<span class=\"zh\">基于 CASI 安全评分阈值自动决策</span>";
+
+    const banner = document.getElementById("pipelineBanner");
+    if (banner) banner.remove();
+  }
+
+  function showBanner(type, html){
+    let banner = document.getElementById("pipelineBanner");
+    if (banner) banner.remove();
+    banner = document.createElement("div");
+    banner.id = "pipelineBanner";
+    banner.className = "pipeline-banner banner-" + type;
+    banner.innerHTML = html;
+    document.getElementById("pipelineContainer").appendChild(banner);
+  }
+
+  // --- Step 1: Git Commit ---
+  async function simulateGitCommit(){
+    const n = 1;
+    updateStepStatus(n, "running");
+    openLog(n);
+    const log = document.getElementById("log" + n);
+    const hash = "a3f7c2d";
+
+    await typeLogLine(log, "$ git add -A", "log-cmd");
+    await delay(300);
+    await typeLogLine(log, "$ git commit -m \"feat: integrate AI guardrail module v2.1\"", "log-cmd");
+    await delay(400);
+    await typeLogLine(log, "[main " + hash + "] feat: integrate AI guardrail module v2.1", "log-info");
+    await typeLogLine(log, " 3 files changed, 127 insertions(+), 15 deletions(-)", "log-info");
+    await delay(300);
+    await typeLogLine(log, "$ git push origin main", "log-cmd");
+    await delay(500);
+    await typeLogLine(log, "To github.com:enterprise/ai-app.git", "log-info");
+    await typeLogLine(log, "   b4e8f1a.." + hash + "  main -&gt; main", "log-info");
+    await delay(200);
+    await typeLogLine(log, "✓ Code committed and pushed successfully.", "log-success");
+
+    updateStepStatus(n, "success");
+    updateConnector(n, "done");
+    collapseLog(n);
+  }
+
+  // --- Step 2: Mirror & Build ---
+  async function simulateBuild(){
+    const n = 2;
+    updateStepStatus(n, "running");
+    updateConnector(1, "active");
+    await delay(200);
+    updateConnector(1, "done");
+    openLog(n);
+    const log = document.getElementById("log" + n);
+
+    await typeLogLine(log, "Mirroring repository to dev environment...", "log-info");
+    await delay(500);
+    await typeLogLine(log, "Repository synced: enterprise/ai-app @ a3f7c2d", "log-info");
+    await delay(300);
+    await typeLogLine(log, "Running build pipeline...", "log-info");
+    await delay(400);
+    await typeLogLine(log, "$ npm install", "log-cmd");
+    await delay(600);
+    await typeLogLine(log, "added 128 packages in 4.2s", "log-info");
+    await typeLogLine(log, "$ npm run build", "log-cmd");
+    await delay(400);
+    await typeLogLine(log, "  Compiling TypeScript...", "log-info");
+    await delay(500);
+    await typeLogLine(log, "  Bundling assets...", "log-info");
+    await delay(400);
+    await typeLogLine(log, "  Build output: dist/ (2.4 MB)", "log-info");
+    await delay(200);
+    await typeLogLine(log, "✓ Build completed successfully.", "log-success");
+
+    updateStepStatus(n, "success");
+    updateConnector(n, "done");
+    collapseLog(n);
+  }
+
+  // --- Step 3: Deploy ---
+  async function simulateDeploy(){
+    const n = 3;
+    updateStepStatus(n, "running");
+    updateConnector(2, "active");
+    await delay(200);
+    updateConnector(2, "done");
+    openLog(n);
+    const log = document.getElementById("log" + n);
+
+    await typeLogLine(log, "Deploying to dev-test environment...", "log-info");
+    await delay(500);
+    await typeLogLine(log, "  Pulling image: registry.internal/ai-app:a3f7c2d", "log-info");
+    await delay(400);
+    await typeLogLine(log, "  Updating deployment: ai-app-dev", "log-info");
+    await delay(500);
+    await typeLogLine(log, "  Pod ai-app-dev-7f8b9c-xk2lm: Running", "log-info");
+    await delay(300);
+    await typeLogLine(log, "  Health check: HTTP 200 OK", "log-info");
+    await delay(200);
+    await typeLogLine(log, "✓ Deployment successful. Service: https://ai-app.dev.internal", "log-success");
+
+    updateStepStatus(n, "success");
+    updateConnector(n, "done");
+    collapseLog(n);
+  }
+
+  // --- Step 4: F5 Red Team Test (with sub-steps) ---
+
+  async function subStepLog(subId, html, cssClass){
+    const log = document.getElementById("subLog" + subId.replace("sub",""));
+    if (!log) return;
+    await typeLogLine(log, html, cssClass);
+  }
+
+  async function simulateRedTeam(){
+    const n = 4;
+    updateStepStatus(n, "running");
+    updateConnector(3, "active");
+    await delay(200);
+    updateConnector(3, "done");
+
+    document.getElementById("substepsPanel").style.display = "";
+
+    const campaignId = fakeUUID();
+    const runId = fakeUUID();
+    const attackRunId = fakeUUID();
+    const providerId = fakeUUID();
+    const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,"");
+    const nowISO = new Date().toISOString();
+    const S = (id, h, c) => subStepLog(id, h, c);
+
+    // ======== 4.1 Create Campaign ========
+    // POST /backend/v1/campaigns
+    updateSubStepStatus("sub4_1", "running");
+    openSubLog("sub4_1");
+
+    await S("sub4_1", "→ Request:", "log-info");
+    await S("sub4_1", "POST https://www.us1.calypsoai.app/backend/v1/campaigns", "log-cmd");
+    await S("sub4_1", "Body: {", "log-json");
+    await S("sub4_1", '  "name": "AI-App-Security-Scan-' + dateStr + '",', "log-json");
+    await S("sub4_1", '  "description": "Automated Red Team scan for ai-app build a3f7c2d",', "log-json");
+    await S("sub4_1", '  "attacks": [', "log-json");
+    await S("sub4_1", '    {"technique":"static_content","vector":"dan","converters":["base64"]},', "log-json");
+    await S("sub4_1", '    {"technique":"static_content","vector":"conditional_context_change","converters":["caesar"]},', "log-json");
+    await S("sub4_1", '    {"technique":"static_content","vector":"fictional_context_change","converters":["leetspeak"]},', "log-json");
+    await S("sub4_1", '    {"technique":"dynamic_content","vector":"crescendo",', "log-json");
+    await S("sub4_1", '     "converters":["single_character"],', "log-json");
+    await S("sub4_1", '     "intents":["Extract internal employee PII data"]},', "log-json");
+    await S("sub4_1", '    {"technique":"operational","vector":"fuzzing"},', "log-json");
+    await S("sub4_1", '    {"technique":"operational","vector":"tls"}', "log-json");
+    await S("sub4_1", "  ]", "log-json");
+    await S("sub4_1", "}", "log-json");
+    await delay(700);
+
+    await S("sub4_1", "", "");
+    await S("sub4_1", "← Response: 200 OK", "log-success");
+    await S("sub4_1", "{", "log-json");
+    await S("sub4_1", '  "id": "' + campaignId + '",', "log-json");
+    await S("sub4_1", '  "name": "AI-App-Security-Scan-' + dateStr + '",', "log-json");
+    await S("sub4_1", '  "description": "Automated Red Team scan for ai-app build a3f7c2d",', "log-json");
+    await S("sub4_1", '  "attacks": [', "log-json");
+    await S("sub4_1", '    {"technique":"static_content","vector":"dan","converters":["base64"],"pack":"2026-03","severity":1},', "log-json");
+    await S("sub4_1", '    {"technique":"static_content","vector":"conditional_context_change","converters":["caesar"],"pack":"2026-03","severity":1},', "log-json");
+    await S("sub4_1", '    {"technique":"static_content","vector":"fictional_context_change","converters":["leetspeak"],"pack":"2026-03","severity":1},', "log-json");
+    await S("sub4_1", '    {"technique":"dynamic_content","vector":"crescendo","converters":["single_character"],"multiTurn":true,"severity":1,', "log-json");
+    await S("sub4_1", '     "intents":["Extract internal employee PII data"]},', "log-json");
+    await S("sub4_1", '    {"technique":"operational","vector":"fuzzing","severity":1},', "log-json");
+    await S("sub4_1", '    {"technique":"operational","vector":"tls","severity":1}', "log-json");
+    await S("sub4_1", '  ],', "log-json");
+    await S("sub4_1", '  "vendored": false', "log-json");
+    await S("sub4_1", "}", "log-json");
+    await delay(200);
+    await S("sub4_1", "✓ Campaign created — 6 attacks configured.", "log-success");
+
+    updateSubStepStatus("sub4_1", "success");
+    collapseSubLog("sub4_1");
+    await delay(300);
+
+    // ======== 4.2 Run Campaign ========
+    // POST /backend/v1/campaign-runs
+    updateSubStepStatus("sub4_2", "running");
+    openSubLog("sub4_2");
+
+    await S("sub4_2", "→ Request:", "log-info");
+    await S("sub4_2", "POST https://www.us1.calypsoai.app/backend/v1/campaign-runs", "log-cmd");
+    await S("sub4_2", "Body: {", "log-json");
+    await S("sub4_2", '  "campaignId": "' + campaignId + '",', "log-json");
+    await S("sub4_2", '  "name": "Run-' + dateStr + '-a3f7c2d",', "log-json");
+    await S("sub4_2", '  "providerIds": ["' + providerId + '"]', "log-json");
+    await S("sub4_2", "}", "log-json");
+    await delay(600);
+
+    await S("sub4_2", "", "");
+    await S("sub4_2", "← Response: 200 OK", "log-success");
+    await S("sub4_2", "{", "log-json");
+    await S("sub4_2", '  "id": "' + runId + '",', "log-json");
+    await S("sub4_2", '  "name": "Run-' + dateStr + '-a3f7c2d",', "log-json");
+    await S("sub4_2", '  "campaignId": "' + campaignId + '",', "log-json");
+    await S("sub4_2", '  "status": "in_progress",', "log-json");
+    await S("sub4_2", '  "progress": 0,', "log-json");
+    await S("sub4_2", '  "total": 6,', "log-json");
+    await S("sub4_2", '  "CASIScore": null,', "log-json");
+    await S("sub4_2", '  "createdAt": "' + nowISO + '",', "log-json");
+    await S("sub4_2", '  "attackRuns": [', "log-json");
+    await S("sub4_2", '    {"id":"' + attackRunId + '","attack":{"vector":"dan","technique":"static_content"},', "log-json");
+    await S("sub4_2", '     "events":[{"event":"queued","createdAt":"' + nowISO + '"}],"progress":0,"total":1}', "log-json");
+    await S("sub4_2", "    ... (5 more attack runs)", "log-info");
+    await S("sub4_2", "  ]", "log-json");
+    await S("sub4_2", "}", "log-json");
+    await delay(200);
+    await S("sub4_2", "✓ Campaign run started — 6 attack runs queued.", "log-success");
+
+    updateSubStepStatus("sub4_2", "success");
+    collapseSubLog("sub4_2");
+    await delay(300);
+
+    // ======== 4.3 Poll Status ========
+    // GET /backend/v1/campaign-runs/{campaignRunId}
+    updateSubStepStatus("sub4_3", "running");
+    openSubLog("sub4_3");
+
+    await S("sub4_3", "Polling campaign run status...", "log-info");
+    await delay(300);
+
+    // Poll 1 — progress 2/6
+    await S("sub4_3", "→ GET /backend/v1/campaign-runs/" + runId, "log-cmd");
+    await delay(900);
+    await S("sub4_3", '← { "status": "in_progress", "progress": 2, "total": 6, "CASIScore": null }', "log-warn");
+    await S("sub4_3", "  ⏳ in_progress (2/6 attacks complete) — retry in 1s...", "log-warn");
+    await delay(1000);
+
+    // Poll 2 — progress 4/6
+    await S("sub4_3", "→ GET /backend/v1/campaign-runs/" + runId, "log-cmd");
+    await delay(900);
+    await S("sub4_3", '← { "status": "in_progress", "progress": 4, "total": 6, "CASIScore": null }', "log-warn");
+    await S("sub4_3", "  ⏳ in_progress (4/6 attacks complete) — retry in 1s...", "log-warn");
+    await delay(1000);
+
+    // Poll 3 — complete
+    await S("sub4_3", "→ GET /backend/v1/campaign-runs/" + runId, "log-cmd");
+    await delay(900);
+    await S("sub4_3", '← { "status": "complete", "progress": 6, "total": 6 }', "log-success");
+    await S("sub4_3", "✓ Campaign run complete — all 6 attacks finished.", "log-success");
+
+    updateSubStepStatus("sub4_3", "success");
+    collapseSubLog("sub4_3");
+    await delay(300);
+
+    // ======== 4.4 Get Report & CASI Score ========
+    // GET /backend/v1/campaign-runs/{campaignRunId}?includeResults=true
+    updateSubStepStatus("sub4_4", "running");
+    openSubLog("sub4_4");
+
+    const casiScore = getDemoScore();
+    const totalAttacks = 6;
+    const vulns = casiScore > 90 ? Math.floor(Math.random()*2) : (casiScore >= 85 ? Math.floor(Math.random()*2)+1 : Math.floor(Math.random()*3)+2);
+    const avgPerf = (Math.random() * 2 + 1.5).toFixed(2);
+
+    await S("sub4_4", "→ Request:", "log-info");
+    await S("sub4_4", "GET /backend/v1/campaign-runs/" + runId + "?includeResults=true", "log-cmd");
+    await delay(800);
+
+    await S("sub4_4", "", "");
+    await S("sub4_4", "← Response: 200 OK", "log-success");
+    await S("sub4_4", "{ \"campaignRun\": {", "log-json");
+    await S("sub4_4", '    "id": "' + runId + '",', "log-json");
+    await S("sub4_4", '    "status": "complete",', "log-json");
+    await S("sub4_4", '    "CASIScore": ' + casiScore + ",", "log-json");
+    await S("sub4_4", '    "progress": 6, "total": 6,', "log-json");
+    await S("sub4_4", '    "averagePerformance": "' + avgPerf + 's",', "log-json");
+    await S("sub4_4", '    "attackRuns": [', "log-json");
+
+    // Show a couple of representative results
+    const vulnFlag1 = vulns > 0;
+    const vulnFlag2 = vulns > 1;
+    await S("sub4_4", '      { "attack": {"vector":"dan","technique":"static_content","severity":1},', "log-json");
+    await S("sub4_4", '        "results": [{"vulnerable":' + vulnFlag1 + ',"converter":"base64","severity":"' + (vulnFlag1?"high":"none") + '",', "log-json");
+    await S("sub4_4", '                     "intentCategory":"jailbreak"}],"progress":1,"total":1 },', "log-json");
+    await S("sub4_4", '      { "attack": {"vector":"crescendo","technique":"dynamic_content","severity":1,"multiTurn":true},', "log-json");
+    await S("sub4_4", '        "results": [{"vulnerable":' + vulnFlag2 + ',"converter":"single_character","severity":"' + (vulnFlag2?"medium":"none") + '",', "log-json");
+    await S("sub4_4", '                     "intent":"Extract internal employee PII data","conversationSteps":4}],', "log-json");
+    await S("sub4_4", '        "progress":1,"total":1 },', "log-json");
+    await S("sub4_4", "      ... (4 more attack runs)", "log-info");
+    await S("sub4_4", "    ]", "log-json");
+    await S("sub4_4", "}}", "log-json");
+
+    await delay(300);
+    await S("sub4_4", "", "");
+    await S("sub4_4", "━━━ Report Summary ━━━", "log-info");
+    await S("sub4_4", "  CASI Score:           " + casiScore, casiScore > 90 ? "log-success" : (casiScore >= 85 ? "log-warn" : "log-cmd"));
+    await S("sub4_4", "  Total attack runs:    " + totalAttacks, "log-info");
+    await S("sub4_4", "  Vulnerabilities found: " + vulns + "/" + totalAttacks, vulns > 0 ? "log-warn" : "log-info");
+    await S("sub4_4", "  Avg response time:    " + avgPerf + "s", "log-info");
+
+    updateSubStepStatus("sub4_4", "success");
+    collapseSubLog("sub4_4");
+    await delay(300);
+
+    // Show score panel
+    const scorePanel = document.getElementById("scorePanel");
+    const scoreValue = document.getElementById("scoreValue");
+    const scoreDetail = document.getElementById("scoreDetail");
+    scorePanel.style.display = "";
+    scoreValue.textContent = casiScore;
+
+    if (casiScore > 90){
+      scoreValue.className = "score-value score-green";
+      scoreDetail.innerHTML = "Excellent — Security test passed. Proceeding to UAT deployment. <span class=\"zh\">优秀，安全测试通过，将进入 UAT 部署。</span>";
+      updateStepStatus(n, "success");
+    } else if (casiScore >= 85){
+      scoreValue.className = "score-value score-orange";
+      scoreDetail.innerHTML = "Marginal — Meets baseline but manual confirmation required. <span class=\"zh\">边缘区间，符合基线但需人工确认。</span>";
+      updateStepStatus(n, "warning");
+    } else {
+      scoreValue.className = "score-value score-red";
+      scoreDetail.innerHTML = "Failed — Security threshold not met. Pipeline blocked. <span class=\"zh\">未达标，流水线已阻断。</span>";
+      updateStepStatus(n, "fail");
+    }
+    updateConnector(n, "done");
+
+    return casiScore;
+  }
+
+  // --- Step 5a: UAT Deploy ---
+  async function simulateUATDeploy(){
+    const n = 5;
+    document.getElementById("step5Title").innerHTML = "Deploy to UAT <span class=\"zh\">部署到 UAT 环境</span>";
+    document.getElementById("step5Desc").innerHTML = "Deploying application to UAT environment<span class=\"zh\">将应用部署到 UAT 环境</span>";
+    updateStepStatus(n, "running");
+    updateConnector(4, "active");
+    await delay(200);
+    updateConnector(4, "done");
+    openLog(n);
+    const log = document.getElementById("log" + n);
+
+    await typeLogLine(log, "Initiating UAT deployment...", "log-info");
+    await delay(400);
+    await typeLogLine(log, "  Promoting image: registry.internal/ai-app:a3f7c2d → UAT", "log-info");
+    await delay(500);
+    await typeLogLine(log, "  Updating deployment: ai-app-uat", "log-info");
+    await delay(600);
+    await typeLogLine(log, "  Pod ai-app-uat-4d6e8a-mn3pq: Running", "log-info");
+    await delay(400);
+    await typeLogLine(log, "  Health check: HTTP 200 OK", "log-info");
+    await delay(300);
+    await typeLogLine(log, "  Smoke tests: 12/12 passed", "log-info");
+    await delay(200);
+    await typeLogLine(log, "✓ UAT deployment successful. Service: https://ai-app.uat.internal", "log-success");
+
+    updateStepStatus(n, "success");
+    collapseLog(n);
+    showBanner("success", "✓ Pipeline completed successfully — Application deployed to UAT <span class=\"zh\">流水线执行成功，应用已部署至 UAT。</span>");
+  }
+
+  // --- Step 5b: Manual Review ---
+  function showManualReview(score){
+    const n = 5;
+    document.getElementById("step5Title").innerHTML = "Manual Review Required <span class=\"zh\">需人工审查</span>";
+    document.getElementById("step5Desc").innerHTML = "CASI Score " + score + " — within marginal zone (85-90)<span class=\"zh\">CASI 评分 " + score + "，处于边缘区间（85-90）</span>";
+    updateStepStatus(n, "warning");
+    updateConnector(4, "active");
+    setTimeout(() => updateConnector(4, "done"), 300);
+    document.getElementById("reviewPanel").style.display = "";
+  }
+
+  // --- Step 5c: Fail ---
+  function showFail(score){
+    const n = 5;
+    document.getElementById("step5Title").innerHTML = "Pipeline Blocked <span class=\"zh\">流水线已阻断</span>";
+    document.getElementById("step5Desc").innerHTML = "CASI Score " + score + " — below security threshold (85)<span class=\"zh\">CASI 评分 " + score + "，低于安全阈值（85）</span>";
+    updateStepStatus(n, "fail");
+    updateConnector(4, "done");
+    document.getElementById("failPanel").style.display = "";
+    showBanner("fail", "✗ Pipeline terminated — Security test did not pass (CASI Score: " + score + ") <span class=\"zh\">流水线已终止，安全测试未通过（CASI 评分：" + score + "）。</span>");
+  }
+
+  // --- Main pipeline runner ---
+  async function startPipeline(){
+    if (pipelineRunning) return;
+    pipelineRunning = true;
+    btnRun.disabled = true;
+
+    resetPipeline();
+    await delay(300);
+
+    await simulateGitCommit();
+    await delay(400);
+    await simulateBuild();
+    await delay(400);
+    await simulateDeploy();
+    await delay(400);
+    const score = await simulateRedTeam();
+    await delay(600);
+
+    if (score > 90){
+      await simulateUATDeploy();
+      pipelineRunning = false;
+      btnRun.disabled = false;
+    } else if (score >= 85){
+      showManualReview(score);
+      // Pipeline pauses here — user clicks approve/reject
+    } else {
+      showFail(score);
+      pipelineRunning = false;
+      btnRun.disabled = false;
+    }
+  }
+
+  btnRun.addEventListener("click", startPipeline);
+
+  document.getElementById("pipelineContainer").addEventListener("click", function(e){
+    const toggle = e.target.closest(".step-log-toggle, .substep-log-toggle");
+    if (!toggle) return;
+    e.preventDefault();
+    const targetId = toggle.getAttribute("data-target");
+    const logEl = document.getElementById(targetId);
+    if (!logEl) return;
+    const isStep = toggle.classList.contains("step-log-toggle");
+    logEl.classList.toggle("open");
+    const isOpen = logEl.classList.contains("open");
+    toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    const icon = toggle.querySelector(".log-toggle-icon");
+    const text = toggle.querySelector(".log-toggle-text");
+    if (icon) icon.textContent = isOpen ? "▲" : "▼";
+    if (text) text.textContent = isOpen ? (isStep ? "收起日志" : "收起") : (isStep ? "展开日志" : "展开");
+    const zhSpan = toggle.querySelector(".zh");
+    if (zhSpan && isStep) zhSpan.textContent = isOpen ? "Collapse" : "Expand log";
+  });
+
+  btnApprove.addEventListener("click", async () => {
+    document.getElementById("reviewPanel").style.display = "none";
+    await simulateUATDeploy();
+    pipelineRunning = false;
+    btnRun.disabled = false;
+  });
+
+  btnReject.addEventListener("click", async () => {
+    document.getElementById("reviewPanel").style.display = "none";
+    updateStepStatus(5, "fail");
+    openLog(5);
+    const log = document.getElementById("log5");
+    await typeLogLine(log, "Pipeline rejected by manual review.", "log-warn");
+    collapseLog(5);
+    showBanner("fail", "✗ Pipeline terminated — Rejected by manual review <span class=\"zh\">流水线已终止 — 人工审查拒绝。</span>");
+    pipelineRunning = false;
+    btnRun.disabled = false;
+  });
+
+  btnViewReport.addEventListener("click", () => {
+    alert("Report viewer would open here.\n\nIn production, this navigates to the full F5 AI Security Red Team campaign report dashboard.");
+  });
+
+})();

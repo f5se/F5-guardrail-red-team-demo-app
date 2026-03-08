@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>F5 AI Guardrail Lab</title>
+  <title>F5 AI Guardrail & Red Team Lab</title>
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-  <div class="topbar">F5 AI Guardrail Lab</div>
+  <div class="topbar">F5 AI Guardrail and Red Team Lab</div>
 
   <div class="wrap">
     <div class="crumb">Home &nbsp;›&nbsp; Assistant</div>
@@ -18,6 +18,7 @@
         <div class="nav">
           <button class="navBtn active" data-view="CHAT" id="btnChat">💬 AI Chatbot</button>
           <button class="navBtn" data-view="SETTINGS" id="btnSettings">⚙️ Settings</button>
+          <button class="navBtn" data-view="REDTEAM" id="btnRedTeam">🔴 Red Team</button>
         </div>
       </aside>
 
@@ -170,12 +171,225 @@
           
         </div>
 
+        <!-- RED TEAM PIPELINE VIEW -->
+        <div class="panel" id="redteamView" style="display:none;">
+          <div class="pipeline-header">
+            <div>
+              <div class="pipeline-title">DevSecOps Pipeline <span class="zh">安全开发运维流水线</span></div>
+              <div class="pipeline-sub">Simulated CI/CD with F5 Red Team Security <span class="zh">· 模拟 CI/CD 与 F5 红队对抗性测试集成</span></div>
+            </div>
+            <button id="btnRunPipeline" class="btn-run-pipeline">
+              <span class="btn-run-icon">▶</span> Run Pipeline
+            </button>
+          </div>
+
+          <div class="pipeline-container" id="pipelineContainer">
+
+            <!-- Step 1: Git Commit -->
+            <div class="pipeline-step" id="step1" data-status="pending">
+              <div class="step-left">
+                <div class="step-icon" id="icon1">
+                  <span class="icon-num">1</span>
+                </div>
+                <div class="step-connector" id="conn1"></div>
+              </div>
+              <div class="step-body">
+                <div class="step-header">
+                  <div class="step-title">Git Commit & Push <span class="zh">代码提交与推送</span></div>
+                  <div class="step-badge" id="badge1">Pending</div>
+                </div>
+                <div class="step-desc">Commit final code changes and push to remote repository<span class="zh">提交最终代码变更并推送到远程仓库</span></div>
+                <div class="step-log-wrap" id="wrapLog1">
+                  <button type="button" class="step-log-toggle" data-target="log1" style="display:none;" aria-expanded="false"><span class="log-toggle-icon">▼</span> <span class="log-toggle-text">展开日志</span> <span class="zh">Expand log</span></button>
+                  <div class="step-log" id="log1"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 2: Mirror & Build -->
+            <div class="pipeline-step" id="step2" data-status="pending">
+              <div class="step-left">
+                <div class="step-icon" id="icon2">
+                  <span class="icon-num">2</span>
+                </div>
+                <div class="step-connector" id="conn2"></div>
+              </div>
+              <div class="step-body">
+                <div class="step-header">
+                  <div class="step-title">Mirror & Build <span class="zh">代码镜像与编译构建</span></div>
+                  <div class="step-badge" id="badge2">Pending</div>
+                </div>
+                <div class="step-desc">Mirror code to dev/test environment and compile application<span class="zh">将代码镜像同步到开发测试环境并编译应用</span></div>
+                <div class="step-log-wrap" id="wrapLog2">
+                  <button type="button" class="step-log-toggle" data-target="log2" style="display:none;" aria-expanded="false"><span class="log-toggle-icon">▼</span> <span class="log-toggle-text">展开日志</span> <span class="zh">Expand log</span></button>
+                  <div class="step-log" id="log2"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 3: Deploy to Dev/Test -->
+            <div class="pipeline-step" id="step3" data-status="pending">
+              <div class="step-left">
+                <div class="step-icon" id="icon3">
+                  <span class="icon-num">3</span>
+                </div>
+                <div class="step-connector" id="conn3"></div>
+              </div>
+              <div class="step-body">
+                <div class="step-header">
+                  <div class="step-title">Deploy to Dev/Test <span class="zh">部署到开发测试环境</span></div>
+                  <div class="step-badge" id="badge3">Pending</div>
+                </div>
+                <div class="step-desc">Deploy application to development testing environment<span class="zh">将应用部署到开发测试环境</span></div>
+                <div class="step-log-wrap" id="wrapLog3">
+                  <button type="button" class="step-log-toggle" data-target="log3" style="display:none;" aria-expanded="false"><span class="log-toggle-icon">▼</span> <span class="log-toggle-text">展开日志</span> <span class="zh">Expand log</span></button>
+                  <div class="step-log" id="log3"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 4: F5 Red Team -->
+            <div class="pipeline-step" id="step4" data-status="pending">
+              <div class="step-left">
+                <div class="step-icon" id="icon4">
+                  <span class="icon-num">4</span>
+                </div>
+                <div class="step-connector" id="conn4"></div>
+              </div>
+              <div class="step-body">
+                <div class="step-header">
+                  <div class="step-title">F5 Red Team Security Test <span class="zh">F5 红队安全测试</span></div>
+                  <div class="step-badge" id="badge4">Pending</div>
+                </div>
+                <div class="step-desc">Run automated adversarial attack campaign via F5 AI Red Team<span class="zh">通过 F5 AI Red Team 执行自动化对抗攻击测试</span></div>
+
+                <!-- Sub-steps -->
+                <div class="substeps" id="substepsPanel" style="display:none;">
+
+                  <!-- 4.1 Create Campaign -->
+                  <div class="substep" id="sub4_1" data-status="pending">
+                    <div class="substep-icon"></div>
+                    <div class="substep-content">
+                      <div class="substep-header">
+                        <span class="substep-title">4.1 Create Campaign <span class="zh">创建攻击活动</span></span>
+                        <span class="substep-badge" id="subBadge4_1">Pending</span>
+                      </div>
+                      <div class="substep-desc">POST /backend/v1/campaigns <span class="zh">— 定义签名攻击 + 操作攻击 + 智能体对抗攻击</span></div>
+                      <div class="substep-log-wrap">
+                        <button type="button" class="substep-log-toggle" data-target="subLog4_1" style="display:none;" aria-expanded="false"><span class="log-toggle-icon">▼</span> <span class="log-toggle-text">展开</span></button>
+                        <div class="substep-log" id="subLog4_1"></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 4.2 Run Campaign -->
+                  <div class="substep" id="sub4_2" data-status="pending">
+                    <div class="substep-icon"></div>
+                    <div class="substep-content">
+                      <div class="substep-header">
+                        <span class="substep-title">4.2 Run Campaign <span class="zh">执行攻击活动</span></span>
+                        <span class="substep-badge" id="subBadge4_2">Pending</span>
+                      </div>
+                      <div class="substep-desc">POST /backend/v1/campaign-runs <span class="zh">— 对目标 Provider 执行攻击</span></div>
+                      <div class="substep-log-wrap">
+                        <button type="button" class="substep-log-toggle" data-target="subLog4_2" style="display:none;" aria-expanded="false"><span class="log-toggle-icon">▼</span> <span class="log-toggle-text">展开</span></button>
+                        <div class="substep-log" id="subLog4_2"></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 4.3 Poll Status -->
+                  <div class="substep" id="sub4_3" data-status="pending">
+                    <div class="substep-icon"></div>
+                    <div class="substep-content">
+                      <div class="substep-header">
+                        <span class="substep-title">4.3 Poll Campaign Status <span class="zh">轮询执行状态</span></span>
+                        <span class="substep-badge" id="subBadge4_3">Pending</span>
+                      </div>
+                      <div class="substep-desc">GET /backend/v1/campaign-runs/{id} <span class="zh">— 循环查询直到状态为 complete</span></div>
+                      <div class="substep-log-wrap">
+                        <button type="button" class="substep-log-toggle" data-target="subLog4_3" style="display:none;" aria-expanded="false"><span class="log-toggle-icon">▼</span> <span class="log-toggle-text">展开</span></button>
+                        <div class="substep-log" id="subLog4_3"></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 4.4 Get Report -->
+                  <div class="substep" id="sub4_4" data-status="pending">
+                    <div class="substep-icon"></div>
+                    <div class="substep-content">
+                      <div class="substep-header">
+                        <span class="substep-title">4.4 Get Report &amp; CASI Score <span class="zh">获取报告与安全评分</span></span>
+                        <span class="substep-badge" id="subBadge4_4">Pending</span>
+                      </div>
+                      <div class="substep-desc">GET /backend/v1/campaign-runs/{id}?includeResults=true <span class="zh">— 获取完整攻击结果</span></div>
+                      <div class="substep-log-wrap">
+                        <button type="button" class="substep-log-toggle" data-target="subLog4_4" style="display:none;" aria-expanded="false"><span class="log-toggle-icon">▼</span> <span class="log-toggle-text">展开</span></button>
+                        <div class="substep-log" id="subLog4_4"></div>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+
+                <div class="score-panel" id="scorePanel" style="display:none;">
+                  <div class="score-label">CASI Score <span class="zh">CASI 安全评分</span></div>
+                  <div class="score-value" id="scoreValue">--</div>
+                  <div class="score-detail" id="scoreDetail"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 5: Decision -->
+            <div class="pipeline-step" id="step5" data-status="pending">
+              <div class="step-left">
+                <div class="step-icon" id="icon5">
+                  <span class="icon-num">5</span>
+                </div>
+              </div>
+              <div class="step-body">
+                <div class="step-header">
+                  <div class="step-title" id="step5Title">Security Decision <span class="zh">安全决策</span></div>
+                  <div class="step-badge" id="badge5">Pending</div>
+                </div>
+                <div class="step-desc" id="step5Desc">Automatic decision based on CASI Score threshold<span class="zh">基于 CASI 安全评分阈值自动决策</span></div>
+                <div class="step-log-wrap" id="wrapLog5">
+                  <button type="button" class="step-log-toggle" data-target="log5" style="display:none;" aria-expanded="false"><span class="log-toggle-icon">▼</span> <span class="log-toggle-text">展开日志</span> <span class="zh">Expand log</span></button>
+                  <div class="step-log" id="log5"></div>
+                </div>
+
+                <!-- Manual review panel (85-90) -->
+                <div class="review-panel" id="reviewPanel" style="display:none;">
+                  <div class="review-msg">
+                    <span class="review-icon">⚠️</span>
+                    <div>CASI Score is in the marginal zone. Manual review required.<span class="zh">CASI 评分处于边缘区间，需人工审查确认。</span></div>
+                  </div>
+                  <div class="review-actions">
+                    <button class="btn-approve" id="btnApprove">✓ Approve &amp; Deploy to UAT · 批准并部署到UAT</button>
+                    <button class="btn-reject" id="btnReject">✗ Reject &amp; End Pipeline · 拒绝并终止流水线</button>
+                  </div>
+                </div>
+
+                <!-- Fail panel (<85) -->
+                <div class="fail-panel" id="failPanel" style="display:none;">
+                  <div class="fail-msg">
+                    <span class="fail-icon">🛑</span>
+                    <div>Security test FAILED. Pipeline terminated. Please review the full report.<span class="zh">安全测试未通过，流水线已终止。请查看完整报告。</span></div>
+                  </div>
+                  <button class="btn-view-report" id="btnViewReport">View Full Report · 查看完整报告</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
       </section>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
-  <script src="/static/js/app.js?v=20260308-1"></script>
+  <script src="/static/js/app.js?v=20260308-7"></script>
 </body>
 </html>

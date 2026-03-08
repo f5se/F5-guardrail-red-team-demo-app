@@ -4,6 +4,8 @@ A multi-engine AI guardrail demo Agent application based on F5 AI Guardrail (Cal
 
 ![image-20260308163826054](README.assets/image-20260308163826054.png)
 
+![F5-Red-Team-DevSecOps-failure](README.assets/F5-Red-Team-DevSecOps-failure.png)
+
 **Credits:** This app is an improvement on James Lee's demo, including but not limited to:
 
 1. Fixed bugs in multi-turn conversations
@@ -11,6 +13,7 @@ A multi-engine AI guardrail demo Agent application based on F5 AI Guardrail (Cal
 3. Added Hugging Face proxy download support
 4. Load `.env` directly without setting environment variables
 5. Added frontend Markdown response rendering
+6. Added the integration pipeline demonstration of F5 Red Team and DevSecOps
 
 ---
 
@@ -100,6 +103,7 @@ On first run, the app will download local detection models from Hugging Face (e.
 - **Configurable policies:** Detection thresholds, rule weights, enterprise knowledge base path, etc. via `settings.json` and UI.
 - **Optional local knowledge base Skill:** Skills simulate connecting to a local enterprise knowledge base (this demo uses local directory reads); directory and file types are configurable.
 - **Configurable Reasoning turns:** ReAct-style Agent simulates multi-step reasoning.
+- **F5 Red Team DevSecOps integration:** Simulated CI/CD pipeline view with F5 AI Red Team automated adversarial testing in the build/deploy flow, for validating AI app resilience in DevSecOps.
 
 ---
 
