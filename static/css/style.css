@@ -1105,6 +1105,28 @@ code{
   border:2px solid #fde68a;
 }
 
+/* Pipeline disclaimer (bottom of Red Team view) */
+.pipeline-disclaimer{
+  margin-top:24px;
+  padding-top:16px;
+  border-top:1px solid var(--border);
+  font-size:12px;
+  line-height:1.6;
+  color:var(--muted);
+}
+.pipeline-disclaimer .zh{
+  display:block;
+  margin-top:6px;
+  color:#818cf8;
+}
+.pipeline-disclaimer a{
+  color:var(--brand);
+  text-decoration:none;
+}
+.pipeline-disclaimer a:hover{
+  text-decoration:underline;
+}
+
 /* Responsive for pipeline */
 @media (max-width: 900px){
   .pipeline-header{ flex-direction:column; gap:12px; align-items:flex-start; }

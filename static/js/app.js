@@ -539,6 +539,13 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
 
     const banner = document.getElementById("pipelineBanner");
     if (banner) banner.remove();
+    const disclaimer = document.getElementById("pipelineDisclaimer");
+    if (disclaimer) disclaimer.style.display = "none";
+  }
+
+  function showDisclaimer(){
+    const disclaimer = document.getElementById("pipelineDisclaimer");
+    if (disclaimer) disclaimer.style.display = "";
   }
 
   function showBanner(type, html){
@@ -885,6 +892,7 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
     updateStepStatus(n, "success");
     collapseLog(n);
     showBanner("success", "✓ Pipeline completed successfully — Application deployed to UAT <span class=\"zh\">流水线执行成功，应用已部署至 UAT。</span>");
+    showDisclaimer();
   }
 
   // --- Step 5b: Manual Review ---
@@ -907,6 +915,7 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
     updateConnector(4, "done");
     document.getElementById("failPanel").style.display = "";
     showBanner("fail", "✗ Pipeline terminated — Security test did not pass (CASI Score: " + score + ") <span class=\"zh\">流水线已终止，安全测试未通过（CASI 评分：" + score + "）。</span>");
+    showDisclaimer();
   }
 
   // --- Main pipeline runner ---
@@ -977,6 +986,7 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
     await typeLogLine(log, "Pipeline rejected by manual review.", "log-warn");
     collapseLog(5);
     showBanner("fail", "✗ Pipeline terminated — Rejected by manual review <span class=\"zh\">流水线已终止 — 人工审查拒绝。</span>");
+    showDisclaimer();
     pipelineRunning = false;
     btnRun.disabled = false;
   });
