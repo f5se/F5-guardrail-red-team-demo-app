@@ -9,11 +9,18 @@
 感谢：本App是在James Lee的Demo基础上进行的改进，包括但不限于：
 
 1. 修正了多轮对话中的bug
+
 2. 增加了Skills能力，可随时增加新的Skills并自动注册Skill
+
 3. 增加了HF的代理下载能力
+
 4. 将env文件直接加载，无需设置环境变量
+
 5. 增加了前端Markdown响应的渲染
-6. 增加了F5 Red Team与DevSecOps的集成流水线演示
+
+6. 增加了F5 Red Team与DevSecOps的集成流水线演示。
+
+   注意：考虑到实际Red Team耗时及环境可行性，这里的Red Team API集成是mock模拟的，并不实际在SaaS端创建真实对象。
 
 ---
 

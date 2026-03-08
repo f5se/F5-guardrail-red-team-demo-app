@@ -9,11 +9,18 @@ A multi-engine AI guardrail demo Agent application based on F5 AI Guardrail (Cal
 **Credits:** This app is an improvement on James Lee's demo, including but not limited to:
 
 1. Fixed bugs in multi-turn conversations
+
 2. Added Skills capability—new Skills can be added and auto-registered at any time
+
 3. Added Hugging Face proxy download support
+
 4. Load `.env` directly without setting environment variables
+
 5. Added frontend Markdown response rendering
-6. Added the integration pipeline demonstration of F5 Red Team and DevSecOps
+
+6. Added the integration pipeline demonstration of F5 Red Team and DevSecOps. 
+
+   Note: Considering the actual time consumption of Red Team and the feasibility of the environment, the Red Team API integration here is mock simulation and does not actually create real objects on the SaaS.
 
 ---
 
