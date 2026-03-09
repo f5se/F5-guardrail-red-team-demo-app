@@ -116,4 +116,4 @@ On first run, the app will download local detection models from Hugging Face (e.
 
 ## 7. Disclaimer
 
-This is a demo application for the F5 Guardrail system and is not production-ready. Please open issues for any problems.
+This is a demo application for the F5 AI Guardrail and AI Red Team system and is not production-ready. Please open issues for any problems.

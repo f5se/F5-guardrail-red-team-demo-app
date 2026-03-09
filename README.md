@@ -116,4 +116,4 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 
 ## 7. 说明
 
-本程序为F5 Guardrail系统的演示程序，非生产级。如有问题请提issues。
+本程序为F5 AI Guardrail与AI Red Team系统的演示程序，非生产级。如有问题请提issues。
