@@ -537,383 +537,502 @@ def read_meta(path: str) -> MetaInfo:
 
 DEFAULT_TEMPLATE = r"""
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ title }}</title>
+
+  <!-- Modern font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Bootstrap -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Plotly -->
   <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+
   <style>
-    body { background: #f7f8fa; }
-    .container { max-width: 1200px; }
-    .card { border: 0; box-shadow: 0 6px 18px rgba(0,0,0,.05); }
-    .muted { color: #667085; }
-    .kpi { font-size: 1.35rem; font-weight: 700; }
-    .small-note { font-size: 0.88rem; color: #667085; }
-    .toc a { text-decoration: none; }
-    .badge-soft { background: rgba(13,110,253,.08); color: #0d6efd; }
-    .table thead th { background: #f0f2f6; }
-    .heat td { font-variant-numeric: tabular-nums; }
-    .footer { color: #98a2b3; font-size: .85rem; }
+    :root{
+      --bg: #0b1020;
+      --panel: rgba(255,255,255,.06);
+      --panel2: rgba(255,255,255,.08);
+      --text: #e7ecff;
+      --muted: rgba(231,236,255,.72);
+      --line: rgba(255,255,255,.08);
+      --brand: #6ea8fe;
+      --brand2: #22c55e;
+      --danger: #fb7185;
+      --warn: #fbbf24;
+      --shadow: 0 14px 40px rgba(0,0,0,.45);
+    }
+
+    html, body { height: 100%; }
+    body {
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Helvetica Neue", sans-serif;
+      background: radial-gradient(1200px 800px at 20% 10%, rgba(110,168,254,.25), transparent 55%),
+                  radial-gradient(900px 700px at 80% 0%, rgba(34,197,94,.16), transparent 50%),
+                  radial-gradient(800px 700px at 50% 90%, rgba(251,113,133,.12), transparent 55%),
+                  var(--bg);
+      color: var(--text);
+    }
+
+    .container { max-width: 1250px; }
+
+    .nav-blur {
+      background: rgba(11,16,32,.55);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .brand-dot{
+      width: 10px; height: 10px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--brand), var(--brand2));
+      box-shadow: 0 0 18px rgba(110,168,254,.55);
+      display: inline-block;
+    }
+
+    .cardx {
+      background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.04));
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .cardx .card-headerx{
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-weight: 600;
+      letter-spacing: .2px;
+    }
+
+    .cardx .card-bodyx{ padding: 16px; }
+
+    .kpi-title{ color: var(--muted); font-size: .88rem; }
+    .kpi-value{ font-size: 1.7rem; font-weight: 700; }
+
+    .pill {
+      font-size: .78rem;
+      padding: .22rem .6rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.06);
+      color: var(--muted);
+    }
+
+    .pill.ok{ color: rgba(34,197,94,.95); border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.10); }
+    .pill.warn{ color: rgba(251,191,36,.95); border-color: rgba(251,191,36,.35); background: rgba(251,191,36,.10); }
+    .pill.bad{ color: rgba(251,113,133,.95); border-color: rgba(251,113,133,.35); background: rgba(251,113,133,.10); }
+
+    .toc a { color: var(--muted); text-decoration: none; }
+    .toc a:hover { color: var(--text); }
+
+    .section-title{ font-weight: 750; letter-spacing: .2px; }
+    .section-sub{ color: var(--muted); }
+
+    table.table {
+      --bs-table-bg: transparent;
+      --bs-table-color: var(--text);
+      --bs-table-border-color: var(--line);
+    }
+
+    .table thead th {
+      color: var(--muted);
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.04);
+    }
+
+    .small-note { color: var(--muted); font-size: .86rem; }
+    code { color: #c7d2fe; }
+
+    .divider { height: 1px; background: var(--line); margin: 18px 0; }
+
+    .plot { width: 100%; height: 320px; }
+    .plot-sm { width: 100%; height: 240px; }
+
+    .footer { color: rgba(231,236,255,.55); font-size: .85rem; }
+
+    @media (max-width: 768px) {
+      .plot { height: 280px; }
+      .plot-sm { height: 220px; }
+    }
   </style>
 </head>
 <body>
 
-<div class="container my-4">
-  <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-    <div>
-      <h2 class="mb-1">{{ title }}</h2>
-      <div class="muted">
-        <span class="me-3">Campaign: <b>{{ meta.campaign or 'N/A' }}</b></span>
-        <span class="me-3">Run: <b>{{ meta.run_name or 'N/A' }}</b></span>
-        <span class="me-3">Run ID: <code>{{ meta.run_id or 'N/A' }}</code></span>
+<div class="nav-blur">
+  <div class="container py-3">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div class="d-flex align-items-center gap-2">
+        <span class="brand-dot"></span>
+        <div>
+          <div class="fw-bold">{{ title }}</div>
+          <div class="small-note">Campaign: <b>{{ meta.campaign or 'N/A' }}</b> · Run: <b>{{ meta.run_name or 'N/A' }}</b> · ID: <code>{{ meta.run_id or 'N/A' }}</code></div>
+        </div>
       </div>
-      <div class="muted mt-1">
-        <span class="me-3">Status: <span class="badge text-bg-secondary">{{ meta.status or 'N/A' }}</span></span>
-        {% if meta.created_at %}<span class="me-3">Created: {{ meta.created_at }}</span>{% endif %}
-        {% if meta.start_at %}<span class="me-3">Start: {{ meta.start_at }}</span>{% endif %}
-        {% if meta.created_by %}<span class="me-3">By: {{ meta.created_by }}</span>{% endif %}
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <span class="pill">Generated: {{ generated_at }}</span>
+        <span class="pill">Input: <code>{{ input_path }}</code></span>
+        <span class="pill">Parser: {% if has_ijson %}<span class="pill ok">streaming</span>{% else %}<span class="pill warn">full-load</span>{% endif %}</span>
       </div>
-    </div>
-    <div class="text-end">
-      <div class="small-note">Generated at {{ generated_at }}</div>
-      <div class="small-note">Input: <code>{{ input_path }}</code></div>
-      <div class="small-note">Parser: {% if has_ijson %}<span class="badge rounded-pill text-bg-success">streaming (ijson)</span>{% else %}<span class="badge rounded-pill text-bg-warning">full-load (json)</span>{% endif %}</div>
     </div>
   </div>
+</div>
 
-  <!-- KPI cards -->
-  <div class="row g-3 mt-2">
-    <div class="col-md-3">
-      <div class="card p-3">
-        <div class="muted">CASI</div>
-        <div class="kpi">{{ meta.CASIScore if meta.CASIScore is not none else 'N/A' }}</div>
-        <div class="small-note">casiScorePositionDelta: {{ meta.casiScorePositionDelta if meta.casiScorePositionDelta is not none else 'N/A' }}</div>
+<div class="container my-4">
+
+  <!-- Executive KPI row -->
+  <div class="row g-3">
+    <div class="col-lg-3 col-md-6">
+      <div class="cardx">
+        <div class="card-bodyx">
+          <div class="kpi-title">Overall vulnerability rate</div>
+          <div class="kpi-value">{{ overall.vulnerability_rate | pct }}</div>
+          <div class="small-note">Vulnerable {{ overall.total_vulnerable | num }} / Total {{ overall.total_tests | num }}</div>
+        </div>
       </div>
     </div>
-    <div class="col-md-3">
-      <div class="card p-3">
-        <div class="muted">ARS</div>
-        <div class="kpi">{% if meta.ARSScore is not none %}{{ meta.ARSScore }}{% else %}<span class="muted">(not provided)</span>{% endif %}</div>
-        <div class="small-note">ARSScore only shown when present in response</div>
+    <div class="col-lg-3 col-md-6">
+      <div class="cardx">
+        <div class="card-bodyx">
+          <div class="kpi-title">CASI</div>
+          <div class="kpi-value">{{ meta.CASIScore if meta.CASIScore is not none else 'N/A' }}</div>
+          <div class="small-note">Δ position: {{ meta.casiScorePositionDelta if meta.casiScorePositionDelta is not none else 'N/A' }}</div>
+        </div>
       </div>
     </div>
-    <div class="col-md-3">
-      <div class="card p-3">
-        <div class="muted">Overall vulnerability rate</div>
-        <div class="kpi">{{ overall.vulnerability_rate | pct }}</div>
-        <div class="small-note">Vulnerable {{ overall.total_vulnerable | num }} / Total {{ overall.total_tests | num }}</div>
+    <div class="col-lg-3 col-md-6">
+      <div class="cardx">
+        <div class="card-bodyx">
+          <div class="kpi-title">ARS</div>
+          <div class="kpi-value">{% if meta.ARSScore is not none %}{{ meta.ARSScore }}{% else %}<span class="small-note">not provided</span>{% endif %}</div>
+          <div class="small-note">Displayed only when present in response</div>
+        </div>
       </div>
     </div>
-    <div class="col-md-3">
-      <div class="card p-3">
-        <div class="muted">Coverage</div>
-        <div class="kpi">{{ coverage.providers }} models</div>
-        <div class="small-note">Vectors {{ coverage.vectors }}, Packs {{ coverage.packs }}, Converters(result) {{ coverage.converters }}, Converters(attack) {{ coverage.attack_converters }}, Intents {{ coverage.intentCategories }}</div>
+    <div class="col-lg-3 col-md-6">
+      <div class="cardx">
+        <div class="card-bodyx">
+          <div class="kpi-title">Coverage</div>
+          <div class="kpi-value">{{ coverage.providers }} models</div>
+          <div class="small-note">Vectors {{ coverage.vectors }}, Packs {{ coverage.packs }}, Converters(result) {{ coverage.converters }}, Converters(attack) {{ coverage.attack_converters }}</div>
+        </div>
       </div>
     </div>
   </div>
 
   <!-- Summary -->
-  <div class="card p-3 mt-3">
-    <h5 class="mb-2">Executive summary</h5>
-    <ul class="mb-0">
-      {% for s in summary_lines %}
-      <li>{{ s }}</li>
-      {% endfor %}
-    </ul>
+  <div class="cardx mt-3">
+    <div class="card-headerx">Executive summary</div>
+    <div class="card-bodyx">
+      <ul class="mb-0">
+        {% for s in summary_lines %}
+        <li>{{ s }}</li>
+        {% endfor %}
+      </ul>
+    </div>
   </div>
 
-  <!-- TOC -->
-  <div class="card p-3 mt-3">
-    <div class="row">
-      <div class="col-md-6">
-        <h6 class="mb-2">Contents</h6>
-        <div class="toc">
-          <div><a href="#campaign">1. Campaign-level metrics</a></div>
-          <div><a href="#provider">2. Provider / Model analysis</a></div>
-          <div><a href="#attack">3. Attack vector & pack</a></div>
-          <div><a href="#converter">4. Converter bypass</a></div>
-          <div><a href="#intent">5. Intent & severity</a></div>
-          <div><a href="#conversation">6. Multi-turn analysis</a></div>
-          <div><a href="#appendix">7. Appendix</a></div>
+  <!-- Contents -->
+  <div class="cardx mt-3">
+    <div class="card-bodyx">
+      <div class="row">
+        <div class="col-md-6">
+          <div class="section-title">Contents</div>
+          <div class="toc mt-2">
+            <div><a href="#campaign">1. Campaign-level metrics</a></div>
+            <div><a href="#provider">2. Provider / Model analysis</a></div>
+            <div><a href="#attack">3. Attack vector & pack</a></div>
+            <div><a href="#converter">4. Converter bypass</a></div>
+            <div><a href="#intent">5. Intent & severity</a></div>
+            <div><a href="#conversation">6. Multi-turn analysis</a></div>
+            <div><a href="#appendix">7. Appendix</a></div>
+          </div>
         </div>
-      </div>
-      <div class="col-md-6">
-        <div class="small-note">
-          Notes:
-          <ul>
-            <li>All metrics are direct counts/ratios from response fields; no custom risk scoring.</li>
-            <li>Vulnerability rate = vulnerable / total for the chosen grouping.</li>
-            <li>Unknown/missing values are grouped as <code>unknown</code> and listed in Appendix.</li>
-          </ul>
+        <div class="col-md-6">
+          <div class="section-title">Notes</div>
+          <div class="small-note mt-2">
+            <ul class="mb-0">
+              <li>All metrics are direct counts/ratios from response fields; no custom risk scoring.</li>
+              <li>Vulnerability rate = vulnerable / total for the chosen grouping.</li>
+              <li>Unknown/missing values are grouped as <code>unknown</code> and listed in Appendix.</li>
+            </ul>
+          </div>
         </div>
       </div>
     </div>
   </div>
 
   <!-- 1 Campaign -->
-  <div class="mt-4" id="campaign"></div>
-  <h4 class="mt-4">1. Campaign-level metrics</h4>
-  <div class="row g-3">
-    <div class="col-md-6">
-      <div class="card p-3">
-        <h6 class="mb-2">Core run fields</h6>
-        <table class="table table-sm">
-          <tbody>
-            <tr><th>campaignRun.total (field)</th><td>{{ meta.total_field if meta.total_field is not none else 'N/A' }}</td></tr>
-            <tr><th>actionsCount</th><td>{{ meta.actionsCount if meta.actionsCount is not none else 'N/A' }}</td></tr>
-            <tr><th>progress</th><td>{{ meta.progress if meta.progress is not none else 'N/A' }}</td></tr>
-            <tr><th>costOfSecurity</th><td>{{ meta.costOfSecurity if meta.costOfSecurity is not none else 'N/A' }}</td></tr>
-            <tr><th>rtpRatio</th><td>{{ meta.rtpRatio if meta.rtpRatio is not none else 'N/A' }}</td></tr>
-            <tr><th>averagePerformance</th><td>{{ meta.averagePerformance if meta.averagePerformance is not none else 'N/A' }}</td></tr>
-            <tr><th>total_errors (attackRun.errorCount sum)</th><td>{{ overall.total_errors | num }}</td></tr>
-          </tbody>
-        </table>
-        <div class="small-note">Field <code>campaignRun.total</code> may differ from counted results; report uses counted results as ground truth for vulnerability rate.</div>
-      </div>
+  <div id="campaign" class="mt-4"></div>
+  <div class="d-flex align-items-end justify-content-between flex-wrap gap-2 mt-4">
+    <div>
+      <div class="section-title">1. Campaign-level metrics</div>
+      <div class="section-sub small-note">High-level run indicators designed for quick executive review</div>
     </div>
-    <div class="col-md-6">
-      <div class="card p-3">
-        <h6 class="mb-2">Severity highlight</h6>
-        <div id="sevPie" style="height:320px;"></div>
-        <div class="small-note">Critical vulnerable: {{ overall.critical_vulnerable | num }} / {{ overall.critical_total | num }} ({{ overall.critical_vulnerability_rate | pct }})</div>
-      </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <span class="pill">Status: {{ meta.status or 'N/A' }}</span>
+      {% if meta.created_at %}<span class="pill">Created: {{ meta.created_at }}</span>{% endif %}
+      {% if meta.start_at %}<span class="pill">Start: {{ meta.start_at }}</span>{% endif %}
+      {% if meta.created_by %}<span class="pill">By: {{ meta.created_by }}</span>{% endif %}
     </div>
   </div>
 
-  <!-- 2 Provider -->
-  <div class="mt-4" id="provider"></div>
-  <h4 class="mt-4">2. Provider / Model analysis</h4>
-  <div class="row g-3">
-    <div class="col-md-6">
-      <div class="card p-3">
-        <h6 class="mb-2">Provider vulnerability rate</h6>
-        <div id="providerBar" style="height:360px;"></div>
+  <!-- Big metric visuals -->
+  <div class="row g-3 mt-2">
+    <div class="col-lg-4">
+      <div class="cardx">
+        <div class="card-headerx">Security scores</div>
+        <div class="card-bodyx">
+          <div id="gaugeCasi" class="plot-sm"></div>
+          <div id="gaugeArs" class="plot-sm mt-2"></div>
+        </div>
       </div>
     </div>
-    <div class="col-md-6">
-      <div class="card p-3">
-        <h6 class="mb-2">Provider table</h6>
-        <div class="table-responsive">
-          <table class="table table-sm">
-            <thead><tr><th>Provider</th><th class="text-end">Total</th><th class="text-end">Vulnerable</th><th class="text-end">Rate</th></tr></thead>
-            <tbody>
-              {% for r in tables.by_provider %}
-              <tr>
-                <td>{{ r.name }}</td>
-                <td class="text-end">{{ r.total | num }}</td>
-                <td class="text-end">{{ r.vulnerable | num }}</td>
-                <td class="text-end">{{ r.rate | pct }}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+    <div class="col-lg-4">
+      <div class="cardx">
+        <div class="card-headerx">Risk snapshot</div>
+        <div class="card-bodyx">
+          <div id="gaugeVuln" class="plot"></div>
+          <div class="small-note">Critical vulnerable: {{ overall.critical_vulnerable | num }} / {{ overall.critical_total | num }} ({{ overall.critical_vulnerability_rate | pct }})</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="cardx">
+        <div class="card-headerx">Performance & cost</div>
+        <div class="card-bodyx">
+          <div id="gaugeCost" class="plot-sm"></div>
+          <div class="row g-2 mt-2">
+            <div class="col-6"><div id="gaugeRtp" class="plot-sm"></div></div>
+            <div class="col-6"><div id="gaugePerf" class="plot-sm"></div></div>
+          </div>
+          <div class="small-note mt-1">Errors (sum of attackRun.errorCount): <b>{{ overall.total_errors | num }}</b></div>
         </div>
       </div>
     </div>
   </div>
 
-  <div class="card p-3 mt-3">
-    <h6 class="mb-2">Provider × Vector matrix (vulnerability rate)</h6>
-    <div class="table-responsive">
-      <table class="table table-sm heat">
-        <thead>
-          <tr>
-            <th>Provider</th>
-            {% for v in coverage.vector_list %}<th class="text-end">{{ v }}</th>{% endfor %}
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in matrix.provider_vector %}
-          <tr>
-            <td><b>{{ row.provider }}</b></td>
-            {% for cell in row.cells %}
-            <td class="text-end" data-rate="{{ cell.rate }}">
-              {% if cell.total > 0 %}
-              {{ cell.rate | pct }}<br><span class="small-note">({{ cell.vulnerable }}/{{ cell.total }})</span>
-              {% else %}
-              <span class="muted">—</span>
-              {% endif %}
-            </td>
-            {% endfor %}
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <div class="small-note">Color intensity indicates higher vulnerability rate.</div>
-  </div>
+  <div class="divider"></div>
 
-  <!-- 3 Attack -->
-  <div class="mt-4" id="attack"></div>
-  <h4 class="mt-4">3. Attack vector & pack</h4>
-  <div class="row g-3">
-    <div class="col-md-6">
-      <div class="card p-3">
-        <h6 class="mb-2">Attack vector (Top by rate)</h6>
-        <div id="vectorBar" style="height:420px;"></div>
-      </div>
-    </div>
-    <div class="col-md-6">
-      <div class="card p-3">
-        <h6 class="mb-2">Attack pack</h6>
-        <div id="packBar" style="height:420px;"></div>
-      </div>
-    </div>
-  </div>
+  <!-- Provider -->
+  <div id="provider"></div>
+  <div class="section-title">2. Provider / Model analysis</div>
+  <div class="section-sub small-note">Compare vulnerability rate across model providers</div>
 
-  <div class="row g-3 mt-1">
-    <div class="col-md-12">
-      <div class="card p-3">
-        <h6 class="mb-2">Technique (Top by rate)</h6>
-        <div id="techBar" style="height:420px;"></div>
+  <div class="row g-3 mt-2">
+    <div class="col-lg-6">
+      <div class="cardx">
+        <div class="card-headerx">Provider vulnerability rate</div>
+        <div class="card-bodyx"><div id="providerBar" class="plot"></div></div>
       </div>
     </div>
-  </div>
-
-  <!-- 4 Converter -->
-  <div class="mt-4" id="converter"></div>
-  <h4 class="mt-4">4. Converter bypass</h4>
-  <div class="row g-3">
-    <div class="col-md-6">
-      <div class="card p-3">
-        <h6 class="mb-2">Converter vulnerability rate (result.converter)</h6>
-        <div id="convBar" style="height:360px;"></div>
-        <div class="small-note">Based on <code>results.converter</code>.</div>
-      </div>
-      <div class="card p-3 mt-3">
-        <h6 class="mb-2">Converter vulnerability rate (attack.converters[][])</h6>
-        <div id="attackConvBar" style="height:360px;"></div>
-        <div class="small-note">Based on flattened <code>attack.converters</code> configured per attackRun and applied to all its results.</div>
-      </div>
-    </div>
-    <div class="col-md-6">
-      <div class="card p-3">
-        <h6 class="mb-2">Top vector + converter combinations</h6>
-        <div class="small-note">This table uses <code>results.converter</code>.</div>
-        <div class="table-responsive">
-          <table class="table table-sm">
-            <thead><tr><th>Vector</th><th>Converter</th><th class="text-end">Total</th><th class="text-end">Vulnerable</th><th class="text-end">Rate</th></tr></thead>
-            <tbody>
-            {% for r in top.vector_converter_top20 %}
-              <tr>
-                <td>{{ r.vector }}</td>
-                <td><span class="badge badge-soft">{{ r.converter }}</span></td>
-                <td class="text-end">{{ r.total | num }}</td>
-                <td class="text-end">{{ r.vulnerable | num }}</td>
-                <td class="text-end">{{ r.rate | pct }}</td>
-              </tr>
-            {% endfor %}
-            </tbody>
-          </table>
-        </div>
-
-        <h6 class="mb-2 mt-3">Top vector + converter combinations (attack.converters)</h6>
-        <div class="small-note">This table uses flattened <code>attack.converters[][]</code> from attack configuration.</div>
-        <div class="table-responsive">
-          <table class="table table-sm">
-            <thead><tr><th>Vector</th><th>Attack Converter</th><th class="text-end">Total</th><th class="text-end">Vulnerable</th><th class="text-end">Rate</th></tr></thead>
-            <tbody>
-            {% for r in top.vector_attack_converter_top20 %}
-              <tr>
-                <td>{{ r.vector }}</td>
-                <td><span class="badge badge-soft">{{ r.converter }}</span></td>
-                <td class="text-end">{{ r.total | num }}</td>
-                <td class="text-end">{{ r.vulnerable | num }}</td>
-                <td class="text-end">{{ r.rate | pct }}</td>
-              </tr>
-            {% endfor %}
-            </tbody>
-          </table>
-        </div>
-
-      </div>
-    </div>
-  </div>
-
-  <!-- 5 Intent -->
-  <div class="mt-4" id="intent"></div>
-  <h4 class="mt-4">5. Intent & severity</h4>
-  <div class="row g-3">
-    <div class="col-md-6">
-      <div class="card p-3">
-        <h6 class="mb-2">Intent category distribution</h6>
-        <div id="intentBar" style="height:380px;"></div>
-      </div>
-    </div>
-    <div class="col-md-6">
-      <div class="card p-3">
-        <h6 class="mb-2">Intent category vulnerability rate</h6>
-        <div id="intentRateBar" style="height:380px;"></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="row g-3 mt-1">
-    <div class="col-md-12">
-      <div class="card p-3">
-        <h6 class="mb-2">Severity distribution (count)</h6>
-        <div id="sevBar" style="height:360px;"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- 6 Conversation -->
-  <div class="mt-4" id="conversation"></div>
-  <h4 class="mt-4">6. Multi-turn analysis</h4>
-  <div class="row g-3">
-    <div class="col-md-12">
-      <div class="card p-3">
-        <h6 class="mb-2">Conversation steps vs vulnerability rate</h6>
-        <div id="stepsLine" style="height:380px;"></div>
-        <div class="small-note">Steps are taken from <code>results.conversationSteps</code> (bucketed by exact integer; missing grouped as <code>unknown</code>).</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Appendix -->
-  <div class="mt-4" id="appendix"></div>
-  <h4 class="mt-4">7. Appendix</h4>
-
-  <div class="row g-3">
-    <div class="col-md-6">
-      <div class="card p-3">
-        <h6 class="mb-2">Unknown / missing values (Top)</h6>
-        <table class="table table-sm">
-          <thead><tr><th>Item</th><th class="text-end">Count</th></tr></thead>
-          <tbody>
-          {% for k, c in unknowns %}
-            <tr><td>{{ k }}</td><td class="text-end">{{ c | num }}</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    <div class="col-md-6">
-      <div class="card p-3">
-        <h6 class="mb-2">Result errors</h6>
-        <div class="row">
-          <div class="col-6">
-            <div class="small-note">error (top)</div>
+    <div class="col-lg-6">
+      <div class="cardx">
+        <div class="card-headerx">Provider table</div>
+        <div class="card-bodyx">
+          <div class="table-responsive">
             <table class="table table-sm">
+              <thead><tr><th>Provider</th><th class="text-end">Total</th><th class="text-end">Vulnerable</th><th class="text-end">Rate</th></tr></thead>
               <tbody>
-              {% for k, c in errors.result_error_types %}
-                <tr><td>{{ k }}</td><td class="text-end">{{ c | num }}</td></tr>
-              {% endfor %}
+                {% for r in tables.by_provider %}
+                <tr>
+                  <td>{{ r.name }}</td>
+                  <td class="text-end">{{ r.total | num }}</td>
+                  <td class="text-end">{{ r.vulnerable | num }}</td>
+                  <td class="text-end">{{ r.rate | pct }}</td>
+                </tr>
+                {% endfor %}
               </tbody>
             </table>
           </div>
-          <div class="col-6">
-            <div class="small-note">errorSummary (top)</div>
-            <table class="table table-sm">
-              <tbody>
-              {% for k, c in errors.error_summaries %}
-                <tr><td>{{ k }}</td><td class="text-end">{{ c | num }}</td></tr>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cardx mt-3">
+    <div class="card-headerx">Provider × Vector matrix (vulnerability rate)</div>
+    <div class="card-bodyx">
+      <div class="table-responsive">
+        <table class="table table-sm heat">
+          <thead>
+            <tr>
+              <th>Provider</th>
+              {% for v in coverage.vector_list %}<th class="text-end">{{ v }}</th>{% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in matrix.provider_vector %}
+            <tr>
+              <td><b>{{ row.provider }}</b></td>
+              {% for cell in row.cells %}
+              <td class="text-end" data-rate="{{ cell.rate }}">
+                {% if cell.total > 0 %}
+                  {{ cell.rate | pct }}<br><span class="small-note">({{ cell.vulnerable }}/{{ cell.total }})</span>
+                {% else %}
+                  <span class="small-note">—</span>
+                {% endif %}
+              </td>
               {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="small-note">Color intensity indicates higher vulnerability rate.</div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Attack -->
+  <div id="attack"></div>
+  <div class="section-title">3. Attack vector & pack</div>
+  <div class="section-sub small-note">Identify highest-risk vectors/packs and techniques</div>
+
+  <div class="row g-3 mt-2">
+    <div class="col-lg-6"><div class="cardx"><div class="card-headerx">Attack vector vulnerability rate (Top)</div><div class="card-bodyx"><div id="vectorBar" class="plot"></div></div></div></div>
+    <div class="col-lg-6"><div class="cardx"><div class="card-headerx">Attack pack vulnerability rate</div><div class="card-bodyx"><div id="packBar" class="plot"></div></div></div></div>
+  </div>
+  <div class="row g-3 mt-3">
+    <div class="col-12"><div class="cardx"><div class="card-headerx">Technique vulnerability rate (Top)</div><div class="card-bodyx"><div id="techBar" class="plot"></div></div></div></div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Converter -->
+  <div id="converter"></div>
+  <div class="section-title">4. Converter bypass</div>
+  <div class="section-sub small-note">Compare result-level converters vs attack configuration converters</div>
+
+  <div class="row g-3 mt-2">
+    <div class="col-lg-6">
+      <div class="cardx"><div class="card-headerx">Converter vulnerability rate (results.converter)</div><div class="card-bodyx"><div id="convBar" class="plot"></div><div class="small-note">Based on <code>results.converter</code>.</div></div></div>
+      <div class="cardx mt-3"><div class="card-headerx">Converter vulnerability rate (attack.converters[][])</div><div class="card-bodyx"><div id="attackConvBar" class="plot"></div><div class="small-note">Based on flattened <code>attack.converters</code> configured per attackRun.</div></div></div>
+    </div>
+    <div class="col-lg-6">
+      <div class="cardx">
+        <div class="card-headerx">Top combinations</div>
+        <div class="card-bodyx">
+          <div class="small-note">Vector + <code>results.converter</code></div>
+          <div class="table-responsive">
+            <table class="table table-sm">
+              <thead><tr><th>Vector</th><th>Converter</th><th class="text-end">Total</th><th class="text-end">Vulnerable</th><th class="text-end">Rate</th></tr></thead>
+              <tbody>
+                {% for r in top.vector_converter_top20 %}
+                <tr>
+                  <td>{{ r.vector }}</td>
+                  <td><span class="pill">{{ r.converter }}</span></td>
+                  <td class="text-end">{{ r.total | num }}</td>
+                  <td class="text-end">{{ r.vulnerable | num }}</td>
+                  <td class="text-end">{{ r.rate | pct }}</td>
+                </tr>
+                {% endfor %}
               </tbody>
             </table>
+          </div>
+
+          <div class="small-note mt-3">Vector + <code>attack.converters</code></div>
+          <div class="table-responsive">
+            <table class="table table-sm">
+              <thead><tr><th>Vector</th><th>Attack Converter</th><th class="text-end">Total</th><th class="text-end">Vulnerable</th><th class="text-end">Rate</th></tr></thead>
+              <tbody>
+                {% for r in top.vector_attack_converter_top20 %}
+                <tr>
+                  <td>{{ r.vector }}</td>
+                  <td><span class="pill">{{ r.converter }}</span></td>
+                  <td class="text-end">{{ r.total | num }}</td>
+                  <td class="text-end">{{ r.vulnerable | num }}</td>
+                  <td class="text-end">{{ r.rate | pct }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Intent -->
+  <div id="intent"></div>
+  <div class="section-title">5. Intent & severity</div>
+  <div class="section-sub small-note">Distribution and vulnerability rate by intent category and severity</div>
+
+  <div class="row g-3 mt-2">
+    <div class="col-lg-6"><div class="cardx"><div class="card-headerx">Intent category distribution (count)</div><div class="card-bodyx"><div id="intentBar" class="plot"></div></div></div></div>
+    <div class="col-lg-6"><div class="cardx"><div class="card-headerx">Intent category vulnerability rate</div><div class="card-bodyx"><div id="intentRateBar" class="plot"></div></div></div></div>
+  </div>
+  <div class="row g-3 mt-3">
+    <div class="col-12"><div class="cardx"><div class="card-headerx">Severity distribution (count)</div><div class="card-bodyx"><div id="sevBar" class="plot"></div></div></div></div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Conversation -->
+  <div id="conversation"></div>
+  <div class="section-title">6. Multi-turn analysis</div>
+  <div class="section-sub small-note">How multi-step conversations affect vulnerability rate</div>
+
+  <div class="row g-3 mt-2">
+    <div class="col-12"><div class="cardx"><div class="card-headerx">Conversation steps vs vulnerability rate</div><div class="card-bodyx"><div id="stepsLine" class="plot"></div><div class="small-note">Based on <code>results.conversationSteps</code>. Missing values grouped as <code>unknown</code>.</div></div></div></div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Appendix -->
+  <div id="appendix"></div>
+  <div class="section-title">7. Appendix</div>
+  <div class="section-sub small-note">Data quality signals and error summaries</div>
+
+  <div class="row g-3 mt-2">
+    <div class="col-lg-6">
+      <div class="cardx"><div class="card-headerx">Unknown / missing values (Top)</div>
+        <div class="card-bodyx">
+          <table class="table table-sm">
+            <thead><tr><th>Item</th><th class="text-end">Count</th></tr></thead>
+            <tbody>
+              {% for k, c in unknowns %}
+              <tr><td>{{ k }}</td><td class="text-end">{{ c | num }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="cardx"><div class="card-headerx">Result errors</div>
+        <div class="card-bodyx">
+          <div class="row g-3">
+            <div class="col-12 col-lg-6">
+              <div class="small-note mb-1">error (top)</div>
+              <div class="table-responsive">
+                <table class="table table-sm mb-0"><tbody>
+                  {% for k, c in errors.result_error_types %}
+                  <tr><td class="text-break">{{ k }}</td><td class="text-end">{{ c | num }}</td></tr>
+                  {% endfor %}
+                </tbody></table>
+              </div>
+            </div>
+            <div class="col-12 col-lg-6">
+              <div class="small-note mb-1">errorSummary (top)</div>
+              <div class="table-responsive">
+                <table class="table table-sm mb-0"><tbody>
+                  {% for k, c in errors.error_summaries %}
+                  <tr><td class="text-break">{{ k }}</td><td class="text-end">{{ c | num }}</td></tr>
+                  {% endfor %}
+                </tbody></table>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -921,20 +1040,28 @@ DEFAULT_TEMPLATE = r"""
   </div>
 
   <div class="footer mt-4 mb-3">
-    Generated by <code>campaign_run_analyzer_v2.py</code>. Charts by Plotly.js (CDN). Styling by Bootstrap.
+    Generated by <code>campaign_run_analyzer_v2.py</code> (modern theme). Charts by Plotly.js (CDN). Styling by Bootstrap.
   </div>
+
 </div>
 
 <script>
   const DATA = {{ chart_data_json | safe }};
+
+  const THEME = {
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    font: {color: '#e7ecff', family: 'Inter, sans-serif'},
+    margin: {l: 50, r: 18, t: 40, b: 80}
+  };
 
   function barRate(divId, rows, title, topN=15) {
     const sorted = [...rows].sort((a,b)=> (b.rate-a.rate) || (b.total-a.total)).slice(0, topN);
     const x = sorted.map(r=>r.name);
     const y = sorted.map(r=>Math.round(r.rate*10000)/100);
     const text = sorted.map(r=>`vuln ${r.vulnerable}/${r.total}`);
-    const trace = {type:'bar', x, y, text, hovertemplate:'%{x}<br>%{y}%<br>%{text}<extra></extra>'};
-    const layout = {title, yaxis:{title:'Vulnerability rate (%)'}, margin:{l:50,r:20,t:40,b:120}};
+    const trace = {type:'bar', x, y, text, marker:{color:'#6ea8fe'}, hovertemplate:'%{x}<br>%{y}%<br>%{text}<extra></extra>'};
+    const layout = {...THEME, title, yaxis:{title:'Vulnerability rate (%)', gridcolor:'rgba(255,255,255,.10)'}, xaxis:{tickangle: -30}};
     Plotly.newPlot(divId, [trace], layout, {displayModeBar:false, responsive:true});
   }
 
@@ -942,17 +1069,65 @@ DEFAULT_TEMPLATE = r"""
     const sorted = [...rows].sort((a,b)=> (b.total-a.total)).slice(0, topN);
     const x = sorted.map(r=>r.name);
     const y = sorted.map(r=>r.total);
-    const trace = {type:'bar', x, y, hovertemplate:'%{x}<br>%{y}<extra></extra>'};
-    const layout = {title, yaxis:{title:'Count'}, margin:{l:50,r:20,t:40,b:120}};
+    const trace = {type:'bar', x, y, marker:{color:'#22c55e'}, hovertemplate:'%{x}<br>%{y}<extra></extra>'};
+    const layout = {...THEME, title, yaxis:{title:'Count', gridcolor:'rgba(255,255,255,.10)'}, xaxis:{tickangle: -30}};
     Plotly.newPlot(divId, [trace], layout, {displayModeBar:false, responsive:true});
   }
 
-  function pie(divId, rows, title) {
-    const labels = rows.map(r=>r.name);
-    const values = rows.map(r=>r.total);
-    const trace = {type:'pie', labels, values, textinfo:'label+percent'};
-    Plotly.newPlot(divId, [trace], {title, margin:{l:10,r:10,t:40,b:10}}, {displayModeBar:false, responsive:true});
+  function indicatorGauge(divId, value, title, opts={}){
+    const min = (opts.min ?? 0);
+    const max = (opts.max ?? 100);
+    const suffix = (opts.suffix ?? '');
+    const color = (opts.color ?? '#6ea8fe');
+    const steps = (opts.steps ?? [
+      {range:[min, min+(max-min)*0.6], color:'rgba(34,197,94,.18)'},
+      {range:[min+(max-min)*0.6, min+(max-min)*0.85], color:'rgba(251,191,36,.18)'},
+      {range:[min+(max-min)*0.85, max], color:'rgba(251,113,133,.18)'}
+    ]);
+
+    const trace = {
+      type: 'indicator',
+      mode: 'gauge+number',
+      value: (value ?? 0),
+      number: {suffix, font:{size: 34}},
+      title: {text: title, font:{size: 14, color:'rgba(231,236,255,.75)'}},
+      gauge: {
+        axis: {range: [min, max], tickwidth: 1, tickcolor: 'rgba(231,236,255,.4)'} ,
+        bar: {color},
+        bgcolor: 'rgba(0,0,0,0)',
+        borderwidth: 0,
+        steps,
+      }
+    };
+
+    const layout = {paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', margin:{l:20,r:20,t:50,b:20}, font:{color:'#e7ecff', family:'Inter, sans-serif'}};
+    Plotly.newPlot(divId, [trace], layout, {displayModeBar:false, responsive:true});
   }
+
+  // Campaign-level gauges
+  indicatorGauge('gaugeVuln', Math.round((DATA.meta.overall_vuln_rate||0)*10000)/100, 'Overall vulnerability rate', {min:0, max:100, suffix:'%'});
+  indicatorGauge('gaugeCasi', DATA.meta.casi, 'CASI score', {min:0, max:100, color:'#6ea8fe'});
+  if (DATA.meta.ars !== null && DATA.meta.ars !== undefined) {
+    indicatorGauge('gaugeArs', DATA.meta.ars, 'ARS score', {min:0, max:100, color:'#22c55e'});
+  } else {
+    indicatorGauge('gaugeArs', 0, 'ARS score (not provided)', {min:0, max:100, color:'rgba(231,236,255,.25)'});
+  }
+  // Cost / RTP / Performance: show gauges with generic 0..100 if numeric
+  indicatorGauge('gaugeCost', DATA.meta.cost, 'Cost of Security', {min:0, max:100, color:'#fbbf24'});
+  indicatorGauge('gaugeRtp', DATA.meta.rtp, 'RTP ratio', {min:0, max:100, color:'#6ea8fe'});
+  indicatorGauge('gaugePerf', DATA.meta.perf, 'Avg performance', {min:0, max:100, color:'#22c55e'});
+
+  // Render charts
+  barRate('providerBar', DATA.by_provider, 'Provider vulnerability rate', 20);
+  barRate('vectorBar', DATA.by_vector, 'Attack vector vulnerability rate (Top)', 20);
+  barRate('packBar', DATA.by_pack, 'Attack pack vulnerability rate', 20);
+  barRate('convBar', DATA.by_converter, 'Converter vulnerability rate (results.converter)', 20);
+  barRate('attackConvBar', DATA.by_attack_converter || [], 'Converter vulnerability rate (attack.converters)', 20);
+  barRate('intentRateBar', DATA.by_intent_cat, 'Intent category vulnerability rate', 20);
+  barCount('intentBar', DATA.by_intent_cat, 'Intent category distribution (count)', 20);
+  barCount('sevBar', DATA.by_severity, 'Severity distribution (count)', 20);
+  barRate('techBar', DATA.by_technique, 'Technique vulnerability rate (Top)', 20);
+  // Steps line
 
   function lineRate(divId, rows, title) {
     const cleaned = rows
@@ -963,25 +1138,13 @@ DEFAULT_TEMPLATE = r"""
 
     const x = cleaned.map(r=>r.steps);
     const y = cleaned.map(r=>Math.round(r.rate*10000)/100);
-    const size = cleaned.map(r=>Math.max(6, Math.min(18, Math.sqrt(r.total))));
+    const size = cleaned.map(r=>Math.max(7, Math.min(18, Math.sqrt(r.total))));
     const text = cleaned.map(r=>`total ${r.total}, vuln ${r.vulnerable}`);
 
-    const trace = {type:'scatter', mode:'lines+markers', x, y, text, marker:{size}, hovertemplate:'steps %{x}<br>%{y}%<br>%{text}<extra></extra>'};
-    const layout = {title, xaxis:{title:'Conversation steps'}, yaxis:{title:'Vulnerability rate (%)'}, margin:{l:50,r:20,t:40,b:60}};
+    const trace = {type:'scatter', mode:'lines+markers', x, y, text, marker:{size, color:'#6ea8fe'}, line:{color:'#6ea8fe'}, hovertemplate:'steps %{x}<br>%{y}%<br>%{text}<extra></extra>'};
+    const layout = {...THEME, title, xaxis:{title:'Conversation steps', gridcolor:'rgba(255,255,255,.10)'}, yaxis:{title:'Vulnerability rate (%)', gridcolor:'rgba(255,255,255,.10)'}};
     Plotly.newPlot(divId, [trace], layout, {displayModeBar:false, responsive:true});
   }
-
-  // Render charts
-  barRate('providerBar', DATA.by_provider, 'Provider vulnerability rate', 20);
-  barRate('vectorBar', DATA.by_vector, 'Attack vector vulnerability rate (Top)', 20);
-  barRate('packBar', DATA.by_pack, 'Attack pack vulnerability rate', 20);
-  barRate('convBar', DATA.by_converter, 'Converter vulnerability rate (result.converter)', 20);
-  barRate('attackConvBar', DATA.by_attack_converter || [], 'Converter vulnerability rate (attack.converters)', 20);
-  barRate('intentRateBar', DATA.by_intent_cat, 'Intent category vulnerability rate', 20);
-  barCount('intentBar', DATA.by_intent_cat, 'Intent category distribution (count)', 20);
-  barCount('sevBar', DATA.by_severity, 'Severity distribution (count)', 20);
-  pie('sevPie', DATA.by_severity, 'Severity distribution');
-  barRate('techBar', DATA.by_technique, 'Technique vulnerability rate (Top)', 20);
   lineRate('stepsLine', DATA.by_steps, 'Conversation steps vs vulnerability rate');
 
   // Heatmap-like table cell background
@@ -990,8 +1153,9 @@ DEFAULT_TEMPLATE = r"""
     cells.forEach(td => {
       const r = parseFloat(td.getAttribute('data-rate'));
       if (Number.isNaN(r)) return;
-      const a = Math.min(0.38, Math.max(0, r)) * 0.38;
-      td.style.backgroundColor = `rgba(220, 53, 69, ${a})`;
+      const a = Math.min(0.60, Math.max(0, r)) * 0.55;
+      td.style.backgroundColor = `rgba(251, 113, 133, ${a})`;
+      td.style.borderRadius = '8px';
     });
   })();
 </script>
@@ -1012,6 +1176,14 @@ def render_html(meta: MetaInfo, analysis: Dict[str, Any], title: str, input_path
         'by_severity': analysis['tables']['by_severity'],
         'by_technique': analysis['tables']['by_technique'],
         'by_steps': analysis['tables']['by_steps'],
+        'meta': {
+            'casi': meta.CASIScore,
+            'ars': meta.ARSScore,
+            'cost': meta.costOfSecurity,
+            'rtp': meta.rtpRatio,
+            'perf': meta.averagePerformance,
+            'overall_vuln_rate': analysis['overall']['vulnerability_rate'],
+        },
     }
 
     ov = analysis['overall']
@@ -1065,6 +1237,7 @@ def render_html(meta: MetaInfo, analysis: Dict[str, Any], title: str, input_path
         template = env.get_template(tpl_name)
     else:
         template = env.from_string(DEFAULT_TEMPLATE)
+
     meta.created_at = _iso_to_local(meta.created_at)
     meta.start_at = _iso_to_local(meta.start_at)
 

@@ -15,7 +15,7 @@
 2. Generate the report:
 
    ```shell
-   python campaign_run_analyzer_v2.py   \
+   python campaign_run_analyzer_v3.py   \
      --input ./campaign-run-019fdf9697b-fe67-709f-9088-af7bdfsf2fe1a-20260311T011840Z.json \
      --output ./campaign_run_report_example.html \
      --title "F5 AI Red Team Campaign test Report"
