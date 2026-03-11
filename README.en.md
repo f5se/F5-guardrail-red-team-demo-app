@@ -1,4 +1,4 @@
-# F5 Guardrail Demo App
+# F5 AI Guardrail and Red Team Demo App
 
 A multi-engine AI guardrail demo Agent application based on F5 AI Guardrail (CalypsoAI) and local ML engines. It provides a web chat interface with configurable prompt/response detection policies and integrates Skills to simulate enterprise system integration.
 

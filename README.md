@@ -1,4 +1,4 @@
-# F5 Guardrail Demo App
+# F5 AI Guardrail and Red Team Demo App
 
 基于 F5 AI Guardrail（CalypsoAI）与本地 ML 引擎的多引擎 AI 护栏演示Agent应用，提供 Web 对话界面与可配置的提示/响应检测策略，结合Skills能力模拟企业内部系统对接能力。
 
