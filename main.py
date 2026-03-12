@@ -234,7 +234,7 @@ def get_runtime_settings(raw: dict) -> dict:
 def format_guardrail_reply(data: dict) -> str:
     guardrail_result = (data.get("result") or {})
     outcome = guardrail_result.get("outcome")
-    if outcome == "cleared":
+    if outcome == "cleared" or outcome == "redacted":
         return guardrail_result.get("response", "") or "(empty response)"
     calypso_type = str(data.get("type", "")).lower()
     label = "Response" if calypso_type == "response" else "Prompt"
@@ -299,6 +299,7 @@ async def run_agent_skill_loop(user_input: str, send_kwargs: dict, settings: dic
     scratchpad_entries: List[str] = []
     trace: List[dict] = []
     tool_calls: List[dict] = []
+    last_guardrail_data: Optional[dict] = None
     agent_debug_log(
         settings,
         f"skill_loop start max_steps={max_steps} user_input_chars={len(user_input)}",
@@ -313,15 +314,17 @@ async def run_agent_skill_loop(user_input: str, send_kwargs: dict, settings: dic
             max_steps=max_steps,
         )
         reply, data = await call_f5_guardrail(prompt, send_kwargs)
+        last_guardrail_data = data
         outcome = ((data.get("result") or {}).get("outcome") or "").lower()
         agent_debug_log(settings, f"skill_loop step={step} outcome={outcome or 'unknown'}")
-        if outcome != "cleared":
+        if outcome not in ("cleared", "redacted"):
             agent_debug_log(settings, f"skill_loop stop_on_guardrail_reject step={step}")
             return {
                 "reply": reply,
                 "trace": trace,
                 "tool_calls": tool_calls,
                 "skill_used": len(tool_calls) > 0,
+                "guardrail": last_guardrail_data,
             }
 
         obj, parse_err = extract_json_object(reply)
@@ -343,6 +346,7 @@ async def run_agent_skill_loop(user_input: str, send_kwargs: dict, settings: dic
                 "trace": trace,
                 "tool_calls": tool_calls,
                 "skill_used": len(tool_calls) > 0,
+                "guardrail": last_guardrail_data,
             }
 
         if event_type != "tool_call":
@@ -379,6 +383,7 @@ async def run_agent_skill_loop(user_input: str, send_kwargs: dict, settings: dic
         "trace": trace,
         "tool_calls": tool_calls,
         "skill_used": len(tool_calls) > 0,
+        "guardrail": last_guardrail_data,
     }
 
 # -----------------------------
@@ -426,9 +431,10 @@ async def api_chat(payload: ChatIn):
         agent_trace = loop_result["trace"]
         agent_tool_calls = loop_result["tool_calls"]
         skill_used = loop_result["skill_used"]
+        guardrail_raw = loop_result.get("guardrail")
     else:
         agent_debug_log(settings, "api_chat mode=plain_guardrail")
-        reply, _ = await call_f5_guardrail(prompt_to_send, send_kwargs)
+        reply, guardrail_raw = await call_f5_guardrail(prompt_to_send, send_kwargs)
 
     # Convert outcome to reply text
     if payload.multi_turn:
@@ -524,19 +530,62 @@ async def api_chat(payload: ChatIn):
         }
     }
 
-    return JSONResponse(
-        {
-            "reply": reply,
-            "status": status,
-            "rejection_type": rejection_type,
-            "engines": engines,
-            "mode": "project" if CALYPSOAI_PROJECT_ID else "provider",
-            "multi_turn": payload.multi_turn,
-            "skill_used": skill_used,
-            "agent_trace": agent_trace,
-            "agent_tool_calls": agent_tool_calls,
-        }
-    )
+    # Temporary debug: save raw F5 Guardrail response to .cursor for inspection
+    if isinstance(guardrail_raw, dict):
+        try:
+            _debug_path = os.path.join(BASE_DIR, ".cursor", "guardrail_response_debug.json")
+            os.makedirs(os.path.dirname(_debug_path), exist_ok=True)
+            with open(_debug_path, "w", encoding="utf-8") as _df:
+                json.dump(guardrail_raw, _df, default=str, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+    guardrail_payload = None
+    if isinstance(guardrail_raw, dict):
+        # Safely JSON-encode the substructure to strip non-serializable
+        # objects such as UUID, then decode back to a plain dict.
+        try:
+            raw_scanners = guardrail_raw.get("scanners")
+            raw_sub = {
+                "result": guardrail_raw.get("result"),
+                "scanners": raw_scanners,
+            }
+            safe_sub = json.loads(json.dumps(raw_sub, default=str))
+            guardrail_result = safe_sub.get("result") or {}
+            guardrail_scanners = safe_sub.get("scanners") or {}
+
+            # Flatten to the inner scanners map if present; this makes the
+            # frontend lookup logic simpler and more robust.
+            scanners_map = guardrail_scanners
+            if isinstance(guardrail_scanners, dict):
+                inner = guardrail_scanners.get("scanners")
+                if isinstance(inner, dict):
+                    scanners_map = inner
+
+            guardrail_payload = {
+                "result": guardrail_result,
+                "scanners": scanners_map or {},
+            }
+        except Exception:
+            # If anything goes wrong during safe conversion, fall back to
+            # omitting the guardrail payload so the main chat still works.
+            guardrail_payload = None
+
+    response_body = {
+        "reply": reply,
+        "status": status,
+        "rejection_type": rejection_type,
+        "engines": engines,
+        "mode": "project" if CALYPSOAI_PROJECT_ID else "provider",
+        "multi_turn": payload.multi_turn,
+        "skill_used": skill_used,
+        "agent_trace": agent_trace,
+        "agent_tool_calls": agent_tool_calls,
+    }
+    if guardrail_payload is not None:
+        response_body["guardrail"] = guardrail_payload
+
+    return JSONResponse(response_body)
 
 @app.get("/api/settings")
 async def get_settings():

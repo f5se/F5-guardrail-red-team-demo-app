@@ -1,0 +1,8 @@
+员工手机号码，通信录，电话列表
+staff phone number list
+
+NAME: Number:
+姓名：号码：
+林静LinJing    13800000001
+廖健雄LJX    13800000002
+王志博WZB    13800000003

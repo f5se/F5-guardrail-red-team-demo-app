@@ -7,6 +7,19 @@ const modeBadgeEl = document.getElementById("modeBadge");
 const kbSkillBadgeEl = document.getElementById("kbSkillBadge");
 const navButtons = Array.from(document.querySelectorAll(".navBtn"));
 
+// Guardrail panel elements
+const guardrailCardEl = document.getElementById("guardrailCard");
+const guardrailEmptyEl = document.getElementById("guardrailEmpty");
+const guardrailContentEl = document.getElementById("guardrailContent");
+const guardrailOutcomeEl = document.getElementById("guardrailOutcome");
+const guardrailOutcomeLabelEl = document.getElementById("guardrailOutcomeLabel");
+const guardrailOutcomeDescEl = document.getElementById("guardrailOutcomeDesc");
+const guardrailSummaryNumberEl = document.getElementById("guardrailSummaryNumber");
+const guardrailSummaryTextEl = document.getElementById("guardrailSummaryText");
+const guardrailSummaryHintEl = document.getElementById("guardrailSummaryHint");
+const guardrailListHeaderCountEl = document.getElementById("guardrailListHeaderCount");
+const guardrailListEl = document.getElementById("guardrailList");
+
 const chatView = document.getElementById("chatView");
 const settingsView = document.getElementById("settingsView");
 const toggleMultiTurnEl = document.getElementById("toggleMultiTurn");
@@ -62,6 +75,178 @@ function updateEngines(engines){
   }
 }
 
+// =========================
+// GUARDRAIL RESULT PANEL
+// =========================
+function resetGuardrailPanel(){
+  if (!guardrailCardEl) return;
+  if (guardrailEmptyEl) guardrailEmptyEl.style.display = "";
+  if (guardrailContentEl) guardrailContentEl.style.display = "none";
+  if (guardrailOutcomeEl) {
+    guardrailOutcomeEl.classList.remove("cleared","flagged","blocked");
+  }
+  if (guardrailOutcomeLabelEl) guardrailOutcomeLabelEl.textContent = "";
+  if (guardrailOutcomeDescEl) guardrailOutcomeDescEl.textContent = "";
+  if (guardrailSummaryNumberEl) guardrailSummaryNumberEl.textContent = "0 / 0";
+  if (guardrailSummaryTextEl) guardrailSummaryTextEl.textContent = "Failed / Total";
+  if (guardrailSummaryHintEl) guardrailSummaryHintEl.textContent = "";
+  if (guardrailListHeaderCountEl) guardrailListHeaderCountEl.textContent = "";
+  if (guardrailListEl) guardrailListEl.innerHTML = "";
+}
+
+function updateGuardrailPanel(guardrail){
+  if (!guardrailCardEl) return;
+
+  if (!guardrail || typeof guardrail !== "object" || !guardrail.result){
+    resetGuardrailPanel();
+    return;
+  }
+
+  const result = guardrail.result || {};
+  // Support both shapes: (1) guardrail.scanners.scanners = { [id]: {...} } or (2) guardrail.scanners = { [id]: {...} } (direct map)
+  const scannersInner = guardrail.scanners && guardrail.scanners.scanners;
+  const isInnerMap = scannersInner && typeof scannersInner === "object" && !Array.isArray(scannersInner);
+  const directMap = guardrail.scanners && typeof guardrail.scanners === "object" && !Array.isArray(guardrail.scanners)
+    && !("scanners" in guardrail.scanners)
+    && !("configs" in guardrail.scanners)
+    ? guardrail.scanners
+    : null;
+  const scannersRoot = isInnerMap ? scannersInner : directMap;
+  const scannerResults = Array.isArray(result.scannerResults) ? result.scannerResults : [];
+
+  if (guardrailEmptyEl) guardrailEmptyEl.style.display = "none";
+  if (guardrailContentEl) guardrailContentEl.style.display = "";
+
+  // Outcome block
+  const rawOutcome = (result.outcome || "").toString();
+  const outcome = rawOutcome.toLowerCase();
+  if (guardrailOutcomeEl){
+    guardrailOutcomeEl.classList.remove("cleared","flagged","blocked","redacted");
+    if (outcome === "cleared") guardrailOutcomeEl.classList.add("cleared");
+    else if (outcome === "flagged") guardrailOutcomeEl.classList.add("flagged");
+    else if (outcome === "blocked") guardrailOutcomeEl.classList.add("blocked");
+    else if (outcome === "redacted") guardrailOutcomeEl.classList.add("redacted");
+  }
+  let labelText = rawOutcome || "Unknown";
+  let descText = "";
+  if (outcome === "cleared"){
+    labelText = "Cleared";
+    descText = "All guardrails passed, prompt was sent to providers.";
+  } else if (outcome === "flagged"){
+    labelText = "Flagged";
+    descText = "At least one guardrail failed, but the prompt was still sent to providers.";
+  } else if (outcome === "blocked"){
+    labelText = "Blocked";
+    descText = "At least one guardrail failed and the prompt was not sent to providers.";
+  } else if (outcome === "redacted"){
+    labelText = "Redacted";
+    descText = "The Guardrail system has redacted part of the content.";
+  } else {
+    descText = "Guardrail outcome is unknown or not available.";
+  }
+  if (guardrailOutcomeLabelEl) guardrailOutcomeLabelEl.textContent = labelText;
+  if (guardrailOutcomeDescEl) guardrailOutcomeDescEl.textContent = descText;
+
+  // Summary
+  const total = scannerResults.length;
+  const failed = scannerResults.filter(r => (r.outcome || "").toString().toLowerCase() === "failed").length;
+  if (guardrailSummaryNumberEl) guardrailSummaryNumberEl.textContent = failed + " / " + total;
+  if (guardrailSummaryTextEl) guardrailSummaryTextEl.textContent = "Failed / Total";
+  if (guardrailSummaryHintEl){
+    if (!total){
+      guardrailSummaryHintEl.textContent = "No scanner results were returned for this prompt.";
+    } else if (failed === 0){
+      guardrailSummaryHintEl.textContent = "All scanners passed for this prompt.";
+    } else {
+      guardrailSummaryHintEl.textContent = failed + " scanner(s) reported failed outcome.";
+    }
+  }
+
+  // Build scanner meta map: key = scannerId (string), value = { name, direction, source: { type } }
+  const metaMap = {};
+  if (scannersRoot && typeof scannersRoot === "object" && !Array.isArray(scannersRoot)){
+    Object.keys(scannersRoot).forEach(k => {
+      const s = scannersRoot[k];
+      if (!s) return;
+      const sid = (s.id != null ? s.id : k).toString();
+      metaMap[sid] = s;
+    });
+  }
+
+  // List
+  if (guardrailListHeaderCountEl) guardrailListHeaderCountEl.textContent = total ? (total + " scanners") : "";
+
+  if (!guardrailListEl) return;
+  if (!total){
+    guardrailListEl.innerHTML = "<div class=\"scannerItem\"><div class=\"scannerMain\"><div class=\"scannerName\">No scanners</div><div class=\"scannerMetaRow\"><span>No scanner results available for this prompt.</span></div></div></div>";
+    return;
+  }
+
+  // Sort: failed first, then passed (stable by original index)
+  const sortedResults = [...scannerResults].sort((a, b) => {
+    const aFailed = (a.outcome || "").toString().toLowerCase() === "failed";
+    const bFailed = (b.outcome || "").toString().toLowerCase() === "failed";
+    if (aFailed && !bFailed) return -1;
+    if (!aFailed && bFailed) return 1;
+    return 0;
+  });
+
+  let html = "";
+  const formatDirection = (dir) => {
+    const d = (dir || "").toString().toLowerCase();
+    if (d === "request") return "Request";
+    if (d === "response") return "Response";
+    if (d === "both") return "Both";
+    return "N/A";
+  };
+
+  sortedResults.forEach(r => {
+    const sid = (r.scannerId || "").toString();
+    const meta = sid && metaMap[sid] ? metaMap[sid] : null;
+    const versionName = r.scannerVersionMeta && r.scannerVersionMeta.name;
+    const name = (meta && meta.name) || (versionName && String(versionName)) || sid || "Unnamed scanner";
+    const rawDirection = (meta && meta.direction) || r.scanDirection || r.direction;
+    const directionLabel = formatDirection(rawDirection);
+
+    // Determine source type from scannerVersionMeta.createdBy:
+    // "system" => System (built-in), otherwise => Custom.
+    const createdBy = r.scannerVersionMeta && r.scannerVersionMeta.createdBy;
+    let sourceLabel = "Unknown";
+    let sourceClass = "unknown";
+    if (typeof createdBy === "string") {
+      const c = createdBy.toLowerCase();
+      if (c === "system") {
+        sourceLabel = "System";
+        sourceClass = "system";
+      } else {
+        sourceLabel = "Custom";
+        sourceClass = "custom";
+      }
+    }
+    const outcomeRaw = (r.outcome || "").toString();
+    const outcomeLower = outcomeRaw.toLowerCase();
+    const statusClass = outcomeLower === "failed" ? "failed" : "pass";
+    const statusLabel = outcomeLower === "failed" ? "Failed" : "Passed";
+    const itemClass = "scannerItem" + (outcomeLower === "failed" ? " scannerItem--failed" : "");
+
+    html +=
+      "<div class=\"" + itemClass + "\">" +
+        "<div class=\"scannerMain\">" +
+          "<div class=\"scannerName\">" + escapeHtml(name) + "</div>" +
+          "<div class=\"scannerMetaRow\">" +
+            "<span>Direction: " + escapeHtml(directionLabel) + "</span>" +
+          "</div>" +
+        "</div>" +
+        "<div class=\"scannerBadges\">" +
+          "<div class=\"scannerStatus " + statusClass + "\">" + statusLabel + "</div>" +
+          "<div class=\"scannerSource " + sourceClass + "\">" + sourceLabel + "</div>" +
+        "</div>" +
+      "</div>";
+  });
+
+  guardrailListEl.innerHTML = html;
+}
+
 let activeView = "CHAT";
 let isSending = false;
 
@@ -106,6 +291,7 @@ toggleMultiTurnEl.addEventListener("change", () => {
 
 const redteamView = document.getElementById("redteamView");
 const engineRow = document.getElementById("engineRow");
+const layoutEl = document.querySelector(".layout");
 
 function setActiveView(view){
   activeView = view;
@@ -125,15 +311,21 @@ function setActiveView(view){
     chatView.style.display = "";
     chatOnlyEls.forEach(el => { if(el) el.style.display = ""; });
     if (subEl) subEl.textContent = "F5 AI Demo Chatbot · Connected to Backend LLM";
+    if (guardrailCardEl) guardrailCardEl.style.display = "";
+    if (layoutEl) layoutEl.classList.add("layout--with-guardrail");
     inputEl.focus();
-  } else if (view === "SETTINGS"){
-    chatTitleEl.textContent = "Settings";
-    settingsView.style.display = "";
-    if (subEl) subEl.textContent = "Configure detection engines and thresholds";
-  } else if (view === "REDTEAM"){
-    chatTitleEl.textContent = "Red Team Pipeline";
-    redteamView.style.display = "";
-    if (subEl) subEl.textContent = "Simulated DevSecOps pipeline with F5 AI Red Team";
+  } else {
+    if (guardrailCardEl) guardrailCardEl.style.display = "none";
+    if (layoutEl) layoutEl.classList.remove("layout--with-guardrail");
+    if (view === "SETTINGS"){
+      chatTitleEl.textContent = "Settings";
+      settingsView.style.display = "";
+      if (subEl) subEl.textContent = "Configure detection engines and thresholds";
+    } else if (view === "REDTEAM"){
+      chatTitleEl.textContent = "Red Team Pipeline";
+      redteamView.style.display = "";
+      if (subEl) subEl.textContent = "Simulated DevSecOps pipeline with F5 AI Red Team";
+    }
   }
 }
 navButtons.forEach(btn => {
@@ -236,6 +428,13 @@ async function send(){
 
     const reply = data.reply || "(empty reply)";
     updateEngines(data.engines);
+    if (data.guardrail) {
+      updateGuardrailPanel(data.guardrail);
+    } else {
+      // If backend did not send guardrail payload, keep previous or reset.
+      // Here we choose to reset to avoid showing stale data for incompatible responses.
+      resetGuardrailPanel();
+    }
 
     if (isRejected(reply)){
       renderRejectedBubble(assistantBubble, reply);
@@ -265,6 +464,7 @@ btnClear.addEventListener("click", () => {
   addBubble("assistant","Hi there! How can I help?");
   conversationId = uuidv4();
   updateEngines(null);
+  resetGuardrailPanel();
 });
 
 inputEl.addEventListener("keydown", (e) => {

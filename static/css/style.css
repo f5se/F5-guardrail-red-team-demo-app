@@ -34,7 +34,7 @@ body{
   letter-spacing:.2px;
 }
 .wrap{
-  max-width:1200px;
+  max-width:1400px;
   margin:18px auto;
   padding:0 14px;
 }
@@ -43,6 +43,9 @@ body{
   grid-template-columns: 260px 1fr;
   gap:16px;
   align-items:start;
+}
+.layout.layout--with-guardrail{
+  grid-template-columns: 260px minmax(0, 2.2fr) minmax(0, 1.3fr);
 }
 .sidebar{
   background:var(--sidebar);
@@ -94,6 +97,9 @@ body{
   border-radius:var(--radius);
   box-shadow:var(--shadow);
   overflow:hidden;
+}
+.mainCard{
+  min-width:0;
 }
 .cardHeader{
   display:flex;
@@ -354,6 +360,242 @@ code{
   .chat{ height:auto; min-height: 70vh; }
   .messages{ min-height: 52vh; }
 }
+
+/* =========================
+   F5 GUARDRAIL RESULT PANEL
+========================= */
+
+.guardrailCard{
+  display:flex;
+  flex-direction:column;
+  max-height:calc(100vh - 180px);
+}
+.guardrailHeader{
+  padding:14px 16px 10px;
+  border-bottom:1px solid var(--border);
+}
+.guardrailTitle{
+  font-size:16px;
+  font-weight:800;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.guardrailSub{
+  margin-top:4px;
+  font-size:12px;
+  color:var(--muted);
+}
+.guardrailBody{
+  padding:10px 14px 14px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  flex:1;
+  min-height:0;
+  overflow:hidden;
+}
+.guardrailEmpty{
+  padding:16px 14px;
+  border-radius:14px;
+  border:1px dashed var(--border);
+  background:#f9fafb;
+}
+.guardrailEmptyTitle{
+  font-size:14px;
+  font-weight:700;
+  margin-bottom:4px;
+}
+.guardrailEmptyDesc{
+  font-size:12px;
+  color:var(--muted);
+  line-height:1.5;
+}
+.guardrailContent{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  flex:1;
+  min-height:0;
+  overflow:hidden;
+}
+.guardrailOutcome{
+  padding:10px 12px;
+  border-radius:14px;
+  border:1px solid #e2e8f0;
+  background:#f8fafc;
+}
+.guardrailOutcomeLabel{
+  font-size:13px;
+  font-weight:800;
+  margin-bottom:4px;
+}
+.guardrailOutcomeDesc{
+  font-size:12px;
+  color:var(--muted);
+  line-height:1.4;
+}
+.guardrailOutcome.cleared{
+  background:#ecfdf5;
+  border-color:#bbf7d0;
+}
+.guardrailOutcome.cleared .guardrailOutcomeLabel{
+  color:#16a34a;
+}
+.guardrailOutcome.flagged{
+  background:#fffbeb;
+  border-color:#fde68a;
+}
+.guardrailOutcome.flagged .guardrailOutcomeLabel{
+  color:#d97706;
+}
+.guardrailOutcome.blocked{
+  background:#fef2f2;
+  border-color:#fecaca;
+}
+.guardrailOutcome.blocked .guardrailOutcomeLabel{
+  color:#dc2626;
+}
+.guardrailOutcome.redacted{
+  background:#f0f9ff;
+  border-color:#bae6fd;
+}
+.guardrailOutcome.redacted .guardrailOutcomeLabel{
+  color:#0284c7;
+}
+.guardrailSummary{
+  padding:10px 12px;
+  border-radius:14px;
+  border:1px solid #e5e7eb;
+  background:#f9fafb;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.guardrailSummaryMain{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}
+.guardrailSummaryNumber{
+  font-size:18px;
+  font-weight:900;
+}
+.guardrailSummaryText{
+  font-size:12px;
+  color:#475569;
+  font-weight:700;
+}
+.guardrailSummaryHint{
+  font-size:11px;
+  color:var(--muted);
+}
+.guardrailListHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  font-size:12px;
+  color:#64748b;
+  font-weight:700;
+  margin-top:4px;
+}
+.guardrailListHeaderCount{
+  font-weight:600;
+}
+.guardrailList{
+  margin-top:4px;
+  flex:1;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  overflow-y:auto;
+  overflow-x:hidden;
+}
+.scannerItem{
+  padding:8px 10px;
+  border-radius:12px;
+  border:1px solid #e5e7eb;
+  background:#ffffff;
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:8px;
+  flex-shrink:0;
+}
+.scannerItem.scannerItem--failed{
+  background:#fef2f2;
+  border-color:#fecaca;
+}
+.scannerMain{
+  flex:1;
+  min-width:0;
+}
+.scannerName{
+  font-size:13px;
+  font-weight:700;
+  color:var(--text);
+  margin-bottom:2px;
+}
+.scannerMetaRow{
+  font-size:11px;
+  color:var(--muted);
+}
+.scannerMetaRow span + span::before{
+  content:"·";
+  margin:0 4px;
+}
+.scannerBadges{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:4px;
+  flex-shrink:0;
+}
+.scannerStatus{
+  font-size:11px;
+  padding:2px 8px;
+  border-radius:999px;
+  font-weight:700;
+  border:1px solid transparent;
+}
+.scannerStatus.pass{
+  background:#ecfdf5;
+  color:#16a34a;
+  border-color:#bbf7d0;
+}
+.scannerStatus.failed{
+  background:#fef2f2;
+  color:#dc2626;
+  border-color:#fecaca;
+}
+.scannerSource{
+  font-size:10px;
+  padding:2px 7px;
+  border-radius:999px;
+  border:1px solid #e5e7eb;
+  background:#f8fafc;
+  color:#475569;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+}
+.scannerSource.system{
+  background:#eef2ff;
+  border-color:#c7d2fe;
+  color:#3730a3;
+}
+.scannerSource.custom{
+  background:#fef3c7;
+  border-color:#fde68a;
+  color:#92400e;
+}
+.scannerSource.unknown{
+  background:#f1f5f9;
+  border-color:#e2e8f0;
+  color:#64748b;
+}
+
 
 /* =========================
    ENGINE STATUS CARDS

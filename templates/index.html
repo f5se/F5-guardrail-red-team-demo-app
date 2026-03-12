@@ -12,7 +12,7 @@
   <div class="wrap">
     <div class="crumb">Home &nbsp;›&nbsp; Assistant</div>
 
-    <div class="layout">
+    <div class="layout layout--with-guardrail">
       <aside class="sidebar">
         <div class="sidebarHeader">Menu</div>
         <div class="nav">
@@ -22,7 +22,7 @@
         </div>
       </aside>
 
-      <section class="card">
+      <section class="card mainCard">
         <div class="cardHeader">
           <div>
             <div class="titleRow">
@@ -391,6 +391,51 @@
         </div>
 
       </section>
+
+      <!-- F5 Guardrail Scanner Result Panel -->
+      <aside class="card guardrailCard" id="guardrailCard">
+        <div class="guardrailHeader">
+          <div class="guardrailTitle">
+            F5 Guardrail Result
+            <span class="zh">Guardrail 检测结果</span>
+          </div>
+          <div class="guardrailSub">
+            Latest scanner outcome per prompt
+            <span class="zh">每次对话后的最新安全扫描结果</span>
+          </div>
+        </div>
+
+        <div class="guardrailBody">
+          <div class="guardrailEmpty" id="guardrailEmpty">
+            <div class="guardrailEmptyTitle">No Guardrail result yet</div>
+            <div class="guardrailEmptyDesc">
+              Send a question in the AI Assistant on the left to see F5 Guardrail scanner details here.
+              <span class="zh">在左侧 AI Assistant 中发送问题后，这里会展示对应的 Guardrail 扫描详情。</span>
+            </div>
+          </div>
+
+          <div class="guardrailContent" id="guardrailContent" style="display:none;">
+            <div class="guardrailOutcome" id="guardrailOutcome">
+              <div class="guardrailOutcomeLabel" id="guardrailOutcomeLabel">Cleared</div>
+              <div class="guardrailOutcomeDesc" id="guardrailOutcomeDesc"></div>
+            </div>
+
+            <div class="guardrailSummary" id="guardrailSummary">
+              <div class="guardrailSummaryMain">
+                <span class="guardrailSummaryNumber" id="guardrailSummaryNumber">0 / 0</span>
+                <span class="guardrailSummaryText" id="guardrailSummaryText">Failed / Total</span>
+              </div>
+              <div class="guardrailSummaryHint" id="guardrailSummaryHint"></div>
+            </div>
+
+            <div class="guardrailListHeader">
+              <span>Scanners</span>
+              <span class="guardrailListHeaderCount" id="guardrailListHeaderCount"></span>
+            </div>
+            <div class="guardrailList" id="guardrailList"></div>
+          </div>
+        </div>
+      </aside>
     </div>
   </div>
 
