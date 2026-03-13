@@ -13,7 +13,7 @@ load_dotenv()  # 从项目目录 .env 加载环境变量
 # -----------------------------
 HF_PROXY = os.getenv("HF_PROXY") or os.getenv("PROXY")
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Body
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -76,8 +76,64 @@ print("ML engines loaded.")
 
 app = FastAPI()
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+# 静态资源挂载（使用项目根路径，避免工作目录变化导致 404）
+app.mount(
+    "/static",
+    StaticFiles(directory=os.path.join(BASE_DIR, "static")),
+    name="static",
+)
+
+# Red Team 自定义报告目录挂载，供前端直接访问 HTML 报告
+app.mount(
+    "/redteam-report",
+    StaticFiles(directory=os.path.join(BASE_DIR, "redteam-report"), html=True),
+    name="redteam-report",
+)
+
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+
+
+# -----------------------------
+# Attack presets config
+# -----------------------------
+ATTACK_PRESETS_FILE = os.path.join(BASE_DIR, "config", "attack-presets.json")
+
+
+def load_attack_presets() -> List[dict]:
+    """
+    Load attack presets from config/attack-presets.json.
+    Fail-safe: on any error, return empty list so that UI can handle gracefully.
+    """
+    try:
+        if not os.path.exists(ATTACK_PRESETS_FILE):
+            return []
+        with open(ATTACK_PRESETS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            return []
+        # Filter out disabled presets and ensure required keys exist
+        presets: List[dict] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            if item.get("enabled", True) is False:
+                continue
+            title = str(item.get("title") or "").strip()
+            prompt = str(item.get("prompt") or "").strip()
+            if not title or not prompt:
+                continue
+            presets.append(
+                {
+                    "id": str(item.get("id") or title),
+                    "title": title,
+                    "prompt": prompt,
+                    "category": str(item.get("category") or "未分类"),
+                }
+            )
+        return presets
+    except Exception:
+        # Any parsing error just results in no presets; details can be inspected via server logs if needed.
+        return []
 
 
 # -----------------------------
@@ -101,7 +157,16 @@ class ChatIn(BaseModel):
 # -----------------------------
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    attack_presets = load_attack_presets()
+    # Inject as JSON string for frontend usage
+    attack_presets_json = json.dumps(attack_presets, ensure_ascii=False)
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "attack_presets_json": attack_presets_json,
+        },
+    )
 
 
 @app.get("/health")
@@ -181,6 +246,8 @@ DEFAULT_SETTINGS = {
     "toxic_threshold": 0.75,
     "pi_threshold": 0.7,
     "agent_skill_enabled": False,
+    "f5_guardrail_only": False,
+    "debug_guardrail_raw_enabled": False,
     "kb_dir": "./enterprise_kb",
     "agent_max_steps": 4,
     "agent_debug_enabled": False,
@@ -222,6 +289,8 @@ def get_runtime_settings(raw: dict) -> dict:
         "toxic_threshold": to_float(raw.get("toxic_threshold", 0.75), 0.75, 0.0, 1.0),
         "pi_threshold": to_float(raw.get("pi_threshold", 0.7), 0.7, 0.0, 1.0),
         "agent_skill_enabled": to_bool(raw.get("agent_skill_enabled", False)),
+        "f5_guardrail_only": to_bool(raw.get("f5_guardrail_only", False)),
+        "debug_guardrail_raw_enabled": to_bool(raw.get("debug_guardrail_raw_enabled", False)),
         "kb_dir": str(raw.get("kb_dir") or "./enterprise_kb"),
         "agent_max_steps": to_int(raw.get("agent_max_steps", 4), 4, 1, 8),
         "agent_debug_enabled": to_bool(raw.get("agent_debug_enabled", False)),
@@ -453,85 +522,97 @@ async def api_chat(payload: ChatIn):
     status, rejection_type = classify_rejection(reply)
     
     # ======================
-    # LOCAL ENGINE DETECTION
+    # LOCAL ENGINE DETECTION (skipped when f5_guardrail_only is True)
+    # Single-turn and multi-turn both respect this setting.
     # ======================
-    heuristic_threshold = settings["heuristic_threshold"]
-    toxic_threshold = settings["toxic_threshold"]
-    pi_threshold = settings["pi_threshold"]
-    
-    pattern_map = parse_patterns(settings["patterns"])
-    # Keep local engines aligned with Guardrail input:
-    # multi-turn => full sliding-window context, single-turn => current user message.
-    local_engine_input = prompt_to_send
-    msg_lower = local_engine_input.lower()
-
-    # Pattern Engine
-    matched_keyword = next((k for k in pattern_map if k in msg_lower), None)
-
-    # Heuristic Engine
-    heuristic_score = sum(
-        pattern_map[k] for k in pattern_map if k in msg_lower
-    )
-    
-    # Toxic Engine
-    try:
-        # Run blocking model in a separate thread
-        tox_results = await run_in_threadpool(tox_model, local_engine_input)
-        tox_r = tox_results[0]
-        tox_block = tox_r["score"] >= toxic_threshold
-        tox_score = round(float(tox_r.get("score", 0)), 4)
-        tox_label = tox_r.get("label", "unknown")
-    except Exception as e:
-        print(f"Toxic-BERT failed: {e}")
-        tox_block = False
-        tox_score = 0.0
-        tox_label = "ERROR"
-
-    # LLM Guard Engine (ProtectAI local model)
-    try:
-        pi_results = await run_in_threadpool(pi_model, local_engine_input)
-        pi_r = pi_results[0]
-        #pi_r = pi_model(user_message)[0]
-    except Exception as e:
-        print("ProtectAI failed:", e)
-        pi_r = {"score": 0.0, "label": "SAFE"}
-
-    pi_label = pi_r.get("label", "SAFE") # Extract ProtectAI label
-    pi_score = float(pi_r.get("score", 0))
-
-    # GOAL 1 FIX: Only block if the label indicates an attack.
-    if pi_label == "SAFE":
-        pi_block = False
-    else:
-        pi_block = pi_score >= pi_threshold
-
-    engines = {
-        "pattern": {
-            "status": "BLOCK" if matched_keyword else "PASS",
-            "score": matched_keyword or "clean"
-        },
-        "heuristic": {
-            "status": "BLOCK" if heuristic_score >= heuristic_threshold else "PASS",
-            "score": heuristic_score
-        },
-        "toxic": {
-            "status": "BLOCK" if tox_block else "PASS",
-            #"score": round(float(tox_r.get("score", 0)), 4),
-            "score": tox_score,
-            "label": tox_label # GOAL 2 FIX: Send label to frontend
-        },
-        "protectai": {
-            "status": "BLOCK" if pi_block else "PASS",
-            "score": round(float(pi_score), 4),
-            "label": pi_label # GOAL 2 FIX: Send label to frontend
-        },
-        "f5": {
-            "status": "BLOCK" if status == "rejected" else "PASS"
+    f5_only = settings.get("f5_guardrail_only", False)
+    if f5_only:
+        agent_debug_log(settings, "api_chat f5_guardrail_only=True, skipping local engines")
+        engines = {
+            "pattern": {"status": "IDLE", "score": "—"},
+            "heuristic": {"status": "IDLE", "score": "—"},
+            "toxic": {"status": "IDLE", "score": "—"},
+            "protectai": {"status": "IDLE", "score": "—"},
+            "f5": {"status": "BLOCK" if status == "rejected" else "PASS"}
         }
-    }
+    else:
+        heuristic_threshold = settings["heuristic_threshold"]
+        toxic_threshold = settings["toxic_threshold"]
+        pi_threshold = settings["pi_threshold"]
+        
+        pattern_map = parse_patterns(settings["patterns"])
+        # Keep local engines aligned with Guardrail input:
+        # multi-turn => full sliding-window context, single-turn => current user message.
+        local_engine_input = prompt_to_send
+        msg_lower = local_engine_input.lower()
 
-    # Temporary debug: save raw F5 Guardrail response to .cursor for inspection
-    if isinstance(guardrail_raw, dict):
+        # Pattern Engine
+        matched_keyword = next((k for k in pattern_map if k in msg_lower), None)
+
+        # Heuristic Engine
+        heuristic_score = sum(
+            pattern_map[k] for k in pattern_map if k in msg_lower
+        )
+        
+        # Toxic Engine
+        try:
+            # Run blocking model in a separate thread
+            tox_results = await run_in_threadpool(tox_model, local_engine_input)
+            tox_r = tox_results[0]
+            tox_block = tox_r["score"] >= toxic_threshold
+            tox_score = round(float(tox_r.get("score", 0)), 4)
+            tox_label = tox_r.get("label", "unknown")
+        except Exception as e:
+            print(f"Toxic-BERT failed: {e}")
+            tox_block = False
+            tox_score = 0.0
+            tox_label = "ERROR"
+
+        # LLM Guard Engine (ProtectAI local model)
+        try:
+            pi_results = await run_in_threadpool(pi_model, local_engine_input)
+            pi_r = pi_results[0]
+            #pi_r = pi_model(user_message)[0]
+        except Exception as e:
+            print("ProtectAI failed:", e)
+            pi_r = {"score": 0.0, "label": "SAFE"}
+
+        pi_label = pi_r.get("label", "SAFE") # Extract ProtectAI label
+        pi_score = float(pi_r.get("score", 0))
+
+        # GOAL 1 FIX: Only block if the label indicates an attack.
+        if pi_label == "SAFE":
+            pi_block = False
+        else:
+            pi_block = pi_score >= pi_threshold
+
+        engines = {
+            "pattern": {
+                "status": "BLOCK" if matched_keyword else "PASS",
+                "score": matched_keyword or "clean"
+            },
+            "heuristic": {
+                "status": "BLOCK" if heuristic_score >= heuristic_threshold else "PASS",
+                "score": heuristic_score
+            },
+            "toxic": {
+                "status": "BLOCK" if tox_block else "PASS",
+                #"score": round(float(tox_r.get("score", 0)), 4),
+                "score": tox_score,
+                "label": tox_label # GOAL 2 FIX: Send label to frontend
+            },
+            "protectai": {
+                "status": "BLOCK" if pi_block else "PASS",
+                "score": round(float(pi_score), 4),
+                "label": pi_label # GOAL 2 FIX: Send label to frontend
+            },
+            "f5": {
+                "status": "BLOCK" if status == "rejected" else "PASS"
+            }
+        }
+
+    # Optional debug: save raw F5 Guardrail response to .cursor for inspection
+    if settings.get("debug_guardrail_raw_enabled") and isinstance(guardrail_raw, dict):
         try:
             _debug_path = os.path.join(BASE_DIR, ".cursor", "guardrail_response_debug.json")
             os.makedirs(os.path.dirname(_debug_path), exist_ok=True)
@@ -592,11 +673,11 @@ async def get_settings():
     return load_settings()
 
 @app.post("/api/settings")
-async def post_settings(payload: dict):
+async def post_settings(payload: dict = Body(default=None)):
     merged = load_settings()
-    if isinstance(payload, dict):
+    if isinstance(payload, dict) and payload:
         merged.update(payload)
     merged = get_runtime_settings(merged)
-    with open(SETTINGS_FILE, "w") as f:
-        json.dump(merged, f, indent=2)
-    return {"status":"ok", "settings": merged}
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(merged, f, indent=2, ensure_ascii=False)
+    return {"status": "ok", "settings": merged}

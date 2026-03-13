@@ -7,6 +7,151 @@ const modeBadgeEl = document.getElementById("modeBadge");
 const kbSkillBadgeEl = document.getElementById("kbSkillBadge");
 const navButtons = Array.from(document.querySelectorAll(".navBtn"));
 
+// 攻击示例面板元素
+const attackCardEl = document.getElementById("attackCard");
+const attackPanelBodyEl = document.getElementById("attackPanelBody");
+const attackPanelToggleEl = document.getElementById("attackPanelToggle");
+const attackPresets = Array.isArray(window.ATTACK_PRESETS) ? window.ATTACK_PRESETS : [];
+let attackTooltipEl = null;
+
+function ensureAttackTooltip() {
+  if (attackTooltipEl) return attackTooltipEl;
+  const div = document.createElement("div");
+  div.className = "attackTooltip";
+  div.style.display = "none";
+  document.body.appendChild(div);
+  attackTooltipEl = div;
+  return div;
+}
+
+function renderAttackPresets() {
+  if (!attackPanelBodyEl) return;
+
+  attackPanelBodyEl.innerHTML = "";
+
+  if (!attackPresets.length) {
+    const empty = document.createElement("div");
+    empty.className = "attackEmpty";
+    empty.textContent = "当前没有可用的攻击示例，请在 config/attack-presets.json 中配置。";
+    attackPanelBodyEl.appendChild(empty);
+    return;
+  }
+
+  // 分组：按 category 聚合
+  const groups = {};
+  attackPresets.forEach(p => {
+    const cat = (p.category || "未分类").toString();
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(p);
+  });
+
+  Object.keys(groups).sort().forEach(category => {
+    const items = groups[category];
+
+    const catEl = document.createElement("div");
+    catEl.className = "attackCategory";
+
+    const headerEl = document.createElement("button");
+    headerEl.type = "button";
+    headerEl.className = "attackCategoryHeader";
+    headerEl.setAttribute("data-category", category);
+    headerEl.setAttribute("aria-expanded", "true");
+    headerEl.innerHTML = `<span class="attackCategoryName">${escapeHtml(category)}</span><span class="attackCategoryIcon">▼</span>`;
+
+    const listEl = document.createElement("div");
+    listEl.className = "attackList";
+
+    items.forEach(preset => {
+      const itemEl = document.createElement("button");
+      itemEl.type = "button";
+      itemEl.className = "attackItem";
+      itemEl.textContent = preset.title || preset.id || "(未命名攻击示例)";
+      // 自定义 tooltip 展示完整攻击内容
+      const fullPrompt = String(preset.prompt || "");
+      let lastMouseX = 0;
+      let lastMouseY = 0;
+
+      itemEl.addEventListener("mouseenter", () => {
+        if (!fullPrompt) return;
+        const tip = ensureAttackTooltip();
+        tip.textContent = fullPrompt;
+        tip.style.display = "block";
+
+        // 初次根据上次记录的位置进行定位，稍后 mousemove 会精细调整
+        const x = lastMouseX || (itemEl.getBoundingClientRect().right + 8);
+        const y = lastMouseY || itemEl.getBoundingClientRect().top;
+        tip.style.left = x + "px";
+        tip.style.top = y + "px";
+      });
+
+      itemEl.addEventListener("mousemove", (ev) => {
+        lastMouseX = ev.clientX;
+        lastMouseY = ev.clientY;
+        if (!attackTooltipEl || attackTooltipEl.style.display === "none") return;
+        const tip = attackTooltipEl;
+        const padding = 10;
+        let x = ev.clientX + 14;
+        let y = ev.clientY + 12;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const rect = tip.getBoundingClientRect();
+        if (x + rect.width + padding > vw) {
+          x = ev.clientX - rect.width - 14;
+        }
+        if (y + rect.height + padding > vh) {
+          y = ev.clientY - rect.height - 12;
+        }
+        tip.style.left = x + "px";
+        tip.style.top = y + "px";
+      });
+
+      itemEl.addEventListener("mouseleave", () => {
+        if (attackTooltipEl) {
+          attackTooltipEl.style.display = "none";
+        }
+      });
+
+      itemEl.addEventListener("click", (ev) => {
+        if (!inputEl) return;
+        const text = String(preset.prompt || "");
+        if (!text) return;
+
+        // 默认覆盖；按住 Shift 追加
+        if (ev.shiftKey && inputEl.value) {
+          inputEl.value = inputEl.value.replace(/\s*$/,"") + "\n\n" + text;
+        } else {
+          inputEl.value = text;
+        }
+        inputEl.focus();
+      });
+      listEl.appendChild(itemEl);
+    });
+
+    headerEl.addEventListener("click", () => {
+      const expanded = headerEl.getAttribute("aria-expanded") === "true";
+      headerEl.setAttribute("aria-expanded", expanded ? "false" : "true");
+      headerEl.querySelector(".attackCategoryIcon").textContent = expanded ? "▶" : "▼";
+      listEl.style.display = expanded ? "none" : "";
+    });
+
+    catEl.appendChild(headerEl);
+    catEl.appendChild(listEl);
+    attackPanelBodyEl.appendChild(catEl);
+  });
+}
+
+if (attackPanelToggleEl && attackPanelBodyEl) {
+  attackPanelToggleEl.addEventListener("click", () => {
+    const expanded = attackPanelToggleEl.getAttribute("aria-expanded") === "true";
+    attackPanelToggleEl.setAttribute("aria-expanded", expanded ? "false" : "true");
+    attackPanelToggleEl.textContent = expanded ? "展开" : "折叠";
+    attackPanelBodyEl.style.display = expanded ? "none" : "";
+  });
+}
+
+// 初始渲染攻击示例面板
+renderAttackPresets();
+
 // Guardrail panel elements
 const guardrailCardEl = document.getElementById("guardrailCard");
 const guardrailEmptyEl = document.getElementById("guardrailEmpty");
@@ -24,6 +169,8 @@ const chatView = document.getElementById("chatView");
 const settingsView = document.getElementById("settingsView");
 const toggleMultiTurnEl = document.getElementById("toggleMultiTurn");
 const toggleAgentSkillEl = document.getElementById("toggleAgentSkill");
+const toggleGuardrailDebugEl = document.getElementById("toggleGuardrailDebug");
+const toggleF5GuardrailOnlyEl = document.getElementById("toggleF5GuardrailOnly");
 const kbDirInputEl = document.getElementById("kbDirInput");
 
 function asBool(v){
@@ -59,7 +206,11 @@ function updateEngines(engines){
     const e = engines[key];
     const s = e.status || "IDLE";
 
-    el.className = "engineStatus " + (s === "PASS" ? "pass" : "block");
+    if (s === "IDLE") {
+      el.className = "engineStatus idle";
+    } else {
+      el.className = "engineStatus " + (s === "PASS" ? "pass" : "block");
+    }
 
     let text = s;
 
@@ -137,7 +288,7 @@ function updateGuardrailPanel(guardrail){
     descText = "At least one guardrail failed, but the prompt was still sent to providers.";
   } else if (outcome === "blocked"){
     labelText = "Blocked";
-    descText = "At least one guardrail failed and the prompt was not sent to providers.";
+    descText = "At least one guardrail failed and the prompt was not sent to providers or response from LLM was blocked.";
   } else if (outcome === "redacted"){
     labelText = "Redacted";
     descText = "The Guardrail system has redacted part of the content.";
@@ -275,6 +426,8 @@ setMultiTurnEnabled(getMultiTurnEnabled());
 function setEnterpriseKBSkillEnabled(v){
   if (!kbSkillBadgeEl) return;
   kbSkillBadgeEl.textContent = v ? "Enterprise KB Skill ON" : "Enterprise KB Skill OFF";
+  kbSkillBadgeEl.classList.toggle("kbSkillOn", !!v);
+  kbSkillBadgeEl.classList.toggle("kbSkillOff", !v);
 }
 setEnterpriseKBSkillEnabled(!!toggleAgentSkillEl?.checked);
 
@@ -310,11 +463,13 @@ function setActiveView(view){
     chatTitleEl.textContent = "AI Assistant";
     chatView.style.display = "";
     chatOnlyEls.forEach(el => { if(el) el.style.display = ""; });
+    if (attackCardEl) attackCardEl.style.display = "";
     if (subEl) subEl.textContent = "F5 AI Demo Chatbot · Connected to Backend LLM";
     if (guardrailCardEl) guardrailCardEl.style.display = "";
     if (layoutEl) layoutEl.classList.add("layout--with-guardrail");
     inputEl.focus();
   } else {
+    if (attackCardEl) attackCardEl.style.display = "none";
     if (guardrailCardEl) guardrailCardEl.style.display = "none";
     if (layoutEl) layoutEl.classList.remove("layout--with-guardrail");
     if (view === "SETTINGS"){
@@ -496,6 +651,12 @@ async function loadSettings(){
       toggleAgentSkillEl.checked = enabled;
       setEnterpriseKBSkillEnabled(enabled);
     }
+    if (toggleGuardrailDebugEl) {
+      toggleGuardrailDebugEl.checked = asBool(s.debug_guardrail_raw_enabled);
+    }
+    if (toggleF5GuardrailOnlyEl) {
+      toggleF5GuardrailOnlyEl.checked = asBool(s.f5_guardrail_only);
+    }
     if (kbDirInputEl) {
       kbDirInputEl.value = s.kb_dir || "./enterprise_kb";
     }
@@ -516,6 +677,8 @@ async function saveSettings(showToast = true){
       toxic_threshold: document.getElementById("toxSlider").value,
       pi_threshold: document.getElementById("piSlider").value,
       agent_skill_enabled: !!document.getElementById("toggleAgentSkill")?.checked,
+      f5_guardrail_only: !!document.getElementById("toggleF5GuardrailOnly")?.checked,
+      debug_guardrail_raw_enabled: !!document.getElementById("toggleGuardrailDebug")?.checked,
       kb_dir: document.getElementById("kbDirInput")?.value || "./enterprise_kb",
       agent_max_steps: document.getElementById("agentMaxStepsSlider")?.value || 4
     })
@@ -538,6 +701,8 @@ document.getElementById("toggleAgentSkill")?.addEventListener("change", () => {
   setEnterpriseKBSkillEnabled(!!toggleAgentSkillEl?.checked);
   saveSettings(false);
 });
+document.getElementById("toggleGuardrailDebug")?.addEventListener("change", () => saveSettings(false));
+document.getElementById("toggleF5GuardrailOnly")?.addEventListener("change", () => saveSettings(false));
 document.getElementById("kbDirInput")?.addEventListener("change", () => saveSettings(false));
 document.getElementById("agentMaxStepsSlider")?.addEventListener("change", () => saveSettings(false));
 loadSettings();
@@ -1091,7 +1256,15 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
 
     updateStepStatus(n, "success");
     collapseLog(n);
-    showBanner("success", "✓ Pipeline completed successfully — Application deployed to UAT <span class=\"zh\">流水线执行成功，应用已部署至 UAT。</span>");
+    showBanner(
+      "success",
+      "✓ Pipeline completed successfully — Application deployed to UAT <span class=\"zh\">流水线执行成功，应用已部署至 UAT。</span>" +
+      "<div class=\"report-link-card\">" +
+      "<a href=\"/redteam-report/campaign_run_report_example.html\" target=\"_blank\" rel=\"noopener noreferrer\">" +
+      "查看本次渗透测试自定义报告" +
+      "</a>" +
+      "</div>"
+    );
     showDisclaimer();
   }
 
@@ -1192,7 +1365,7 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
   });
 
   btnViewReport.addEventListener("click", () => {
-    alert("Report viewer would open here.\n\nIn production, this navigates to the full F5 AI Security Red Team campaign report dashboard.");
+    window.open("/redteam-report/campaign_run_report_example.html", "_blank", "noopener");
   });
 
 })();

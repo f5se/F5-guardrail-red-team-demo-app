@@ -12,17 +12,25 @@
 
 2. 修正了对Redacted消息的处理问题
 
-3. 增加同时显示F5 Guardrail的scanner处理结果能力
+3. 修正界面布局与窗口适应性问题
 
-4. 增加了Skills能力，可随时增加新的Skills并自动注册Skill
+4. 增加同时显示F5 Guardrail的scanner处理结果能力
 
-5. 增加了HF的代理下载能力
+5. 增加了Skills能力，可随时增加新的Skills并自动注册Skill
 
-6. 将env文件直接加载，无需设置环境变量
+6. 增加攻击场景示例模板
 
-7. 增加了前端Markdown响应的渲染
+7. 增加了HF的代理下载能力
 
-8. 增加了F5 Red Team与DevSecOps的集成流水线演示。
+8. 增加了是否使用所有引擎开关
+
+9. 增加了后端原始响应json调试开关
+
+10. 将env文件直接加载，无需设置环境变量
+
+11. 增加了前端Markdown响应的渲染
+
+12. 增加了F5 Red Team与DevSecOps的集成流水线演示。
 
    注意：考虑到实际Red Team耗时及环境可行性，这里的Red Team API集成是mock模拟的，并不实际在SaaS端创建真实对象。
 

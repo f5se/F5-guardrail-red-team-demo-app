@@ -13,14 +13,29 @@
     <div class="crumb">Home &nbsp;›&nbsp; Assistant</div>
 
     <div class="layout layout--with-guardrail">
-      <aside class="sidebar">
-        <div class="sidebarHeader">Menu</div>
-        <div class="nav">
-          <button class="navBtn active" data-view="CHAT" id="btnChat">💬 AI Chatbot</button>
-          <button class="navBtn" data-view="SETTINGS" id="btnSettings">⚙️ Settings</button>
-          <button class="navBtn" data-view="REDTEAM" id="btnRedTeam">🔴 Red Team</button>
-        </div>
-      </aside>
+      <div class="sidebarStack">
+        <aside class="sidebar">
+          <div class="sidebarHeader">Menu</div>
+          <div class="nav">
+            <button class="navBtn active" data-view="CHAT" id="btnChat">💬 AI Chatbot/Agent</button>
+            <button class="navBtn" data-view="REDTEAM" id="btnRedTeam">🔴 Red Team</button>
+            <button class="navBtn" data-view="SETTINGS" id="btnSettings">⚙️ Settings</button>
+          </div>
+        </aside>
+
+        <!-- 攻击示例独立面板（仅在 AI Chat 视图中展示），竖直位于 Menu 下方 -->
+        <aside class="card attackCard" id="attackCard">
+          <div class="attackPanel">
+            <div class="attackPanelHeader">
+              <div class="attackPanelTitle">攻击示例</div>
+              <button type="button" class="attackPanelToggle" id="attackPanelToggle" aria-expanded="true">折叠</button>
+            </div>
+            <div class="attackPanelBody" id="attackPanelBody">
+              <!-- JS 动态渲染攻击分类和示例列表 -->
+            </div>
+          </div>
+        </aside>
+      </div>
 
       <section class="card mainCard">
         <div class="cardHeader">
@@ -33,7 +48,7 @@
                 <span class="badge" id="kbSkillBadge">Enterprise KB Skill OFF</span>
               </div>
             </div>
-            <div class="sub">F5 AI Demo Chatbot · Connected to Backend LLM</div>
+            <div class="sub">F5 AI Demo Chatbot · Connected to Backend Deepseek LLM</div>
           </div>
           <div class="toolbar">
             <button id="btnClear">Clear</button>
@@ -116,6 +131,37 @@
               <span class="slider"></span>
             </label>
           </div>
+          <hr style="margin:16px 0; border:0; border-top:1px solid #e5e7eb;">
+
+          <div class="settingRow">
+            <div class="settingText">
+              <div class="settingTitle">Only use F5 Guardrail</div>
+              <div class="settingDesc">
+                When enabled, requests are sent only to F5 Guardrail without invoking local engines such as Pattern/Heuristic/Toxic-BERT/LLM Guard; When disabled, all engines are involved in the processing.
+              </div>
+            </div>
+
+            <label class="switch" title="仅启用 F5 Guardrail，不调用本地引擎">
+              <input type="checkbox" id="toggleF5GuardrailOnly" />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <hr style="margin:16px 0; border:0; border-top:1px solid #e5e7eb;">
+
+          <div class="settingRow">
+            <div class="settingText">
+              <div class="settingTitle">Record Raw Guardrail JSON</div>
+              <div class="settingDesc">
+                Store the original F5 Guardrail JSON response into the backend directory for debugging only. Disable by default 。
+              </div>
+            </div>
+
+            <label class="switch" title="Enable/disable raw Guardrail JSON logging">
+              <input type="checkbox" id="toggleGuardrailDebug" />
+              <span class="slider"></span>
+            </label>
+          </div>
+          <hr style="margin:16px 0; border:0; border-top:1px solid #e5e7eb;">
 
           <div class="sliderBlock" style="margin-top:12px;">
             <label>Enterprise KB Directory</label>
@@ -368,6 +414,11 @@
                     <button class="btn-approve" id="btnApprove">✓ Approve &amp; Deploy to UAT · 批准并部署到UAT</button>
                     <button class="btn-reject" id="btnReject">✗ Reject &amp; End Pipeline · 拒绝并终止流水线</button>
                   </div>
+                  <div class="report-link-card">
+                    <a href="/redteam-report/campaign_run_report_example.html" target="_blank" rel="noopener noreferrer">
+                      查看本次渗透测试自定义报告
+                    </a>
+                  </div>
                 </div>
 
                 <!-- Fail panel (<85) -->
@@ -441,6 +492,10 @@
 
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <script>
+    // 从后端注入攻击示例列表，供前端 JS 使用
+    window.ATTACK_PRESETS = {{ attack_presets_json | safe }};
+  </script>
   <script src="/static/js/app.js?v=20260308-7"></script>
 </body>
 </html>

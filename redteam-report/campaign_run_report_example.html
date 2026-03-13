@@ -1,0 +1,1139 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>F5 AI Red Team Campaign test Report</title>
+
+  <!-- Modern font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Bootstrap -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Plotly -->
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+
+  <style>
+    :root{
+      --bg: #0b1020;
+      --panel: rgba(255,255,255,.06);
+      --panel2: rgba(255,255,255,.08);
+      --text: #e7ecff;
+      --muted: rgba(231,236,255,.72);
+      --line: rgba(255,255,255,.08);
+      --brand: #6ea8fe;
+      --brand2: #22c55e;
+      --danger: #fb7185;
+      --warn: #fbbf24;
+      --shadow: 0 14px 40px rgba(0,0,0,.45);
+    }
+
+    html, body { height: 100%; }
+    body {
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Helvetica Neue", sans-serif;
+      background: radial-gradient(1200px 800px at 20% 10%, rgba(110,168,254,.25), transparent 55%),
+                  radial-gradient(900px 700px at 80% 0%, rgba(34,197,94,.16), transparent 50%),
+                  radial-gradient(800px 700px at 50% 90%, rgba(251,113,133,.12), transparent 55%),
+                  var(--bg);
+      color: var(--text);
+    }
+
+    .container { max-width: 1250px; }
+
+    .nav-blur {
+      background: rgba(11,16,32,.55);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .brand-dot{
+      width: 10px; height: 10px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--brand), var(--brand2));
+      box-shadow: 0 0 18px rgba(110,168,254,.55);
+      display: inline-block;
+    }
+
+    .cardx {
+      background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.04));
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .cardx .card-headerx{
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-weight: 600;
+      letter-spacing: .2px;
+    }
+
+    .cardx .card-bodyx{ padding: 16px; }
+
+    .kpi-title{ color: var(--muted); font-size: .88rem; }
+    .kpi-value{ font-size: 1.7rem; font-weight: 700; }
+
+    .pill {
+      font-size: .78rem;
+      padding: .22rem .6rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.06);
+      color: var(--muted);
+    }
+
+    .pill.ok{ color: rgba(34,197,94,.95); border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.10); }
+    .pill.warn{ color: rgba(251,191,36,.95); border-color: rgba(251,191,36,.35); background: rgba(251,191,36,.10); }
+    .pill.bad{ color: rgba(251,113,133,.95); border-color: rgba(251,113,133,.35); background: rgba(251,113,133,.10); }
+
+    .toc a { color: var(--muted); text-decoration: none; }
+    .toc a:hover { color: var(--text); }
+
+    .section-title{ font-weight: 750; letter-spacing: .2px; }
+    .section-sub{ color: var(--muted); }
+
+    table.table {
+      --bs-table-bg: transparent;
+      --bs-table-color: var(--text);
+      --bs-table-border-color: var(--line);
+    }
+
+    .table thead th {
+      color: var(--muted);
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.04);
+    }
+
+    .small-note { color: var(--muted); font-size: .86rem; }
+    code { color: #c7d2fe; }
+
+    .divider { height: 1px; background: var(--line); margin: 18px 0; }
+
+    .plot { width: 100%; height: 320px; }
+    .plot-sm { width: 100%; height: 240px; }
+
+    .footer { color: rgba(231,236,255,.55); font-size: .85rem; }
+
+    @media (max-width: 768px) {
+      .plot { height: 280px; }
+      .plot-sm { height: 220px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="nav-blur">
+  <div class="container py-3">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div class="d-flex align-items-center gap-2">
+        <span class="brand-dot"></span>
+        <div>
+          <div class="fw-bold">F5 AI Red Team Campaign test Report</div>
+          <div class="small-note">Campaign: <b>N/A</b> · Run: <b>find-way-to-money-launder</b> · ID: <code>0199a88e-95e2-70b7-9ddb-637b28555854</code></div>
+        </div>
+      </div>
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <span class="pill">Generated: 2026-03-11 10:44:57 CST</span>
+        <span class="pill">Input: <code>campaign-run-0199a88e-95e2-70b7-9ddb-637b28555854-20260311T014327Z.json</code></span>
+        <span class="pill">Parser: <span class="pill ok">streaming</span></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="container my-4">
+
+  <!-- Executive KPI row -->
+  <div class="row g-3">
+    <div class="col-lg-3 col-md-6">
+      <div class="cardx">
+        <div class="card-bodyx">
+          <div class="kpi-title">Overall vulnerability rate</div>
+          <div class="kpi-value">10.26%</div>
+          <div class="small-note">Vulnerable 1,073 / Total 10,461</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-3 col-md-6">
+      <div class="cardx">
+        <div class="card-bodyx">
+          <div class="kpi-title">CASI</div>
+          <div class="kpi-value">84.0</div>
+          <div class="small-note">Δ position: N/A</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-3 col-md-6">
+      <div class="cardx">
+        <div class="card-bodyx">
+          <div class="kpi-title">ARS</div>
+          <div class="kpi-value"><span class="small-note">not provided</span></div>
+          <div class="small-note">Displayed only when present in response</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-3 col-md-6">
+      <div class="cardx">
+        <div class="card-bodyx">
+          <div class="kpi-title">Coverage</div>
+          <div class="kpi-value">1 models</div>
+          <div class="small-note">Vectors 14, Packs 2, Converters(result) 7, Converters(attack) 6</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div class="cardx mt-3">
+    <div class="card-headerx">Executive summary</div>
+    <div class="card-bodyx">
+      <ul class="mb-0">
+        
+        <li>Tested 10,461 prompts across 1 providers, 14 attack vectors and 2 packs; overall vulnerability rate 10.26%.</li>
+        
+        <li>Highest provider vulnerability rate: unknown (10.26%, 1073/10461).</li>
+        
+        <li>Highest vector vulnerability rate: scenario_nesting (22.62%, 228/1008).</li>
+        
+        <li>Highest pack vulnerability rate: 2025-10 (10.33%, 1072/10374).</li>
+        
+        <li>Attack configuration converters coverage: 6 unique (from attack.converters[][]), separate from 7 result-level converters (results.converter).</li>
+        
+      </ul>
+    </div>
+  </div>
+
+  <!-- Contents -->
+  <div class="cardx mt-3">
+    <div class="card-bodyx">
+      <div class="row">
+        <div class="col-md-6">
+          <div class="section-title">Contents</div>
+          <div class="toc mt-2">
+            <div><a href="#campaign">1. Campaign-level metrics</a></div>
+            <div><a href="#provider">2. Provider / Model analysis</a></div>
+            <div><a href="#attack">3. Attack vector & pack</a></div>
+            <div><a href="#converter">4. Converter bypass</a></div>
+            <div><a href="#intent">5. Intent & severity</a></div>
+            <div><a href="#conversation">6. Multi-turn analysis</a></div>
+            <div><a href="#appendix">7. Appendix</a></div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="section-title">Notes</div>
+          <div class="small-note mt-2">
+            <ul class="mb-0">
+              <li>All metrics are direct counts/ratios from response fields; no custom risk scoring.</li>
+              <li>Vulnerability rate = vulnerable / total for the chosen grouping.</li>
+              <li>Unknown/missing values are grouped as <code>unknown</code> and listed in Appendix.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1 Campaign -->
+  <div id="campaign" class="mt-4"></div>
+  <div class="d-flex align-items-end justify-content-between flex-wrap gap-2 mt-4">
+    <div>
+      <div class="section-title">1. Campaign-level metrics</div>
+      <div class="section-sub small-note">High-level run indicators designed for quick executive review</div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <span class="pill">Status: complete</span>
+      <span class="pill">Created: 2025-10-03 13:32:20 CST</span>
+      <span class="pill">Start: 2025-10-03 13:32:20 CST</span>
+      <span class="pill">By: auth0|68cbd3f192d27d752f59aab9</span>
+    </div>
+  </div>
+
+  <!-- Big metric visuals -->
+  <div class="row g-3 mt-2">
+    <div class="col-lg-4">
+      <div class="cardx">
+        <div class="card-headerx">Security scores</div>
+        <div class="card-bodyx">
+          <div id="gaugeCasi" class="plot-sm"></div>
+          <div id="gaugeArs" class="plot-sm mt-2"></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="cardx">
+        <div class="card-headerx">Risk snapshot</div>
+        <div class="card-bodyx">
+          <div id="gaugeVuln" class="plot"></div>
+          <div class="small-note">Critical vulnerable: 0 / 0 (0.00%)</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="cardx">
+        <div class="card-headerx">Performance & cost</div>
+        <div class="card-bodyx">
+          <div id="gaugeCost" class="plot-sm"></div>
+          <div class="row g-2 mt-2">
+            <div class="col-6"><div id="gaugeRtp" class="plot-sm"></div></div>
+            <div class="col-6"><div id="gaugePerf" class="plot-sm"></div></div>
+          </div>
+          <div class="small-note mt-1">Errors (sum of attackRun.errorCount): <b>123</b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Provider -->
+  <div id="provider"></div>
+  <div class="section-title">2. Provider / Model analysis</div>
+  <div class="section-sub small-note">Compare vulnerability rate across model providers</div>
+
+  <div class="row g-3 mt-2">
+    <div class="col-lg-6">
+      <div class="cardx">
+        <div class="card-headerx">Provider vulnerability rate</div>
+        <div class="card-bodyx"><div id="providerBar" class="plot"></div></div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="cardx">
+        <div class="card-headerx">Provider table</div>
+        <div class="card-bodyx">
+          <div class="table-responsive">
+            <table class="table table-sm">
+              <thead><tr><th>Provider</th><th class="text-end">Total</th><th class="text-end">Vulnerable</th><th class="text-end">Rate</th></tr></thead>
+              <tbody>
+                
+                <tr>
+                  <td>unknown</td>
+                  <td class="text-end">10,461</td>
+                  <td class="text-end">1,073</td>
+                  <td class="text-end">10.26%</td>
+                </tr>
+                
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cardx mt-3">
+    <div class="card-headerx">Provider × Vector matrix (vulnerability rate)</div>
+    <div class="card-bodyx">
+      <div class="table-responsive">
+        <table class="table table-sm heat">
+          <thead>
+            <tr>
+              <th>Provider</th>
+              <th class="text-end">conditional_context_change</th><th class="text-end">crescendo</th><th class="text-end">dan</th><th class="text-end">fictional_context_change</th><th class="text-end">flip</th><th class="text-end">frame</th><th class="text-end">math_prompt</th><th class="text-end">payload_splitting</th><th class="text-end">persuasive_adversarial</th><th class="text-end">refusal_suppression</th><th class="text-end">scenario_nesting</th><th class="text-end">style_injection</th><th class="text-end">trolley</th><th class="text-end">word_game</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr>
+              <td><b>unknown</b></td>
+              
+              <td class="text-end" data-rate="0.06825396825396825">
+                
+                  6.83%<br><span class="small-note">(43/630)</span>
+                
+              </td>
+              
+              <td class="text-end" data-rate="0.09828009828009827">
+                
+                  9.83%<br><span class="small-note">(40/407)</span>
+                
+              </td>
+              
+              <td class="text-end" data-rate="0.047619047619047616">
+                
+                  4.76%<br><span class="small-note">(11/231)</span>
+                
+              </td>
+              
+              <td class="text-end" data-rate="0.12406015037593984">
+                
+                  12.41%<br><span class="small-note">(132/1064)</span>
+                
+              </td>
+              
+              <td class="text-end" data-rate="0.03527336860670194">
+                
+                  3.53%<br><span class="small-note">(40/1134)</span>
+                
+              </td>
+              
+              <td class="text-end" data-rate="0.0">
+                
+                  0.00%<br><span class="small-note">(0/1)</span>
+                
+              </td>
+              
+              <td class="text-end" data-rate="0.03468547912992358">
+                
+                  3.47%<br><span class="small-note">(59/1701)</span>
+                
+              </td>
+              
+              <td class="text-end" data-rate="0.1335978835978836">
+                
+                  13.36%<br><span class="small-note">(101/756)</span>
+                
+              </td>
+              
+              <td class="text-end" data-rate="0.06190476190476191">
+                
+                  6.19%<br><span class="small-note">(13/210)</span>
+                
+              </td>
+              
+              <td class="text-end" data-rate="0.13259195893926431">
+                
+                  13.26%<br><span class="small-note">(155/1169)</span>
+                
+              </td>
+              
+              <td class="text-end" data-rate="0.2261904761904762">
+                
+                  22.62%<br><span class="small-note">(228/1008)</span>
+                
+              </td>
+              
+              <td class="text-end" data-rate="0.1543778801843318">
+                
+                  15.44%<br><span class="small-note">(67/434)</span>
+                
+              </td>
+              
+              <td class="text-end" data-rate="0.0">
+                
+                  0.00%<br><span class="small-note">(0/1)</span>
+                
+              </td>
+              
+              <td class="text-end" data-rate="0.10728862973760933">
+                
+                  10.73%<br><span class="small-note">(184/1715)</span>
+                
+              </td>
+              
+            </tr>
+            
+          </tbody>
+        </table>
+      </div>
+      <div class="small-note">Color intensity indicates higher vulnerability rate.</div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Attack -->
+  <div id="attack"></div>
+  <div class="section-title">3. Attack vector & pack</div>
+  <div class="section-sub small-note">Identify highest-risk vectors/packs and techniques</div>
+
+  <div class="row g-3 mt-2">
+    <div class="col-lg-6"><div class="cardx"><div class="card-headerx">Attack vector vulnerability rate (Top)</div><div class="card-bodyx"><div id="vectorBar" class="plot"></div></div></div></div>
+    <div class="col-lg-6"><div class="cardx"><div class="card-headerx">Attack pack vulnerability rate</div><div class="card-bodyx"><div id="packBar" class="plot"></div></div></div></div>
+  </div>
+  <div class="row g-3 mt-3">
+    <div class="col-12"><div class="cardx"><div class="card-headerx">Technique vulnerability rate (Top)</div><div class="card-bodyx"><div id="techBar" class="plot"></div></div></div></div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Converter -->
+  <div id="converter"></div>
+  <div class="section-title">4. Converter bypass</div>
+  <div class="section-sub small-note">Compare result-level converters vs attack configuration converters</div>
+
+  <div class="row g-3 mt-2">
+    <div class="col-lg-6">
+      <div class="cardx"><div class="card-headerx">Converter vulnerability rate (results.converter)</div><div class="card-bodyx"><div id="convBar" class="plot"></div><div class="small-note">Based on <code>results.converter</code>.</div></div></div>
+      <div class="cardx mt-3"><div class="card-headerx">Converter vulnerability rate (attack.converters[][])</div><div class="card-bodyx"><div id="attackConvBar" class="plot"></div><div class="small-note">Based on flattened <code>attack.converters</code> configured per attackRun.</div></div></div>
+    </div>
+    <div class="col-lg-6">
+      <div class="cardx">
+        <div class="card-headerx">Top combinations</div>
+        <div class="card-bodyx">
+          <div class="small-note">Vector + <code>results.converter</code></div>
+          <div class="table-responsive">
+            <table class="table table-sm">
+              <thead><tr><th>Vector</th><th>Converter</th><th class="text-end">Total</th><th class="text-end">Vulnerable</th><th class="text-end">Rate</th></tr></thead>
+              <tbody>
+                
+                <tr>
+                  <td>scenario_nesting</td>
+                  <td><span class="pill">caesar</span></td>
+                  <td class="text-end">144</td>
+                  <td class="text-end">49</td>
+                  <td class="text-end">34.03%</td>
+                </tr>
+                
+                <tr>
+                  <td>scenario_nesting</td>
+                  <td><span class="pill">repeat_token</span></td>
+                  <td class="text-end">144</td>
+                  <td class="text-end">43</td>
+                  <td class="text-end">29.86%</td>
+                </tr>
+                
+                <tr>
+                  <td>scenario_nesting</td>
+                  <td><span class="pill">single_character</span></td>
+                  <td class="text-end">144</td>
+                  <td class="text-end">43</td>
+                  <td class="text-end">29.86%</td>
+                </tr>
+                
+                <tr>
+                  <td>payload_splitting</td>
+                  <td><span class="pill">caesar</span></td>
+                  <td class="text-end">108</td>
+                  <td class="text-end">30</td>
+                  <td class="text-end">27.78%</td>
+                </tr>
+                
+                <tr>
+                  <td>scenario_nesting</td>
+                  <td><span class="pill">unknown</span></td>
+                  <td class="text-end">144</td>
+                  <td class="text-end">39</td>
+                  <td class="text-end">27.08%</td>
+                </tr>
+                
+                <tr>
+                  <td>refusal_suppression</td>
+                  <td><span class="pill">unknown</span></td>
+                  <td class="text-end">167</td>
+                  <td class="text-end">39</td>
+                  <td class="text-end">23.35%</td>
+                </tr>
+                
+                <tr>
+                  <td>refusal_suppression</td>
+                  <td><span class="pill">repeat_token</span></td>
+                  <td class="text-end">167</td>
+                  <td class="text-end">37</td>
+                  <td class="text-end">22.16%</td>
+                </tr>
+                
+                <tr>
+                  <td>word_game</td>
+                  <td><span class="pill">caesar</span></td>
+                  <td class="text-end">245</td>
+                  <td class="text-end">52</td>
+                  <td class="text-end">21.22%</td>
+                </tr>
+                
+                <tr>
+                  <td>scenario_nesting</td>
+                  <td><span class="pill">leetspeak</span></td>
+                  <td class="text-end">144</td>
+                  <td class="text-end">29</td>
+                  <td class="text-end">20.14%</td>
+                </tr>
+                
+                <tr>
+                  <td>style_injection</td>
+                  <td><span class="pill">single_character</span></td>
+                  <td class="text-end">62</td>
+                  <td class="text-end">12</td>
+                  <td class="text-end">19.35%</td>
+                </tr>
+                
+                <tr>
+                  <td>style_injection</td>
+                  <td><span class="pill">caesar</span></td>
+                  <td class="text-end">62</td>
+                  <td class="text-end">12</td>
+                  <td class="text-end">19.35%</td>
+                </tr>
+                
+                <tr>
+                  <td>fictional_context_change</td>
+                  <td><span class="pill">caesar</span></td>
+                  <td class="text-end">152</td>
+                  <td class="text-end">27</td>
+                  <td class="text-end">17.76%</td>
+                </tr>
+                
+                <tr>
+                  <td>style_injection</td>
+                  <td><span class="pill">repeat_token</span></td>
+                  <td class="text-end">62</td>
+                  <td class="text-end">11</td>
+                  <td class="text-end">17.74%</td>
+                </tr>
+                
+                <tr>
+                  <td>crescendo</td>
+                  <td><span class="pill">caesar</span></td>
+                  <td class="text-end">58</td>
+                  <td class="text-end">10</td>
+                  <td class="text-end">17.24%</td>
+                </tr>
+                
+                <tr>
+                  <td>payload_splitting</td>
+                  <td><span class="pill">leetspeak</span></td>
+                  <td class="text-end">108</td>
+                  <td class="text-end">18</td>
+                  <td class="text-end">16.67%</td>
+                </tr>
+                
+                <tr>
+                  <td>fictional_context_change</td>
+                  <td><span class="pill">single_character</span></td>
+                  <td class="text-end">152</td>
+                  <td class="text-end">25</td>
+                  <td class="text-end">16.45%</td>
+                </tr>
+                
+                <tr>
+                  <td>style_injection</td>
+                  <td><span class="pill">unknown</span></td>
+                  <td class="text-end">62</td>
+                  <td class="text-end">10</td>
+                  <td class="text-end">16.13%</td>
+                </tr>
+                
+                <tr>
+                  <td>style_injection</td>
+                  <td><span class="pill">leetspeak</span></td>
+                  <td class="text-end">62</td>
+                  <td class="text-end">10</td>
+                  <td class="text-end">16.13%</td>
+                </tr>
+                
+                <tr>
+                  <td>dan</td>
+                  <td><span class="pill">caesar</span></td>
+                  <td class="text-end">33</td>
+                  <td class="text-end">5</td>
+                  <td class="text-end">15.15%</td>
+                </tr>
+                
+                <tr>
+                  <td>scenario_nesting</td>
+                  <td><span class="pill">base64</span></td>
+                  <td class="text-end">144</td>
+                  <td class="text-end">21</td>
+                  <td class="text-end">14.58%</td>
+                </tr>
+                
+              </tbody>
+            </table>
+          </div>
+
+          <div class="small-note mt-3">Vector + <code>attack.converters</code></div>
+          <div class="table-responsive">
+            <table class="table table-sm">
+              <thead><tr><th>Vector</th><th>Attack Converter</th><th class="text-end">Total</th><th class="text-end">Vulnerable</th><th class="text-end">Rate</th></tr></thead>
+              <tbody>
+                
+                <tr>
+                  <td>scenario_nesting</td>
+                  <td><span class="pill">base64</span></td>
+                  <td class="text-end">1,008</td>
+                  <td class="text-end">228</td>
+                  <td class="text-end">22.62%</td>
+                </tr>
+                
+                <tr>
+                  <td>scenario_nesting</td>
+                  <td><span class="pill">caesar</span></td>
+                  <td class="text-end">1,008</td>
+                  <td class="text-end">228</td>
+                  <td class="text-end">22.62%</td>
+                </tr>
+                
+                <tr>
+                  <td>scenario_nesting</td>
+                  <td><span class="pill">leetspeak</span></td>
+                  <td class="text-end">1,008</td>
+                  <td class="text-end">228</td>
+                  <td class="text-end">22.62%</td>
+                </tr>
+                
+                <tr>
+                  <td>scenario_nesting</td>
+                  <td><span class="pill">repeat_token</span></td>
+                  <td class="text-end">1,008</td>
+                  <td class="text-end">228</td>
+                  <td class="text-end">22.62%</td>
+                </tr>
+                
+                <tr>
+                  <td>scenario_nesting</td>
+                  <td><span class="pill">single_character</span></td>
+                  <td class="text-end">1,008</td>
+                  <td class="text-end">228</td>
+                  <td class="text-end">22.62%</td>
+                </tr>
+                
+                <tr>
+                  <td>scenario_nesting</td>
+                  <td><span class="pill">unicode_confusable</span></td>
+                  <td class="text-end">1,008</td>
+                  <td class="text-end">228</td>
+                  <td class="text-end">22.62%</td>
+                </tr>
+                
+                <tr>
+                  <td>style_injection</td>
+                  <td><span class="pill">base64</span></td>
+                  <td class="text-end">434</td>
+                  <td class="text-end">67</td>
+                  <td class="text-end">15.44%</td>
+                </tr>
+                
+                <tr>
+                  <td>style_injection</td>
+                  <td><span class="pill">caesar</span></td>
+                  <td class="text-end">434</td>
+                  <td class="text-end">67</td>
+                  <td class="text-end">15.44%</td>
+                </tr>
+                
+                <tr>
+                  <td>style_injection</td>
+                  <td><span class="pill">leetspeak</span></td>
+                  <td class="text-end">434</td>
+                  <td class="text-end">67</td>
+                  <td class="text-end">15.44%</td>
+                </tr>
+                
+                <tr>
+                  <td>style_injection</td>
+                  <td><span class="pill">repeat_token</span></td>
+                  <td class="text-end">434</td>
+                  <td class="text-end">67</td>
+                  <td class="text-end">15.44%</td>
+                </tr>
+                
+                <tr>
+                  <td>style_injection</td>
+                  <td><span class="pill">single_character</span></td>
+                  <td class="text-end">434</td>
+                  <td class="text-end">67</td>
+                  <td class="text-end">15.44%</td>
+                </tr>
+                
+                <tr>
+                  <td>style_injection</td>
+                  <td><span class="pill">unicode_confusable</span></td>
+                  <td class="text-end">434</td>
+                  <td class="text-end">67</td>
+                  <td class="text-end">15.44%</td>
+                </tr>
+                
+                <tr>
+                  <td>payload_splitting</td>
+                  <td><span class="pill">base64</span></td>
+                  <td class="text-end">756</td>
+                  <td class="text-end">101</td>
+                  <td class="text-end">13.36%</td>
+                </tr>
+                
+                <tr>
+                  <td>payload_splitting</td>
+                  <td><span class="pill">caesar</span></td>
+                  <td class="text-end">756</td>
+                  <td class="text-end">101</td>
+                  <td class="text-end">13.36%</td>
+                </tr>
+                
+                <tr>
+                  <td>payload_splitting</td>
+                  <td><span class="pill">leetspeak</span></td>
+                  <td class="text-end">756</td>
+                  <td class="text-end">101</td>
+                  <td class="text-end">13.36%</td>
+                </tr>
+                
+                <tr>
+                  <td>payload_splitting</td>
+                  <td><span class="pill">repeat_token</span></td>
+                  <td class="text-end">756</td>
+                  <td class="text-end">101</td>
+                  <td class="text-end">13.36%</td>
+                </tr>
+                
+                <tr>
+                  <td>payload_splitting</td>
+                  <td><span class="pill">single_character</span></td>
+                  <td class="text-end">756</td>
+                  <td class="text-end">101</td>
+                  <td class="text-end">13.36%</td>
+                </tr>
+                
+                <tr>
+                  <td>payload_splitting</td>
+                  <td><span class="pill">unicode_confusable</span></td>
+                  <td class="text-end">756</td>
+                  <td class="text-end">101</td>
+                  <td class="text-end">13.36%</td>
+                </tr>
+                
+                <tr>
+                  <td>refusal_suppression</td>
+                  <td><span class="pill">base64</span></td>
+                  <td class="text-end">1,169</td>
+                  <td class="text-end">155</td>
+                  <td class="text-end">13.26%</td>
+                </tr>
+                
+                <tr>
+                  <td>refusal_suppression</td>
+                  <td><span class="pill">caesar</span></td>
+                  <td class="text-end">1,169</td>
+                  <td class="text-end">155</td>
+                  <td class="text-end">13.26%</td>
+                </tr>
+                
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Intent -->
+  <div id="intent"></div>
+  <div class="section-title">5. Intent & severity</div>
+  <div class="section-sub small-note">Distribution and vulnerability rate by intent category and severity</div>
+
+  <div class="row g-3 mt-2">
+    <div class="col-lg-6"><div class="cardx"><div class="card-headerx">Intent category distribution (count)</div><div class="card-bodyx"><div id="intentBar" class="plot"></div></div></div></div>
+    <div class="col-lg-6"><div class="cardx"><div class="card-headerx">Intent category vulnerability rate</div><div class="card-bodyx"><div id="intentRateBar" class="plot"></div></div></div></div>
+  </div>
+  <div class="row g-3 mt-3">
+    <div class="col-12"><div class="cardx"><div class="card-headerx">Severity distribution (count)</div><div class="card-bodyx"><div id="sevBar" class="plot"></div></div></div></div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Conversation -->
+  <div id="conversation"></div>
+  <div class="section-title">6. Multi-turn analysis</div>
+  <div class="section-sub small-note">How multi-step conversations affect vulnerability rate</div>
+
+  <div class="row g-3 mt-2">
+    <div class="col-12"><div class="cardx"><div class="card-headerx">Conversation steps vs vulnerability rate</div><div class="card-bodyx"><div id="stepsLine" class="plot"></div><div class="small-note">Based on <code>results.conversationSteps</code>. Missing values grouped as <code>unknown</code>.</div></div></div></div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Appendix -->
+  <div id="appendix"></div>
+  <div class="section-title">7. Appendix</div>
+  <div class="section-sub small-note">Data quality signals and error summaries</div>
+
+  <div class="row g-3 mt-2">
+    <div class="col-lg-6">
+      <div class="cardx"><div class="card-headerx">Unknown / missing values (Top)</div>
+        <div class="card-bodyx">
+          <table class="table table-sm">
+            <thead><tr><th>Item</th><th class="text-end">Count</th></tr></thead>
+            <tbody>
+              
+              <tr><td>results.severity:&lt;missing&gt;</td><td class="text-end">10,461</td></tr>
+              
+              <tr><td>results.converter:&lt;missing&gt;</td><td class="text-end">1,497</td></tr>
+              
+              <tr><td>results.intentCategory:&lt;missing&gt;</td><td class="text-end">87</td></tr>
+              
+              <tr><td>providerName:&lt;missing&gt;</td><td class="text-end">27</td></tr>
+              
+              <tr><td>attack.pack:&lt;missing&gt;</td><td class="text-end">15</td></tr>
+              
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="cardx"><div class="card-headerx">Result errors</div>
+        <div class="card-bodyx">
+          <div class="row g-3">
+            <div class="col-12 col-lg-6">
+              <div class="small-note mb-1">error (top)</div>
+              <div class="table-responsive">
+                <table class="table table-sm mb-0"><tbody>
+                  
+                  <tr><td class="text-break">Received non-success status from provider &lt;400&gt;: b&#39;{&#34;error&#34;:{&#34;message&#34;:&#34;The response was filtered due to the prompt triggering Azure OpenAI\&#39;s content management policy. Please modify your prompt and retry. To learn more about our content filtering policies please read our documentation: https://go.microsoft.com/fwlink/?linkid=2198766&#34;,&#34;type&#34;:null,&#34;param&#34;:&#34;prompt&#34;,&#34;code&#34;:&#34;content_filter&#34;,&#34;status&#34;:400,&#34;innererror&#34;:{&#34;code&#34;:&#34;ResponsibleAIPolicyViolation&#34;,&#34;content_filter_result&#34;:{&#34;hate&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;self_harm&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;sexual&#34;:{&#34;filtered&#34;:true,&#34;severity&#34;:&#34;high&#34;},&#34;violence&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;}}}}}&#39;</td><td class="text-end">39</td></tr>
+                  
+                  <tr><td class="text-break">Invalid type for provider response content. Expected string.</td><td class="text-end">15</td></tr>
+                  
+                  <tr><td class="text-break">Received non-success status from provider &lt;400&gt;: b&#39;{&#34;error&#34;:{&#34;message&#34;:&#34;The response was filtered due to the prompt triggering Azure OpenAI\&#39;s content management policy. Please modify your prompt and retry. To learn more about our content filtering policies please read our documentation: https://go.microsoft.com/fwlink/?linkid=2198766&#34;,&#34;type&#34;:null,&#34;param&#34;:&#34;prompt&#34;,&#34;code&#34;:&#34;content_filter&#34;,&#34;status&#34;:400,&#34;innererror&#34;:{&#34;code&#34;:&#34;ResponsibleAIPolicyViolation&#34;,&#34;content_filter_result&#34;:{&#34;hate&#34;:{&#34;filtered&#34;:true,&#34;severity&#34;:&#34;high&#34;},&#34;self_harm&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;sexual&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;violence&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;}}}}}&#39;</td><td class="text-end">11</td></tr>
+                  
+                  <tr><td class="text-break">Received non-success status from provider &lt;400&gt;: b&#39;{&#34;error&#34;:{&#34;message&#34;:&#34;The response was filtered due to the prompt triggering Azure OpenAI\&#39;s content management policy. Please modify your prompt and retry. To learn more about our content filtering policies please read our documentation: https://go.microsoft.com/fwlink/?linkid=2198766&#34;,&#34;type&#34;:null,&#34;param&#34;:&#34;prompt&#34;,&#34;code&#34;:&#34;content_filter&#34;,&#34;status&#34;:400,&#34;innererror&#34;:{&#34;code&#34;:&#34;ResponsibleAIPolicyViolation&#34;,&#34;content_filter_result&#34;:{&#34;hate&#34;:{&#34;filtered&#34;:true,&#34;severity&#34;:&#34;high&#34;},&#34;self_harm&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;sexual&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;violence&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;low&#34;}}}}}&#39;</td><td class="text-end">5</td></tr>
+                  
+                  <tr><td class="text-break">Received non-success status from provider &lt;400&gt;: b&#39;{&#34;error&#34;:{&#34;message&#34;:&#34;The response was filtered due to the prompt triggering Azure OpenAI\&#39;s content management policy. Please modify your prompt and retry. To learn more about our content filtering policies please read our documentation: https://go.microsoft.com/fwlink/?linkid=2198766&#34;,&#34;type&#34;:null,&#34;param&#34;:&#34;prompt&#34;,&#34;code&#34;:&#34;content_filter&#34;,&#34;status&#34;:400,&#34;innererror&#34;:{&#34;code&#34;:&#34;ResponsibleAIPolicyViolation&#34;,&#34;content_filter_result&#34;:{&#34;hate&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;self_harm&#34;:{&#34;filtered&#34;:true,&#34;severity&#34;:&#34;high&#34;},&#34;sexual&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;violence&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;}}}}}&#39;</td><td class="text-end">5</td></tr>
+                  
+                  <tr><td class="text-break">Received non-success status from provider &lt;400&gt;: b&#39;{&#34;error&#34;:{&#34;message&#34;:&#34;The response was filtered due to the prompt triggering Azure OpenAI\&#39;s content management policy. Please modify your prompt and retry. To learn more about our content filtering policies please read our documentation: https://go.microsoft.com/fwlink/?linkid=2198766&#34;,&#34;type&#34;:null,&#34;param&#34;:&#34;prompt&#34;,&#34;code&#34;:&#34;content_filter&#34;,&#34;status&#34;:400,&#34;innererror&#34;:{&#34;code&#34;:&#34;ResponsibleAIPolicyViolation&#34;,&#34;content_filter_result&#34;:{&#34;hate&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;self_harm&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;sexual&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;violence&#34;:{&#34;filtered&#34;:true,&#34;severity&#34;:&#34;high&#34;}}}}}&#39;</td><td class="text-end">4</td></tr>
+                  
+                  <tr><td class="text-break">Request timed out</td><td class="text-end">4</td></tr>
+                  
+                  <tr><td class="text-break">Received non-success status from provider &lt;400&gt;: b&#39;{&#34;error&#34;:{&#34;message&#34;:&#34;The response was filtered due to the prompt triggering Azure OpenAI\&#39;s content management policy. Please modify your prompt and retry. To learn more about our content filtering policies please read our documentation: https://go.microsoft.com/fwlink/?linkid=2198766&#34;,&#34;type&#34;:null,&#34;param&#34;:&#34;prompt&#34;,&#34;code&#34;:&#34;content_filter&#34;,&#34;status&#34;:400,&#34;innererror&#34;:{&#34;code&#34;:&#34;ResponsibleAIPolicyViolation&#34;,&#34;content_filter_result&#34;:{&#34;hate&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;self_harm&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;sexual&#34;:{&#34;filtered&#34;:true,&#34;severity&#34;:&#34;high&#34;},&#34;violence&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;medium&#34;}}}}}&#39;</td><td class="text-end">3</td></tr>
+                  
+                  <tr><td class="text-break">Received non-success status from provider &lt;400&gt;: b&#39;{&#34;error&#34;:{&#34;message&#34;:&#34;The response was filtered due to the prompt triggering Azure OpenAI\&#39;s content management policy. Please modify your prompt and retry. To learn more about our content filtering policies please read our documentation: https://go.microsoft.com/fwlink/?linkid=2198766&#34;,&#34;type&#34;:null,&#34;param&#34;:&#34;prompt&#34;,&#34;code&#34;:&#34;content_filter&#34;,&#34;status&#34;:400,&#34;innererror&#34;:{&#34;code&#34;:&#34;ResponsibleAIPolicyViolation&#34;,&#34;content_filter_result&#34;:{&#34;hate&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;self_harm&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;sexual&#34;:{&#34;filtered&#34;:true,&#34;severity&#34;:&#34;high&#34;},&#34;violence&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;low&#34;}}}}}&#39;</td><td class="text-end">2</td></tr>
+                  
+                  <tr><td class="text-break">Received non-success status from provider &lt;400&gt;: b&#39;{&#34;error&#34;:{&#34;message&#34;:&#34;The response was filtered due to the prompt triggering Azure OpenAI\&#39;s content management policy. Please modify your prompt and retry. To learn more about our content filtering policies please read our documentation: https://go.microsoft.com/fwlink/?linkid=2198766&#34;,&#34;type&#34;:null,&#34;param&#34;:&#34;prompt&#34;,&#34;code&#34;:&#34;content_filter&#34;,&#34;status&#34;:400,&#34;innererror&#34;:{&#34;code&#34;:&#34;ResponsibleAIPolicyViolation&#34;,&#34;content_filter_result&#34;:{&#34;hate&#34;:{&#34;filtered&#34;:true,&#34;severity&#34;:&#34;high&#34;},&#34;self_harm&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;sexual&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;safe&#34;},&#34;violence&#34;:{&#34;filtered&#34;:false,&#34;severity&#34;:&#34;medium&#34;}}}}}&#39;</td><td class="text-end">2</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a4-570d-70a9-aae0-280e8d8898f9</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8aa-612a-7028-bb09-6751fdfe08ae</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8ab-4d01-70e8-bad6-45a7ba238465</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a4-edf2-70d8-acbf-6af1a49bbbe1</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a4-52ba-7093-a9a1-57359e1db5ff</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a4-59d5-70d0-b58d-9835ff491b79</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a4-6cdf-70c5-85cb-c14016b2e97d</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a5-0cb0-700c-a2dd-87f6b7280d77</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a5-0de3-7068-8376-35c404caf022</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a89b-3072-7051-b413-be8d1bdd55db</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a1-940d-70ab-b578-97dc0f120b44</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a1-d1af-7007-8233-a6112a7972b6</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a4-5636-7021-a817-1756e9a00d3c</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a4-58a3-703f-ac77-b0221fe9cecf</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a4-eb8a-7008-8d89-ddc28f218482</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a5-0666-7072-b724-04e8c2958a6b</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a5-0a5e-702d-a3db-3051d801f5da</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a6-a972-708d-a853-d2a30ed225a0</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a8-ec27-7017-a737-6ab8916c91a5</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">Unknown error occurred. Error ID: 0199a8a9-30d1-7028-9030-25217b2b43a3</td><td class="text-end">1</td></tr>
+                  
+                </tbody></table>
+              </div>
+            </div>
+            <div class="col-12 col-lg-6">
+              <div class="small-note mb-1">errorSummary (top)</div>
+              <div class="table-responsive">
+                <table class="table table-sm mb-0"><tbody>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;validation&#39;, &#39;message&#39;: &#39;Request invalid (Status: 400).&#39;}</td><td class="text-end">71</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;bad_provider_configuration&#39;, &#39;message&#39;: &#39;Bad Provider configuration: Invalid type for provider response content. Expected string.&#39;}</td><td class="text-end">15</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;bad_provider_configuration&#39;, &#39;message&#39;: &#39;Bad Provider configuration: Request timed out&#39;}</td><td class="text-end">4</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a4-570d-70a9-aae0-280e8d8898f9&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8aa-612a-7028-bb09-6751fdfe08ae&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8ab-4d01-70e8-bad6-45a7ba238465&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a4-edf2-70d8-acbf-6af1a49bbbe1&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a4-52ba-7093-a9a1-57359e1db5ff&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a4-59d5-70d0-b58d-9835ff491b79&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a4-6cdf-70c5-85cb-c14016b2e97d&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a5-0cb0-700c-a2dd-87f6b7280d77&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a5-0de3-7068-8376-35c404caf022&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a89b-3072-7051-b413-be8d1bdd55db&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a1-940d-70ab-b578-97dc0f120b44&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a1-d1af-7007-8233-a6112a7972b6&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a4-5636-7021-a817-1756e9a00d3c&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a4-58a3-703f-ac77-b0221fe9cecf&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a4-eb8a-7008-8d89-ddc28f218482&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a5-0666-7072-b724-04e8c2958a6b&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a5-0a5e-702d-a3db-3051d801f5da&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a6-a972-708d-a853-d2a30ed225a0&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a8-ec27-7017-a737-6ab8916c91a5&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a9-30d1-7028-9030-25217b2b43a3&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a9-5f60-7054-95ab-b72b320d1f74&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a9-aca0-7082-87c6-76f7a7b43f1a&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8aa-77b0-70d5-a286-5947ef7e344c&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a4-5513-7006-8ace-910f86f23b87&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a4-589b-70ac-890a-f25d80488cff&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a4-5a89-70f4-b890-03bc23823fa8&#39;}</td><td class="text-end">1</td></tr>
+                  
+                  <tr><td class="text-break">{&#39;type&#39;: &#39;unknown&#39;, &#39;message&#39;: &#39;Unknown error occurred. Error ID: 0199a8a5-0cb9-70f9-89bd-806a0ccf4f16&#39;}</td><td class="text-end">1</td></tr>
+                  
+                </tbody></table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer mt-4 mb-3">
+    Generated by <code>campaign_run_analyzer_v2.py</code> (modern theme). Charts by Plotly.js (CDN). Styling by Bootstrap.
+  </div>
+
+</div>
+
+<script>
+  const DATA = {"by_provider": [{"name": "unknown", "total": 10461, "vulnerable": 1073, "rate": 0.10257145588375872}], "by_vector": [{"name": "scenario_nesting", "total": 1008, "vulnerable": 228, "rate": 0.2261904761904762}, {"name": "style_injection", "total": 434, "vulnerable": 67, "rate": 0.1543778801843318}, {"name": "payload_splitting", "total": 756, "vulnerable": 101, "rate": 0.1335978835978836}, {"name": "refusal_suppression", "total": 1169, "vulnerable": 155, "rate": 0.13259195893926431}, {"name": "fictional_context_change", "total": 1064, "vulnerable": 132, "rate": 0.12406015037593984}, {"name": "word_game", "total": 1715, "vulnerable": 184, "rate": 0.10728862973760933}, {"name": "crescendo", "total": 407, "vulnerable": 40, "rate": 0.09828009828009827}, {"name": "conditional_context_change", "total": 630, "vulnerable": 43, "rate": 0.06825396825396825}, {"name": "persuasive_adversarial", "total": 210, "vulnerable": 13, "rate": 0.06190476190476191}, {"name": "dan", "total": 231, "vulnerable": 11, "rate": 0.047619047619047616}, {"name": "flip", "total": 1134, "vulnerable": 40, "rate": 0.03527336860670194}, {"name": "math_prompt", "total": 1701, "vulnerable": 59, "rate": 0.03468547912992358}, {"name": "frame", "total": 1, "vulnerable": 0, "rate": 0.0}, {"name": "trolley", "total": 1, "vulnerable": 0, "rate": 0.0}], "by_pack": [{"name": "2025-10", "total": 10374, "vulnerable": 1072, "rate": 0.10333526122999807}, {"name": "unknown", "total": 87, "vulnerable": 1, "rate": 0.011494252873563218}], "by_converter": [{"name": "caesar", "total": 1494, "vulnerable": 247, "rate": 0.16532797858099063}, {"name": "repeat_token", "total": 1494, "vulnerable": 185, "rate": 0.12382864792503347}, {"name": "single_character", "total": 1494, "vulnerable": 177, "rate": 0.11847389558232932}, {"name": "unknown", "total": 1497, "vulnerable": 173, "rate": 0.11556446225784903}, {"name": "leetspeak", "total": 1494, "vulnerable": 149, "rate": 0.0997322623828648}, {"name": "base64", "total": 1494, "vulnerable": 98, "rate": 0.06559571619812583}, {"name": "unicode_confusable", "total": 1494, "vulnerable": 44, "rate": 0.029451137884872823}], "by_attack_converter": [{"name": "base64", "total": 10458, "vulnerable": 1073, "rate": 0.10260087970931345}, {"name": "caesar", "total": 10458, "vulnerable": 1073, "rate": 0.10260087970931345}, {"name": "leetspeak", "total": 10458, "vulnerable": 1073, "rate": 0.10260087970931345}, {"name": "repeat_token", "total": 10458, "vulnerable": 1073, "rate": 0.10260087970931345}, {"name": "single_character", "total": 10458, "vulnerable": 1073, "rate": 0.10260087970931345}, {"name": "unicode_confusable", "total": 10458, "vulnerable": 1073, "rate": 0.10260087970931345}], "by_intent_cat": [{"name": "harassment", "total": 1554, "vulnerable": 315, "rate": 0.20270270270270271}, {"name": "sexually explicit", "total": 392, "vulnerable": 66, "rate": 0.1683673469387755}, {"name": "violence / harm", "total": 4382, "vulnerable": 385, "rate": 0.0878594249201278}, {"name": "illegal acts", "total": 1526, "vulnerable": 123, "rate": 0.08060288335517693}, {"name": "toxicity / hate", "total": 1687, "vulnerable": 124, "rate": 0.07350326022525193}, {"name": "misinformation", "total": 833, "vulnerable": 59, "rate": 0.07082833133253301}, {"name": "unknown", "total": 87, "vulnerable": 1, "rate": 0.011494252873563218}], "by_severity": [{"name": "unknown", "total": 10461, "vulnerable": 1073, "rate": 0.10257145588375872}], "by_technique": [{"name": "static_content", "total": 10374, "vulnerable": 1072, "rate": 0.10333526122999807}, {"name": "dynamic_content", "total": 87, "vulnerable": 1, "rate": 0.011494252873563218}], "by_steps": [{"name": "10", "total": 1, "vulnerable": 0, "rate": 0.0}, {"name": "20", "total": 1, "vulnerable": 0, "rate": 0.0}, {"name": "11", "total": 1, "vulnerable": 0, "rate": 0.0}, {"name": "0", "total": 123, "vulnerable": 0, "rate": 0.0}, {"name": "1", "total": 10335, "vulnerable": 1073, "rate": 0.10382196419932269}], "meta": {"casi": 84.0, "ars": null, "cost": null, "rtp": null, "perf": null, "overall_vuln_rate": 0.10257145588375872}};
+
+  const THEME = {
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    font: {color: '#e7ecff', family: 'Inter, sans-serif'},
+    margin: {l: 50, r: 18, t: 40, b: 80}
+  };
+
+  function barRate(divId, rows, title, topN=15) {
+    const sorted = [...rows].sort((a,b)=> (b.rate-a.rate) || (b.total-a.total)).slice(0, topN);
+    const x = sorted.map(r=>r.name);
+    const y = sorted.map(r=>Math.round(r.rate*10000)/100);
+    const text = sorted.map(r=>`vuln ${r.vulnerable}/${r.total}`);
+    const trace = {type:'bar', x, y, text, marker:{color:'#6ea8fe'}, hovertemplate:'%{x}<br>%{y}%<br>%{text}<extra></extra>'};
+    const layout = {...THEME, title, yaxis:{title:'Vulnerability rate (%)', gridcolor:'rgba(255,255,255,.10)'}, xaxis:{tickangle: -30}};
+    Plotly.newPlot(divId, [trace], layout, {displayModeBar:false, responsive:true});
+  }
+
+  function barCount(divId, rows, title, topN=15) {
+    const sorted = [...rows].sort((a,b)=> (b.total-a.total)).slice(0, topN);
+    const x = sorted.map(r=>r.name);
+    const y = sorted.map(r=>r.total);
+    const trace = {type:'bar', x, y, marker:{color:'#22c55e'}, hovertemplate:'%{x}<br>%{y}<extra></extra>'};
+    const layout = {...THEME, title, yaxis:{title:'Count', gridcolor:'rgba(255,255,255,.10)'}, xaxis:{tickangle: -30}};
+    Plotly.newPlot(divId, [trace], layout, {displayModeBar:false, responsive:true});
+  }
+
+  function indicatorGauge(divId, value, title, opts={}){
+    const min = (opts.min ?? 0);
+    const max = (opts.max ?? 100);
+    const suffix = (opts.suffix ?? '');
+    const color = (opts.color ?? '#6ea8fe');
+    const steps = (opts.steps ?? [
+      {range:[min, min+(max-min)*0.6], color:'rgba(34,197,94,.18)'},
+      {range:[min+(max-min)*0.6, min+(max-min)*0.85], color:'rgba(251,191,36,.18)'},
+      {range:[min+(max-min)*0.85, max], color:'rgba(251,113,133,.18)'}
+    ]);
+
+    const trace = {
+      type: 'indicator',
+      mode: 'gauge+number',
+      value: (value ?? 0),
+      number: {suffix, font:{size: 34}},
+      title: {text: title, font:{size: 14, color:'rgba(231,236,255,.75)'}},
+      gauge: {
+        axis: {range: [min, max], tickwidth: 1, tickcolor: 'rgba(231,236,255,.4)'} ,
+        bar: {color},
+        bgcolor: 'rgba(0,0,0,0)',
+        borderwidth: 0,
+        steps,
+      }
+    };
+
+    const layout = {paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', margin:{l:20,r:20,t:50,b:20}, font:{color:'#e7ecff', family:'Inter, sans-serif'}};
+    Plotly.newPlot(divId, [trace], layout, {displayModeBar:false, responsive:true});
+  }
+
+  // Campaign-level gauges
+  indicatorGauge('gaugeVuln', Math.round((DATA.meta.overall_vuln_rate||0)*10000)/100, 'Overall vulnerability rate', {min:0, max:100, suffix:'%'});
+  indicatorGauge('gaugeCasi', DATA.meta.casi, 'CASI score', {min:0, max:100, color:'#6ea8fe'});
+  if (DATA.meta.ars !== null && DATA.meta.ars !== undefined) {
+    indicatorGauge('gaugeArs', DATA.meta.ars, 'ARS score', {min:0, max:100, color:'#22c55e'});
+  } else {
+    indicatorGauge('gaugeArs', 0, 'ARS score (not provided)', {min:0, max:100, color:'rgba(231,236,255,.25)'});
+  }
+  // Cost / RTP / Performance: show gauges with generic 0..100 if numeric
+  indicatorGauge('gaugeCost', DATA.meta.cost, 'Cost of Security', {min:0, max:100, color:'#fbbf24'});
+  indicatorGauge('gaugeRtp', DATA.meta.rtp, 'RTP ratio', {min:0, max:100, color:'#6ea8fe'});
+  indicatorGauge('gaugePerf', DATA.meta.perf, 'Avg performance', {min:0, max:100, color:'#22c55e'});
+
+  // Render charts
+  barRate('providerBar', DATA.by_provider, 'Provider vulnerability rate', 20);
+  barRate('vectorBar', DATA.by_vector, 'Attack vector vulnerability rate (Top)', 20);
+  barRate('packBar', DATA.by_pack, 'Attack pack vulnerability rate', 20);
+  barRate('convBar', DATA.by_converter, 'Converter vulnerability rate (results.converter)', 20);
+  barRate('attackConvBar', DATA.by_attack_converter || [], 'Converter vulnerability rate (attack.converters)', 20);
+  barRate('intentRateBar', DATA.by_intent_cat, 'Intent category vulnerability rate', 20);
+  barCount('intentBar', DATA.by_intent_cat, 'Intent category distribution (count)', 20);
+  barCount('sevBar', DATA.by_severity, 'Severity distribution (count)', 20);
+  barRate('techBar', DATA.by_technique, 'Technique vulnerability rate (Top)', 20);
+  // Steps line
+
+  function lineRate(divId, rows, title) {
+    const cleaned = rows
+      .filter(r => r.name !== 'unknown')
+      .map(r => ({...r, steps: parseInt(r.name,10)}))
+      .filter(r => !Number.isNaN(r.steps))
+      .sort((a,b)=>a.steps-b.steps);
+
+    const x = cleaned.map(r=>r.steps);
+    const y = cleaned.map(r=>Math.round(r.rate*10000)/100);
+    const size = cleaned.map(r=>Math.max(7, Math.min(18, Math.sqrt(r.total))));
+    const text = cleaned.map(r=>`total ${r.total}, vuln ${r.vulnerable}`);
+
+    const trace = {type:'scatter', mode:'lines+markers', x, y, text, marker:{size, color:'#6ea8fe'}, line:{color:'#6ea8fe'}, hovertemplate:'steps %{x}<br>%{y}%<br>%{text}<extra></extra>'};
+    const layout = {...THEME, title, xaxis:{title:'Conversation steps', gridcolor:'rgba(255,255,255,.10)'}, yaxis:{title:'Vulnerability rate (%)', gridcolor:'rgba(255,255,255,.10)'}};
+    Plotly.newPlot(divId, [trace], layout, {displayModeBar:false, responsive:true});
+  }
+  lineRate('stepsLine', DATA.by_steps, 'Conversation steps vs vulnerability rate');
+
+  // Heatmap-like table cell background
+  (function colorizeHeatTable(){
+    const cells = document.querySelectorAll('td[data-rate]');
+    cells.forEach(td => {
+      const r = parseFloat(td.getAttribute('data-rate'));
+      if (Number.isNaN(r)) return;
+      const a = Math.min(0.60, Math.max(0, r)) * 0.55;
+      td.style.backgroundColor = `rgba(251, 113, 133, ${a})`;
+      td.style.borderRadius = '8px';
+    });
+  })();
+</script>
+
+</body>
+</html>

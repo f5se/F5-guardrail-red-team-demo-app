@@ -46,6 +46,12 @@ body{
 }
 .layout.layout--with-guardrail{
   grid-template-columns: 260px minmax(0, 2.2fr) minmax(0, 1.3fr);
+  height: calc(100vh - 130px);
+  max-height: calc(100vh - 130px);
+  align-items: stretch;
+}
+.layout.layout--with-guardrail > *{
+  min-height: 0;
 }
 .sidebar{
   background:var(--sidebar);
@@ -86,6 +92,148 @@ body{
   color:#1e40af;
   font-weight:700;
 }
+
+/* 左侧：Menu + 攻击示例 竖直堆叠，高度受限时本列内可滚动，攻击面板内部也可滚动 */
+.sidebarStack{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  min-height:0;
+  height:100%;
+  overflow-y:auto;
+}
+.sidebarStack .sidebar{
+  flex-shrink:0;
+}
+
+/* 攻击示例独立面板：占满剩余高度，内容区在本区域内上下滚动 */
+.attackCard{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow);
+  flex:1 1 0;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+.attackPanel{
+  border-top:1px solid var(--border);
+  padding:10px 10px 12px;
+  display:flex;
+  flex-direction:column;
+  flex:1;
+  min-height:0;
+  overflow:hidden;
+}
+.attackPanelHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:6px;
+}
+.attackPanelTitle{
+  font-size:13px;
+  font-weight:800;
+  color:var(--muted);
+}
+.attackPanelToggle{
+  border:none;
+  background:transparent;
+  font-size:11px;
+  color:var(--muted);
+  cursor:pointer;
+  padding:2px 6px;
+  border-radius:999px;
+}
+.attackPanelToggle:hover{
+  background:#f3f4ff;
+  color:#4f46e5;
+}
+.attackPanelBody{
+  flex:1 1 0;
+  min-height:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+  padding-right:6px;
+  -webkit-overflow-scrolling:touch;
+}
+.attackEmpty{
+  font-size:12px;
+  color:var(--muted);
+  padding:6px 2px;
+}
+.attackCategory{
+  border-radius:10px;
+  border:1px solid #e5e7eb;
+  background:#f9fafb;
+  margin-bottom:8px;
+  overflow:hidden;
+}
+.attackCategoryHeader{
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:6px 8px;
+  border:none;
+  background:#f3f4ff;
+  font-size:12px;
+  font-weight:700;
+  color:#4b5563;
+  cursor:pointer;
+}
+.attackCategoryHeader:hover{
+  background:#e0e7ff;
+}
+.attackCategoryName{
+  flex:1;
+  text-align:left;
+}
+.attackCategoryIcon{
+  font-size:10px;
+  margin-left:6px;
+}
+.attackList{
+  padding:4px 4px 6px;
+  background:#ffffff;
+}
+.attackItem{
+  width:100%;
+  text-align:left;
+  border:none;
+  background:transparent;
+  border-radius:8px;
+  padding:6px 8px;
+  font-size:12px;
+  color:#111827;
+  cursor:pointer;
+  transition:background .15s, transform .1s;
+}
+.attackItem:hover{
+  background:#eef2ff;
+  transform:translateY(-1px);
+}
+.attackItem:active{
+  transform:translateY(0);
+}
+
+/* 攻击示例 hover 浮层（统一卡片风格） */
+.attackTooltip{
+  position:fixed;
+  z-index:1000;
+  max-width:420px;
+  padding:10px 12px;
+  border-radius:12px;
+  background:#ffffff;
+  border:1px solid #e2e8f0;
+  box-shadow:0 12px 30px rgba(15,23,42,.18);
+  font-size:12px;
+  line-height:1.5;
+  color:#0f172a;
+  white-space:pre-wrap;
+}
 .crumb{
   color:var(--muted);
   font-size:13px;
@@ -100,6 +248,25 @@ body{
 }
 .mainCard{
   min-width:0;
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+}
+.mainCard > .cardHeader,
+.mainCard > .engineRow{
+  flex-shrink:0;
+}
+.mainCard > #chatView.chat{
+  flex:1 1 0;
+  min-height:0;
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+}
+.mainCard > .panel{
+  flex:0 0 auto;
+  min-height:auto;
+  overflow:visible;
 }
 .cardHeader{
   display:flex;
@@ -134,6 +301,21 @@ body{
   border:1px solid #e0e7ff;
   font-weight:700;
 }
+/* Enterprise KB Skill 状态突出显示：扁平底边色条 */
+#kbSkillBadge{
+  border-bottom:1px solid #94a3b8;
+  box-shadow:none;
+}
+#kbSkillBadge.kbSkillOn{
+  border-bottom-color:#10b981;
+  background:#ecfdf5;
+  color:#047857;
+}
+#kbSkillBadge.kbSkillOff{
+  border-bottom-color:#94a3b8;
+  background:#f1f5f9;
+  color:#475569;
+}
 .sub{
   font-size:12px;
   color:var(--muted);
@@ -149,14 +331,17 @@ body{
 }
 
 .chat{
-  height: calc(100vh - 280px);
-  min-height: 520px;
+  flex:1;
+  min-height: 200px;
   display:flex;
   flex-direction:column;
 }
+.chat .composer{
+  flex-shrink:0;
+}
 .messages{
   flex:1;
-  min-height: 460px;
+  min-height: 0;
   padding:16px;
   overflow:auto;
   background:
@@ -269,7 +454,7 @@ body{
 textarea{
   flex:1;
   resize:vertical;
-  min-height:44px;
+  min-height:100px;
   max-height:140px;
   padding:10px 12px;
   border-radius:14px;
@@ -357,6 +542,7 @@ code{
 
 @media (max-width: 900px){
   .layout{ grid-template-columns: 1fr; }
+  .layout.layout--with-guardrail{ max-height: none; }
   .chat{ height:auto; min-height: 70vh; }
   .messages{ min-height: 52vh; }
 }
@@ -368,7 +554,7 @@ code{
 .guardrailCard{
   display:flex;
   flex-direction:column;
-  max-height:calc(100vh - 180px);
+  min-height:0;
 }
 .guardrailHeader{
   padding:14px 16px 10px;
@@ -683,8 +869,7 @@ code{
 ========================= */
 
 #redteamView{
-  max-height:calc(100vh - 180px);
-  overflow-y:auto;
+  overflow-y:visible;
 }
 .pipeline-header{
   display:flex;
@@ -1345,6 +1530,28 @@ code{
   background:#fffbeb;
   color:#d97706;
   border:2px solid #fde68a;
+}
+
+/* Red Team custom report link card */
+.report-link-card{
+  margin-top:12px;
+  padding:10px 14px;
+  border-radius:12px;
+  border:1px dashed #93c5fd;
+  background:#eff6ff;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  font-size:13px;
+}
+.report-link-card a{
+  color:#1d4ed8;
+  font-weight:700;
+  text-decoration:none;
+}
+.report-link-card a:hover{
+  text-decoration:underline;
 }
 
 /* Pipeline disclaimer (bottom of Red Team view) */
