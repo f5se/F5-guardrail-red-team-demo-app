@@ -4,7 +4,7 @@
   "toxic_threshold": 0.75,
   "pi_threshold": 0.7,
   "agent_skill_enabled": true,
-  "f5_guardrail_only": true,
+  "f5_guardrail_only": false,
   "debug_guardrail_raw_enabled": false,
   "kb_dir": "./enterprise_kb",
   "agent_max_steps": 4,
