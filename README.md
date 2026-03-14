@@ -9,28 +9,18 @@
 感谢：本App是在James Lee的Demo基础上进行的改进，包括但不限于：
 
 1. 修正了多轮对话中的bug
-
 2. 修正了对Redacted消息的处理问题
-
 3. 修正界面布局与窗口适应性问题
-
 4. 增加同时显示F5 Guardrail的scanner处理结果能力
-
 5. 增加了Skills能力，可随时增加新的Skills并自动注册Skill
-
-6. 增加攻击场景示例模板
-
-7. 增加了HF的代理下载能力
-
-8. 增加了是否使用所有引擎开关
-
-9. 增加了后端原始响应json调试开关
-
-10. 将env文件直接加载，无需设置环境变量
-
-11. 增加了前端Markdown响应的渲染
-
-12. 增加了F5 Red Team与DevSecOps的集成流水线演示。
+6. 增加了Inline集成与OOB集成动态可视化展现
+7. 增加攻击场景示例模板
+8. 增加了HF的代理下载能力
+9. 增加了是否使用所有引擎开关
+10. 增加了后端原始响应json调试开关
+11. 将env文件直接加载，无需设置环境变量
+12. 增加了前端Markdown响应的渲染
+13. 增加了F5 Red Team与DevSecOps的集成流水线演示。
 
    注意：考虑到实际Red Team耗时及环境可行性，这里的Red Team API集成是mock模拟的，并不实际在SaaS端创建真实对象。
 
@@ -85,7 +75,7 @@ source .venv/bin/activate   # Linux/macOS
 2. **其他依赖**
 
 ```bash
-pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch
+pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf
 ```
 
 ---
@@ -95,6 +85,7 @@ pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch
 在项目根目录、已激活虚拟环境且 `.env` 已配置的前提下：
 
 ```bash
+export TRANSFORMERS_OFFLINE=1
 python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 

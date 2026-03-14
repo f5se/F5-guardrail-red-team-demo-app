@@ -18,7 +18,8 @@
           <div class="sidebarHeader">Menu</div>
           <div class="nav">
             <button class="navBtn active" data-view="CHAT" id="btnChat">💬 AI Chatbot/Agent</button>
-            <button class="navBtn" data-view="REDTEAM" id="btnRedTeam">🔴 Red Team</button>
+            <button class="navBtn" data-view="REDTEAM" id="btnRedTeam">🎯 Red Team</button>
+            <button class="navBtn" data-view="GUARDRAIL_INTEGRATION" id="btnGuardrailIntegration">🛡️ Guardrail Integration</button>
             <button class="navBtn" data-view="SETTINGS" id="btnSettings">⚙️ Settings</button>
           </div>
         </aside>
@@ -441,6 +442,128 @@
           </p>
         </div>
 
+        <!-- Guardrail Integration View -->
+        <div class="panel guardrail-integration-panel" id="guardrailIntegrationView" style="display:none;">
+          <div class="gint-header">
+            <div>
+              <div class="gint-title">Guardrail Integration <span class="zh">Guardrail 集成架构演示</span></div>
+              <div class="gint-sub">F5 AI Guardrail 与 LLM Provider 之间的请求与安全检查流程 <span class="zh">· Inline 串联模式</span></div>
+            </div>
+            <div class="gint-mode-switch">
+              <button type="button" class="gint-mode-btn active" data-mode="inline" id="gintModeInline">Inline <span class="zh">串联</span></button>
+              <button type="button" class="gint-mode-btn" data-mode="oob" id="gintModeOob" disabled title="Coming later">OOB <span class="zh">旁路</span></button>
+            </div>
+          </div>
+
+          <div class="gint-request-panel">
+            <div class="gint-panel-title">Request Panel <span class="zh">请求面板</span></div>
+            <div class="gint-prompt-row">
+              <textarea id="gintPrompt" class="gint-prompt-input" placeholder="Enter prompt to send through Guardrail..." rows="3"></textarea>
+              <button type="button" id="gintSend" class="gint-send-btn">Send <span class="zh">发送</span></button>
+            </div>
+            <div class="gint-response-wrap">
+              <div class="gint-response-label">Response <span class="zh">响应</span></div>
+              <div id="gintResponse" class="gint-response-box">—</div>
+            </div>
+          </div>
+
+          <div class="gint-flow-section">
+            <div class="gint-panel-title">AI Flow Visualization <span class="zh">请求流可视化</span></div>
+            <div class="gint-flow-container" id="gintFlowContainer">
+              <div class="gint-flow-diagram" id="gintFlowDiagram">
+                <div class="gint-node gint-node-client" id="gintNodeClient">
+                  <span class="gint-node-label">AI Client</span>
+                </div>
+                <div class="gint-edge-col">
+                  <div class="gint-edge gint-edge-observed gint-edge-c2g" id="edgeC2G" data-direction="forward">
+                    <svg class="gint-edge-svg" viewBox="0 0 100 24" preserveAspectRatio="none">
+                      <defs><marker id="arrowEndC2G" markerWidth="6" markerHeight="4" refX="5.5" refY="2" orient="auto"><path d="M 0 0 L 6 2 L 0 4 Z" fill="currentColor" /></marker></defs>
+                      <path d="M 0 12 L 100 12" fill="none" stroke-width="2" stroke-linecap="round" stroke="currentColor" marker-end="url(#arrowEndC2G)" />
+                    </svg>
+                    <span class="gint-edge-badge" id="edgeC2GBadge">Network unreachable <span class="zh">网络不通</span></span>
+                    <div class="gint-packet" id="packetC2G"></div>
+                  </div>
+                  <div class="gint-edge gint-edge-observed gint-edge-g2c" id="edgeG2C" data-direction="back">
+                    <svg class="gint-edge-svg" viewBox="0 0 100 24" preserveAspectRatio="none">
+                      <path class="gint-edge-line" d="M 100 12 L 6 12" fill="none" stroke-width="2" stroke-linecap="round" stroke="currentColor" />
+                      <path class="gint-edge-arrow" d="M 0 12 L 6 9 L 6 15 Z" fill="currentColor" />
+                    </svg>
+                    <div class="gint-packet" id="packetG2C"></div>
+                  </div>
+                </div>
+                <div class="gint-node gint-node-guardrail" id="gintNodeGuardrail">
+                  <span class="gint-node-label">F5 Guardrail</span>
+                  <span class="gint-node-status" id="gintGuardrailStatus"></span>
+                </div>
+                <div class="gint-edge-col">
+                  <div class="gint-edge gint-edge-inferred gint-edge-g2p" id="edgeG2P" data-direction="forward">
+                    <svg class="gint-edge-svg" viewBox="0 0 100 24" preserveAspectRatio="none">
+                      <defs><marker id="arrowEndG2P" markerWidth="6" markerHeight="4" refX="5.5" refY="2" orient="auto"><path d="M 0 0 L 6 2 L 0 4 Z" fill="currentColor" /></marker></defs>
+                      <path d="M 0 12 L 100 12" fill="none" stroke-width="2" stroke-linecap="round" stroke-dasharray="5 4" stroke="currentColor" marker-end="url(#arrowEndG2P)" />
+                    </svg>
+                    <div class="gint-packet" id="packetG2P"></div>
+                  </div>
+                  <div class="gint-edge gint-edge-inferred gint-edge-p2g" id="edgeP2G" data-direction="back">
+                    <svg class="gint-edge-svg" viewBox="0 0 100 24" preserveAspectRatio="none">
+                      <path class="gint-edge-line" d="M 100 12 L 6 12" fill="none" stroke-width="2" stroke-linecap="round" stroke-dasharray="5 4" stroke="currentColor" />
+                      <path class="gint-edge-arrow" d="M 0 12 L 6 9 L 6 15 Z" fill="currentColor" />
+                    </svg>
+                    <div class="gint-packet" id="packetP2G"></div>
+                  </div>
+                </div>
+                <div class="gint-node gint-node-provider" id="gintNodeProvider">
+                  <span class="gint-node-label">LLM Provider</span>
+                </div>
+              </div>
+            </div>
+            <div class="gint-flow-legend">
+              <span class="gint-legend-item"><span class="gint-legend-line solid"></span> Observed (Client ↔ Guardrail)</span>
+              <span class="gint-legend-item"><span class="gint-legend-line dashed"></span> Inferred (Guardrail ↔ Provider)</span>
+            </div>
+            <div class="gint-flow-controls">
+              <button type="button" id="gintReplay" class="gint-ctrl-btn">Replay <span class="zh">重播</span></button>
+              <button type="button" id="gintNextStep" class="gint-ctrl-btn">Next Step &gt;</button>
+              <label class="gint-speed-label">Speed <span class="zh">速度</span>:
+                <select id="gintSpeed">
+                  <option value="1">1x</option>
+                  <option value="2">2x</option>
+                  <option value="4">4x</option>
+                </select>
+              </label>
+            </div>
+            <p class="gint-flow-arch-desc" id="gintFlowArchDesc" aria-live="polite">
+              <span class="en">In Inline mode, F5 AI Guardrail proxies client requests; end-to-end latency includes LLM communication and LLM response time.</span>
+              <span class="zh">串联模式下，F5 AI Guardrail 代理用户端请求，处理等待时间包含了 LLM 的通信及 LLM 响应时间。</span>
+            </p>
+          </div>
+
+          <div class="gint-decision-panel">
+            <div class="gint-panel-title">Guardrail Decision Panel <span class="zh">安全检测结果</span></div>
+            <div class="gint-decision-content" id="gintDecisionContent">
+              <div class="gint-decision-block">
+                <div class="gint-decision-row">
+                  <span class="gint-decision-label">Request Inspection</span>
+                  <span class="gint-decision-value" id="gintRequestInspection">—</span>
+                </div>
+                <div class="gint-decision-failed gint-failed-under" id="gintRequestFailedWrap">
+                  <div class="gint-failed-title">Failed Scanner</div>
+                  <div id="gintRequestFailedDetail" class="gint-failed-detail">—</div>
+                </div>
+              </div>
+              <div class="gint-decision-block">
+                <div class="gint-decision-row">
+                  <span class="gint-decision-label">Response Inspection</span>
+                  <span class="gint-decision-value" id="gintResponseInspection">—</span>
+                </div>
+                <div class="gint-decision-failed gint-failed-under" id="gintResponseFailedWrap">
+                  <div class="gint-failed-title">Failed Scanner</div>
+                  <div id="gintResponseFailedDetail" class="gint-failed-detail">—</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </section>
 
       <!-- F5 Guardrail Scanner Result Panel -->
@@ -495,6 +618,7 @@
   <script>
     // 从后端注入攻击示例列表，供前端 JS 使用
     window.ATTACK_PRESETS = {{ attack_presets_json | safe }};
+    window.GUARDRAIL_INTEGRATION_PRESETS = {{ guardrail_integration_presets_json | safe }};
   </script>
   <script src="/static/js/app.js?v=20260308-7"></script>
 </body>

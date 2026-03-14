@@ -97,6 +97,7 @@ templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 # Attack presets config
 # -----------------------------
 ATTACK_PRESETS_FILE = os.path.join(BASE_DIR, "config", "attack-presets.json")
+GUARDRAIL_INTEGRATION_PRESETS_FILE = os.path.join(BASE_DIR, "config", "guardrail-integration-presets.json")
 
 
 def load_attack_presets() -> List[dict]:
@@ -136,6 +137,41 @@ def load_attack_presets() -> List[dict]:
         return []
 
 
+def load_guardrail_integration_presets() -> List[dict]:
+    """
+    Load attack presets for Guardrail Integration view from config/guardrail-integration-presets.json.
+    Same structure as attack-presets.json; fail-safe returns empty list on error.
+    """
+    try:
+        if not os.path.exists(GUARDRAIL_INTEGRATION_PRESETS_FILE):
+            return []
+        with open(GUARDRAIL_INTEGRATION_PRESETS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            return []
+        presets: List[dict] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            if item.get("enabled", True) is False:
+                continue
+            title = str(item.get("title") or "").strip()
+            prompt = str(item.get("prompt") or "").strip()
+            if not title or not prompt:
+                continue
+            presets.append(
+                {
+                    "id": str(item.get("id") or title),
+                    "title": title,
+                    "prompt": prompt,
+                    "category": str(item.get("category") or "未分类"),
+                }
+            )
+        return presets
+    except Exception:
+        return []
+
+
 # -----------------------------
 # In-memory conversation store
 # conversation_id -> deque of turns (strings)
@@ -158,13 +194,13 @@ class ChatIn(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     attack_presets = load_attack_presets()
-    # Inject as JSON string for frontend usage
-    attack_presets_json = json.dumps(attack_presets, ensure_ascii=False)
+    guardrail_integration_presets = load_guardrail_integration_presets()
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
-            "attack_presets_json": attack_presets_json,
+            "attack_presets_json": json.dumps(attack_presets, ensure_ascii=False),
+            "guardrail_integration_presets_json": json.dumps(guardrail_integration_presets, ensure_ascii=False),
         },
     )
 
@@ -621,36 +657,7 @@ async def api_chat(payload: ChatIn):
         except Exception:
             pass
 
-    guardrail_payload = None
-    if isinstance(guardrail_raw, dict):
-        # Safely JSON-encode the substructure to strip non-serializable
-        # objects such as UUID, then decode back to a plain dict.
-        try:
-            raw_scanners = guardrail_raw.get("scanners")
-            raw_sub = {
-                "result": guardrail_raw.get("result"),
-                "scanners": raw_scanners,
-            }
-            safe_sub = json.loads(json.dumps(raw_sub, default=str))
-            guardrail_result = safe_sub.get("result") or {}
-            guardrail_scanners = safe_sub.get("scanners") or {}
-
-            # Flatten to the inner scanners map if present; this makes the
-            # frontend lookup logic simpler and more robust.
-            scanners_map = guardrail_scanners
-            if isinstance(guardrail_scanners, dict):
-                inner = guardrail_scanners.get("scanners")
-                if isinstance(inner, dict):
-                    scanners_map = inner
-
-            guardrail_payload = {
-                "result": guardrail_result,
-                "scanners": scanners_map or {},
-            }
-        except Exception:
-            # If anything goes wrong during safe conversion, fall back to
-            # omitting the guardrail payload so the main chat still works.
-            guardrail_payload = None
+    guardrail_payload = _build_guardrail_payload(guardrail_raw)
 
     response_body = {
         "reply": reply,
@@ -667,6 +674,46 @@ async def api_chat(payload: ChatIn):
         response_body["guardrail"] = guardrail_payload
 
     return JSONResponse(response_body)
+
+
+def _build_guardrail_payload(guardrail_raw: Optional[dict]) -> Optional[dict]:
+    """Build frontend-safe guardrail payload from raw F5 response. Used by api_chat and api_guardrail_scan."""
+    if not isinstance(guardrail_raw, dict):
+        return None
+    try:
+        raw_scanners = guardrail_raw.get("scanners")
+        raw_sub = {"result": guardrail_raw.get("result"), "scanners": raw_scanners}
+        safe_sub = json.loads(json.dumps(raw_sub, default=str))
+        guardrail_result = safe_sub.get("result") or {}
+        guardrail_scanners = safe_sub.get("scanners") or {}
+        scanners_map = guardrail_scanners
+        if isinstance(guardrail_scanners, dict):
+            inner = guardrail_scanners.get("scanners")
+            if isinstance(inner, dict):
+                scanners_map = inner
+        return {"result": guardrail_result, "scanners": scanners_map or {}}
+    except Exception:
+        return None
+
+
+class GuardrailScanIn(BaseModel):
+    message: str
+
+
+@app.post("/api/guardrail-scan")
+async def api_guardrail_scan(payload: GuardrailScanIn):
+    """Dedicated endpoint for Guardrail Integration view: only calls F5 Guardrail, returns full guardrail JSON for flow visualization."""
+    prompt = (payload.message or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="message is required")
+    send_kwargs = build_send_kwargs()
+    reply, guardrail_raw = await call_f5_guardrail(prompt, send_kwargs)
+    guardrail_payload = _build_guardrail_payload(guardrail_raw)
+    return JSONResponse({
+        "reply": reply,
+        "guardrail": guardrail_payload or {},
+    })
+
 
 @app.get("/api/settings")
 async def get_settings():

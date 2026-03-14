@@ -12,7 +12,13 @@ const attackCardEl = document.getElementById("attackCard");
 const attackPanelBodyEl = document.getElementById("attackPanelBody");
 const attackPanelToggleEl = document.getElementById("attackPanelToggle");
 const attackPresets = Array.isArray(window.ATTACK_PRESETS) ? window.ATTACK_PRESETS : [];
+const guardrailIntegrationPresets = Array.isArray(window.GUARDRAIL_INTEGRATION_PRESETS) ? window.GUARDRAIL_INTEGRATION_PRESETS : [];
 let attackTooltipEl = null;
+let activeView = "CHAT";
+
+function getCurrentAttackPresets() {
+  return activeView === "GUARDRAIL_INTEGRATION" ? guardrailIntegrationPresets : attackPresets;
+}
 
 function ensureAttackTooltip() {
   if (attackTooltipEl) return attackTooltipEl;
@@ -27,19 +33,22 @@ function ensureAttackTooltip() {
 function renderAttackPresets() {
   if (!attackPanelBodyEl) return;
 
+  var presets = getCurrentAttackPresets();
   attackPanelBodyEl.innerHTML = "";
 
-  if (!attackPresets.length) {
+  if (!presets.length) {
     const empty = document.createElement("div");
     empty.className = "attackEmpty";
-    empty.textContent = "当前没有可用的攻击示例，请在 config/attack-presets.json 中配置。";
+    empty.textContent = activeView === "GUARDRAIL_INTEGRATION"
+      ? "当前没有可用的攻击示例，请在 config/guardrail-integration-presets.json 中配置。"
+      : "当前没有可用的攻击示例，请在 config/attack-presets.json 中配置。";
     attackPanelBodyEl.appendChild(empty);
     return;
   }
 
   // 分组：按 category 聚合
   const groups = {};
-  attackPresets.forEach(p => {
+  presets.forEach(p => {
     const cat = (p.category || "未分类").toString();
     if (!groups[cat]) groups[cat] = [];
     groups[cat].push(p);
@@ -112,10 +121,22 @@ function renderAttackPresets() {
       });
 
       itemEl.addEventListener("click", (ev) => {
-        if (!inputEl) return;
         const text = String(preset.prompt || "");
         if (!text) return;
 
+        if (activeView === "GUARDRAIL_INTEGRATION") {
+          const gintPromptEl = document.getElementById("gintPrompt");
+          if (gintPromptEl) {
+            if (ev.shiftKey && gintPromptEl.value) {
+              gintPromptEl.value = gintPromptEl.value.replace(/\s*$/, "") + "\n\n" + text;
+            } else {
+              gintPromptEl.value = text;
+            }
+            gintPromptEl.focus();
+          }
+          return;
+        }
+        if (!inputEl) return;
         // 默认覆盖；按住 Shift 追加
         if (ev.shiftKey && inputEl.value) {
           inputEl.value = inputEl.value.replace(/\s*$/,"") + "\n\n" + text;
@@ -398,7 +419,6 @@ function updateGuardrailPanel(guardrail){
   guardrailListEl.innerHTML = html;
 }
 
-let activeView = "CHAT";
 let isSending = false;
 
 function uuidv4(){
@@ -443,6 +463,7 @@ toggleMultiTurnEl.addEventListener("change", () => {
 });
 
 const redteamView = document.getElementById("redteamView");
+const guardrailIntegrationView = document.getElementById("guardrailIntegrationView");
 const engineRow = document.getElementById("engineRow");
 const layoutEl = document.querySelector(".layout");
 
@@ -453,6 +474,7 @@ function setActiveView(view){
   chatView.style.display = "none";
   settingsView.style.display = "none";
   redteamView.style.display = "none";
+  if (guardrailIntegrationView) guardrailIntegrationView.style.display = "none";
 
   const chatOnlyEls = [engineRow, modeBadgeEl, kbSkillBadgeEl, btnClear];
   chatOnlyEls.forEach(el => { if(el) el.style.display = "none"; });
@@ -480,8 +502,14 @@ function setActiveView(view){
       chatTitleEl.textContent = "Red Team Pipeline";
       redteamView.style.display = "";
       if (subEl) subEl.textContent = "Simulated DevSecOps pipeline with F5 AI Red Team";
+    } else if (view === "GUARDRAIL_INTEGRATION"){
+      chatTitleEl.textContent = "Guardrail Integration";
+      if (guardrailIntegrationView) guardrailIntegrationView.style.display = "";
+      if (attackCardEl) attackCardEl.style.display = "";
+      if (subEl) subEl.textContent = "F5 AI Guardrail 与 LLM Provider 集成架构与安全检查流程演示";
     }
   }
+  if (view === "CHAT" || view === "GUARDRAIL_INTEGRATION") renderAttackPresets();
 }
 navButtons.forEach(btn => {
   btn.addEventListener("click", () => setActiveView(btn.dataset.view));
@@ -1368,4 +1396,474 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
     window.open("/redteam-report/campaign_run_report_example.html", "_blank", "noopener");
   });
 
+})();
+
+// =========================
+// GUARDRAIL INTEGRATION VIEW
+// =========================
+(function(){
+  const gintPrompt = document.getElementById("gintPrompt");
+  const gintSend = document.getElementById("gintSend");
+  const gintResponse = document.getElementById("gintResponse");
+  const gintGuardrailStatus = document.getElementById("gintGuardrailStatus");
+  const gintRequestInspection = document.getElementById("gintRequestInspection");
+  const gintResponseInspection = document.getElementById("gintResponseInspection");
+  const gintRequestFailedWrap = document.getElementById("gintRequestFailedWrap");
+  const gintRequestFailedDetail = document.getElementById("gintRequestFailedDetail");
+  const gintResponseFailedWrap = document.getElementById("gintResponseFailedWrap");
+  const gintResponseFailedDetail = document.getElementById("gintResponseFailedDetail");
+  const gintReplay = document.getElementById("gintReplay");
+  const gintNextStep = document.getElementById("gintNextStep");
+  const gintSpeed = document.getElementById("gintSpeed");
+
+  const gintNodeClient = document.getElementById("gintNodeClient");
+  const gintNodeGuardrail = document.getElementById("gintNodeGuardrail");
+  const gintNodeProvider = document.getElementById("gintNodeProvider");
+  const edgeC2G = document.getElementById("edgeC2G");
+  const edgeG2C = document.getElementById("edgeG2C");
+  const edgeG2P = document.getElementById("edgeG2P");
+  const edgeP2G = document.getElementById("edgeP2G");
+  const edgeC2GBadge = document.getElementById("edgeC2GBadge");
+  const packetC2G = document.getElementById("packetC2G");
+  const packetG2C = document.getElementById("packetG2C");
+  const packetG2P = document.getElementById("packetG2P");
+  const packetP2G = document.getElementById("packetP2G");
+  const gintFlowArchDesc = document.getElementById("gintFlowArchDesc");
+  const gintModeInline = document.getElementById("gintModeInline");
+  const gintModeOob = document.getElementById("gintModeOob");
+
+  const ARCH_DESC_INLINE = {
+    en: "In Inline mode, F5 AI Guardrail proxies client requests; end-to-end latency includes LLM communication and LLM response time.",
+    zh: "串联模式下，F5 AI Guardrail 代理用户端请求，处理等待时间包含了 LLM 的通信及 LLM 响应时间。"
+  };
+  const ARCH_DESC_OOB = { en: "", zh: "" };
+
+  function setGintArchDescByMode(mode) {
+    if (!gintFlowArchDesc) return;
+    var content = mode === "oob" ? ARCH_DESC_OOB : ARCH_DESC_INLINE;
+    gintFlowArchDesc.innerHTML = (content.en ? "<span class=\"en\">" + content.en + "</span>" : "") +
+      (content.zh ? "<span class=\"zh\">" + content.zh + "</span>" : "");
+  }
+
+  const STAGE_MS = 650;
+  const STAGES = ["c2g", "request_check", "g2p", "p2g", "response_check", "g2c"];
+
+  let lastTrace = [];
+  let lastGuardrail = null;
+  let lastReply = "";
+  let animTimeout = null;
+  let currentStepIndex = 0;
+
+  function buildTraceFromGuardrail(guardrail) {
+    if (!guardrail || !guardrail.result) return [];
+    const result = guardrail.result;
+    const outcome = (result.outcome || "").toString().toLowerCase();
+    const scannerResults = Array.isArray(result.scannerResults) ? result.scannerResults : [];
+    const hasRequestFailed = scannerResults.some(r =>
+      (r.outcome || "").toString().toLowerCase() === "failed" &&
+      (r.scanDirection || r.direction || "").toString().toLowerCase() === "request"
+    );
+    const hasResponseFailed = scannerResults.some(r =>
+      (r.outcome || "").toString().toLowerCase() === "failed" &&
+      (r.scanDirection || r.direction || "").toString().toLowerCase() === "response"
+    );
+
+    if (outcome === "blocked" && hasRequestFailed) {
+      return [
+        { stage: "c2g", status: "success" },
+        { stage: "request_check", status: "blocked" },
+        { stage: "g2p", status: "idle" },
+        { stage: "p2g", status: "idle" },
+        { stage: "response_check", status: "idle" },
+        { stage: "g2c", status: "success" }
+      ];
+    }
+    if (outcome === "blocked" && hasResponseFailed) {
+      return [
+        { stage: "c2g", status: "success" },
+        { stage: "request_check", status: "success" },
+        { stage: "g2p", status: "inferred" },
+        { stage: "p2g", status: "inferred" },
+        { stage: "response_check", status: "blocked" },
+        { stage: "g2c", status: "success" }
+      ];
+    }
+    return [
+      { stage: "c2g", status: "success" },
+      { stage: "request_check", status: "success" },
+      { stage: "g2p", status: "inferred" },
+      { stage: "p2g", status: "inferred" },
+      { stage: "response_check", status: "success" },
+      { stage: "g2c", status: "success" }
+    ];
+  }
+
+  function formatFailedScanner(r) {
+    const name = (r.scannerVersionMeta && r.scannerVersionMeta.name) || (r.scannerId || "").toString() || "—";
+    const dir = (r.scanDirection || r.direction || "").toString();
+    const outcome = (r.outcome || "").toString();
+    return "Scanner: " + name + "\nDirection: " + dir + "\nOutcome: " + outcome;
+  }
+
+  function updateDecisionPanel(guardrail) {
+    if (!guardrail || !guardrail.result) return;
+    const result = guardrail.result;
+    const scannerResults = Array.isArray(result.scannerResults) ? result.scannerResults : [];
+    const requestFailedList = scannerResults.filter(r =>
+      (r.outcome || "").toString().toLowerCase() === "failed" &&
+      (r.scanDirection || r.direction || "").toString().toLowerCase() === "request"
+    );
+    const responseFailedList = scannerResults.filter(r =>
+      (r.outcome || "").toString().toLowerCase() === "failed" &&
+      (r.scanDirection || r.direction || "").toString().toLowerCase() === "response"
+    );
+    const requestFailed = requestFailedList.length > 0;
+    const responseFailed = responseFailedList.length > 0;
+
+    if (gintRequestInspection) {
+      gintRequestInspection.textContent = requestFailed ? "✖ Blocked" : "✔ Passed";
+      gintRequestInspection.className = "gint-decision-value " + (requestFailed ? "fail" : "pass");
+    }
+    if (gintResponseInspection) {
+      if (requestFailed) {
+        gintResponseInspection.textContent = "N/A";
+        gintResponseInspection.className = "gint-decision-value na";
+      } else {
+        gintResponseInspection.textContent = responseFailed ? "✖ Blocked" : "✔ Passed";
+        gintResponseInspection.className = "gint-decision-value " + (responseFailed ? "fail" : "pass");
+      }
+    }
+
+    if (gintRequestFailedWrap && gintRequestFailedDetail) {
+      if (requestFailedList.length > 0) {
+        gintRequestFailedWrap.style.display = "block";
+        gintRequestFailedDetail.textContent = requestFailedList.map(formatFailedScanner).join("\n\n");
+      } else {
+        gintRequestFailedWrap.style.display = "none";
+        gintRequestFailedDetail.textContent = "—";
+      }
+    }
+    if (gintResponseFailedWrap && gintResponseFailedDetail) {
+      if (responseFailedList.length > 0) {
+        gintResponseFailedWrap.style.display = "block";
+        gintResponseFailedDetail.textContent = responseFailedList.map(formatFailedScanner).join("\n\n");
+      } else {
+        gintResponseFailedWrap.style.display = "none";
+        gintResponseFailedDetail.textContent = "—";
+      }
+    }
+  }
+
+  function resetFlowVisual() {
+    [edgeC2G, edgeG2C, edgeG2P, edgeP2G].forEach(el => { if (el) el.classList.remove("active", "success", "blocked", "network-error", "idle"); });
+    [packetC2G, packetG2C, packetG2P, packetP2G].forEach(el => {
+      if (!el) return;
+      el.classList.remove("anim", "anim-back");
+      el.style.left = "";
+      el.style.opacity = "0";
+    });
+    if (gintGuardrailStatus) gintGuardrailStatus.textContent = "";
+    if (gintNodeGuardrail) gintNodeGuardrail.classList.remove("state-success", "state-blocked");
+    if (gintNodeClient) gintNodeClient.classList.remove("sending", "sent", "received");
+    if (gintNodeProvider) gintNodeProvider.classList.remove("state-idle", "received", "sent", "receiving", "sending");
+    currentStepIndex = 0;
+  }
+
+  function speedMultiplier() {
+    const v = gintSpeed && gintSpeed.value ? Number(gintSpeed.value) : 1;
+    return Math.max(0.25, Math.min(4, v));
+  }
+
+  function runPacketAnim(edgeEl, packetEl, fromStartToEnd, durationMs) {
+    if (!edgeEl || !packetEl) return Promise.resolve();
+    const rect = edgeEl.getBoundingClientRect();
+    const w = rect.width;
+    packetEl.style.transition = "none";
+    packetEl.style.opacity = "0";
+    if (fromStartToEnd) {
+      packetEl.style.left = "0%";
+    } else {
+      packetEl.style.left = "100%";
+    }
+    packetEl.offsetHeight;
+    packetEl.style.opacity = "1";
+    packetEl.classList.add("anim");
+    if (!fromStartToEnd) packetEl.classList.add("anim-back");
+    packetEl.style.transition = "left " + durationMs + "ms linear";
+    if (fromStartToEnd) {
+      packetEl.style.left = "100%";
+    } else {
+      packetEl.style.left = "0%";
+    }
+    return new Promise(r => setTimeout(r, durationMs));
+  }
+
+  function runStep(stepIndex, trace, baseMs) {
+    if (stepIndex >= trace.length) return Promise.resolve();
+    const t = trace[stepIndex];
+    const duration = Math.round(baseMs / speedMultiplier());
+    const edgeActive = (el) => {
+      [edgeC2G, edgeG2C, edgeG2P, edgeP2G].forEach(e => { if (e) e.classList.remove("active"); });
+      if (el) el.classList.add("active");
+    };
+    const edgeSuccess = (el) => {
+      if (el) { el.classList.remove("active"); el.classList.add("success"); }
+    };
+    const edgeBlocked = (el) => {
+      if (el) { el.classList.remove("active"); el.classList.add("blocked"); }
+    };
+
+    if (t.stage === "c2g" && t.status === "success") {
+      edgeActive(edgeC2G);
+      return runPacketAnim(edgeC2G, packetC2G, true, duration).then(() => {
+        edgeSuccess(edgeC2G);
+        packetC2G.style.opacity = "0";
+        if (gintNodeClient) gintNodeClient.classList.add("sent");
+        return runStep(stepIndex + 1, trace, baseMs);
+      });
+    }
+    if (t.stage === "request_check") {
+      if (gintGuardrailStatus) gintGuardrailStatus.textContent = t.status === "blocked" ? "Request Blocked" : "Request ✓";
+      if (t.status === "blocked") {
+        edgeBlocked(edgeC2G);
+        if (gintNodeGuardrail) { gintNodeGuardrail.classList.remove("state-success"); gintNodeGuardrail.classList.add("state-blocked"); }
+        if (gintNodeProvider) gintNodeProvider.classList.add("state-idle");
+        if (edgeG2P) edgeG2P.classList.add("idle");
+        if (edgeP2G) edgeP2G.classList.add("idle");
+      }
+      return new Promise(r => setTimeout(r, duration)).then(() => runStep(stepIndex + 1, trace, baseMs));
+    }
+    if (t.stage === "g2p" && (t.status === "inferred" || t.status === "success")) {
+      edgeActive(edgeG2P);
+      return runPacketAnim(edgeG2P, packetG2P, true, duration).then(() => {
+        edgeSuccess(edgeG2P);
+        packetG2P.style.opacity = "0";
+        if (gintNodeProvider) {
+          gintNodeProvider.classList.remove("state-idle");
+          gintNodeProvider.classList.add("received", "receiving");
+          setTimeout(function () { if (gintNodeProvider) gintNodeProvider.classList.remove("receiving"); }, 400);
+        }
+        return runStep(stepIndex + 1, trace, baseMs);
+      });
+    }
+    if (t.stage === "p2g" && (t.status === "inferred" || t.status === "success")) {
+      edgeActive(edgeP2G);
+      return runPacketAnim(edgeP2G, packetP2G, false, duration).then(() => {
+        edgeSuccess(edgeP2G);
+        packetP2G.style.opacity = "0";
+        if (gintNodeProvider) {
+          gintNodeProvider.classList.add("sent", "sending");
+          setTimeout(function () { if (gintNodeProvider) gintNodeProvider.classList.remove("sending"); }, 400);
+        }
+        return runStep(stepIndex + 1, trace, baseMs);
+      });
+    }
+    if (t.stage === "response_check") {
+      if (gintGuardrailStatus) gintGuardrailStatus.textContent = t.status === "blocked" ? "Response Blocked" : (t.status === "success" ? "Response ✓" : "");
+      if (t.status === "blocked") {
+        edgeBlocked(edgeP2G);
+        if (gintNodeGuardrail) { gintNodeGuardrail.classList.remove("state-success"); gintNodeGuardrail.classList.add("state-blocked"); }
+      } else if (t.status === "success") {
+        if (gintNodeGuardrail) { gintNodeGuardrail.classList.remove("state-blocked"); gintNodeGuardrail.classList.add("state-success"); }
+      }
+      return new Promise(r => setTimeout(r, duration)).then(() => runStep(stepIndex + 1, trace, baseMs));
+    }
+    if (t.stage === "g2c" && t.status === "success") {
+      edgeActive(edgeG2C);
+      return runPacketAnim(edgeG2C, packetG2C, false, duration).then(() => {
+        edgeSuccess(edgeG2C);
+        packetG2C.style.opacity = "0";
+        if (gintNodeClient) gintNodeClient.classList.add("received");
+        return runStep(stepIndex + 1, trace, baseMs);
+      });
+    }
+    return new Promise(r => setTimeout(r, 50)).then(() => runStep(stepIndex + 1, trace, baseMs));
+  }
+
+  function playTrace(trace, baseMs) {
+    if (animTimeout) clearTimeout(animTimeout);
+    resetFlowVisual();
+    if (!trace.length) return;
+    runStep(0, trace, baseMs || STAGE_MS);
+  }
+
+  function playTraceFromStep(trace, startStepIndex, baseMs) {
+    if (!trace.length || startStepIndex >= trace.length) return;
+    runStep(startStepIndex, trace, baseMs || STAGE_MS);
+  }
+
+  function runSingleStep(stepIndex, trace, baseMs) {
+    if (stepIndex >= trace.length) return Promise.resolve();
+    const t = trace[stepIndex];
+    const duration = Math.round(baseMs / speedMultiplier());
+    const edgeActive = (el) => {
+      [edgeC2G, edgeG2C, edgeG2P, edgeP2G].forEach(e => { if (e) e.classList.remove("active"); });
+      if (el) el.classList.add("active");
+    };
+    const edgeSuccess = (el) => {
+      if (el) { el.classList.remove("active"); el.classList.add("success"); }
+    };
+    const edgeBlocked = (el) => {
+      if (el) { el.classList.remove("active"); el.classList.add("blocked"); }
+    };
+    if (t.stage === "c2g" && t.status === "success") {
+      edgeActive(edgeC2G);
+      return runPacketAnim(edgeC2G, packetC2G, true, duration).then(() => {
+        edgeSuccess(edgeC2G); packetC2G.style.opacity = "0";
+        if (gintNodeClient) gintNodeClient.classList.add("sent");
+      });
+    }
+    if (t.stage === "request_check") {
+      if (gintGuardrailStatus) gintGuardrailStatus.textContent = t.status === "blocked" ? "Request Blocked" : "Request ✓";
+      if (t.status === "blocked") {
+        edgeBlocked(edgeC2G);
+        if (gintNodeGuardrail) { gintNodeGuardrail.classList.remove("state-success"); gintNodeGuardrail.classList.add("state-blocked"); }
+        if (gintNodeProvider) gintNodeProvider.classList.add("state-idle");
+        if (edgeG2P) edgeG2P.classList.add("idle");
+        if (edgeP2G) edgeP2G.classList.add("idle");
+      }
+      return new Promise(r => setTimeout(r, duration));
+    }
+    if (t.stage === "g2p" && (t.status === "inferred" || t.status === "success")) {
+      edgeActive(edgeG2P);
+      return runPacketAnim(edgeG2P, packetG2P, true, duration).then(() => {
+        edgeSuccess(edgeG2P); packetG2P.style.opacity = "0";
+        if (gintNodeProvider) {
+          gintNodeProvider.classList.remove("state-idle");
+          gintNodeProvider.classList.add("received", "receiving");
+          setTimeout(function () { if (gintNodeProvider) gintNodeProvider.classList.remove("receiving"); }, 400);
+        }
+      });
+    }
+    if (t.stage === "p2g" && (t.status === "inferred" || t.status === "success")) {
+      edgeActive(edgeP2G);
+      return runPacketAnim(edgeP2G, packetP2G, false, duration).then(() => {
+        edgeSuccess(edgeP2G); packetP2G.style.opacity = "0";
+        if (gintNodeProvider) {
+          gintNodeProvider.classList.add("sent", "sending");
+          setTimeout(function () { if (gintNodeProvider) gintNodeProvider.classList.remove("sending"); }, 400);
+        }
+      });
+    }
+    if (t.stage === "response_check") {
+      if (gintGuardrailStatus) gintGuardrailStatus.textContent = t.status === "blocked" ? "Response Blocked" : (t.status === "success" ? "Response ✓" : "");
+      if (t.status === "blocked") {
+        edgeBlocked(edgeP2G);
+        if (gintNodeGuardrail) { gintNodeGuardrail.classList.remove("state-success"); gintNodeGuardrail.classList.add("state-blocked"); }
+      } else if (t.status === "success") {
+        if (gintNodeGuardrail) { gintNodeGuardrail.classList.remove("state-blocked"); gintNodeGuardrail.classList.add("state-success"); }
+      }
+      return new Promise(r => setTimeout(r, duration));
+    }
+    if (t.stage === "g2c" && t.status === "success") {
+      edgeActive(edgeG2C);
+      return runPacketAnim(edgeG2C, packetG2C, false, duration).then(() => {
+        edgeSuccess(edgeG2C); packetG2C.style.opacity = "0";
+        if (gintNodeClient) gintNodeClient.classList.add("received");
+      });
+    }
+    return new Promise(r => setTimeout(r, 50));
+  }
+
+  function stepOnce() {
+    if (!lastTrace.length) return;
+    if (currentStepIndex >= lastTrace.length) {
+      currentStepIndex = 0;
+      resetFlowVisual();
+    }
+    const baseMs = STAGE_MS;
+    runSingleStep(currentStepIndex, lastTrace, baseMs).then(() => { currentStepIndex++; });
+  }
+
+  function isPromptRejectedReply(text) {
+    const t = String(text || "").trim();
+    return t.startsWith("Prompt Rejected") && t.indexOf("F5 AI Guardrail") !== -1;
+  }
+
+  function setResponseContent(text, isRejected) {
+    if (!gintResponse) return;
+    gintResponse.textContent = text || "—";
+    gintResponse.classList.toggle("rejected", !!isRejected);
+  }
+
+  if (gintSend) {
+    gintSend.addEventListener("click", async () => {
+      const msg = (gintPrompt && gintPrompt.value || "").trim();
+      if (!msg) return;
+      gintSend.disabled = true;
+      setResponseContent("…", false);
+      resetFlowVisual();
+      if (gintRequestInspection) { gintRequestInspection.textContent = "—"; gintRequestInspection.className = "gint-decision-value"; }
+      if (gintResponseInspection) { gintResponseInspection.textContent = "—"; gintResponseInspection.className = "gint-decision-value"; }
+      if (gintRequestFailedWrap) { gintRequestFailedWrap.style.display = "none"; gintRequestFailedDetail && (gintRequestFailedDetail.textContent = "—"); }
+      if (gintResponseFailedWrap) { gintResponseFailedWrap.style.display = "none"; gintResponseFailedDetail && (gintResponseFailedDetail.textContent = "—"); }
+
+      if (gintNodeClient) {
+        gintNodeClient.classList.remove("sending");
+        gintNodeClient.offsetHeight;
+        gintNodeClient.classList.add("sending");
+        setTimeout(function () { if (gintNodeClient) gintNodeClient.classList.remove("sending"); }, 600);
+      }
+
+      var duration = Math.round(STAGE_MS / speedMultiplier());
+      [edgeC2G, edgeG2C, edgeG2P, edgeP2G].forEach(e => e && e.classList.remove("active", "success", "blocked", "network-error"));
+      edgeC2G && edgeC2G.classList.add("active");
+      var c2gAnimPromise = runPacketAnim(edgeC2G, packetC2G, true, duration);
+
+      var fetchPromise = fetch("/api/guardrail-scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: msg })
+      }).then(res => {
+        if (res.ok) return res.json();
+        return res.json().then(d => { throw { httpError: true, message: d.detail || "Request failed" }; });
+      });
+
+      try {
+        const data = await fetchPromise;
+        await c2gAnimPromise;
+        if (edgeC2G) { edgeC2G.classList.remove("active"); edgeC2G.classList.add("success"); }
+        if (packetC2G) packetC2G.style.opacity = "0";
+        if (gintNodeClient) gintNodeClient.classList.add("sent");
+
+        lastReply = data.reply || "";
+        lastGuardrail = data.guardrail && data.guardrail.result ? data.guardrail : null;
+        lastTrace = buildTraceFromGuardrail(lastGuardrail);
+
+        setResponseContent(lastReply || "—", isPromptRejectedReply(lastReply));
+        updateDecisionPanel(lastGuardrail);
+        playTraceFromStep(lastTrace, 1, STAGE_MS);
+      } catch (e) {
+        await c2gAnimPromise;
+        var isNetworkError = !e || !e.httpError;
+        if (edgeC2G && isNetworkError) { edgeC2G.classList.remove("active"); edgeC2G.classList.add("network-error"); }
+        else if (edgeC2G) { edgeC2G.classList.remove("active"); edgeC2G.classList.add("success"); }
+        if (packetC2G) packetC2G.style.opacity = "0";
+        setResponseContent("Error: " + (e && e.message || "Request failed"), false);
+      } finally {
+        gintSend.disabled = false;
+      }
+    });
+  }
+
+  if (gintReplay) gintReplay.addEventListener("click", () => playTrace(lastTrace));
+  if (gintNextStep) gintNextStep.addEventListener("click", stepOnce);
+
+  setGintArchDescByMode("inline");
+  if (gintModeInline) {
+    gintModeInline.addEventListener("click", function () {
+      if (gintModeInline.disabled) return;
+      gintModeInline.classList.add("active");
+      if (gintModeOob) gintModeOob.classList.remove("active");
+      setGintArchDescByMode("inline");
+    });
+  }
+  if (gintModeOob) {
+    gintModeOob.addEventListener("click", function () {
+      if (gintModeOob.disabled) return;
+      gintModeOob.classList.add("active");
+      if (gintModeInline) gintModeInline.classList.remove("active");
+      setGintArchDescByMode("oob");
+    });
+  }
 })();

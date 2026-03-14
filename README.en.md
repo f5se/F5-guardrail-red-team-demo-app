@@ -18,18 +18,20 @@ A multi-engine AI guardrail demo Agent application based on F5 AI Guardrail (Cal
 
 5. Added Skills capability—new Skills can be added and auto-registered at any time
 
-6. Added sample templates for attack scenarios
+6. Added Inline integration and OOB integration for dynamic visualization display
 
-7. Added Hugging Face proxy download support
+7. Added sample templates for attack scenarios
 
-8. Added whether to use all engine switches 
+8. Added Hugging Face proxy download support
 
-2. Added debug swtich for storing raw json that from F5 guardrail
-10. Load `.env` directly without setting environment variables
+9. Added whether to use all engine switches 
 
-11. Added frontend Markdown response rendering
+10. Added debug swtich for storing raw json that from F5 guardrail
+11. Load `.env` directly without setting environment variables
 
-12. Added the integration pipeline demonstration of F5 Red Team and DevSecOps. 
+12. Added frontend Markdown response rendering
+
+13. Added the integration pipeline demonstration of F5 Red Team and DevSecOps. 
 
    Note: Considering the actual time consumption of Red Team and the feasibility of the environment, the Red Team API integration here is mock simulation and does not actually create real objects on the SaaS.
 
@@ -84,7 +86,7 @@ source .venv/bin/activate   # Linux/macOS
 2. **Other dependencies**
 
 ```bash
-pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch
+pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf
 ```
 
 ---
@@ -94,6 +96,7 @@ pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch
 From the project root, with the virtual environment activated and `.env` configured:
 
 ```bash
+export TRANSFORMERS_OFFLINE=1
 python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
