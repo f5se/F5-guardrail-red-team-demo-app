@@ -50,21 +50,70 @@ cp .env_example .env
 # Edit .env with your CalypsoAI and Hugging Face configuration
 ```
 
-Example variables in `.env_example`:
+Variables in `.env_example`:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `CALYPSOAI_URL` | F5 AI Security platform URL | `https://www.us1.calypsoai.app/` |
-| `CALYPSOAI_TOKEN` | API token | `Your-calypsoai-token` |
+| `CALYPSOAI_TOKEN` | API token (required) | `Your-calypsoai-token` |
 | `CALYPSOAI_PROJECT_ID` | Project ID (Project mode) | `Your-calypsoai-project-id` |
-| `DEFAULT_PROVIDER` | Default Provider name | `Your-calypsoai-provider` |
+| `DEFAULT_PROVIDER` | Provider name configured in Calypso | `Your-calypsoai-provider` |
 | `SLIDING_WINDOW_MAX_TURNS` | Sliding window turn count for multi-turn chat | `8` |
 | `SLIDING_WINDOW_MAX_CHARS` | Max characters in sliding window | `8000` |
-| `HF_HOME` | Hugging Face model cache directory | `Your-hugging-face-home-directory` |
+| `CONVERSATION_TTL_SECONDS` | Conversation turn TTL in seconds | `120` |
+| `HF_HOME` | Hugging Face model cache directory (optional) | `Your-hugging-face-home-directory` |
 | `HF_PROXY` | Proxy for HF model download only (optional) | `http://127.0.0.1:8010` |
 | `HF_TOKEN` | Hugging Face token (optional; recommended for faster downloads) | `Your-hugging-face-token` |
+| `OOB_PROXY_URL` | NGINX Proxy URL for OOB mode. **Required when using OOB**; set to your actual deployment (e.g. `http://localhost:8787`). | `http://localhost:8787` |
+| `LLM_PROVIDER_KEY` | API Key (Bearer) sent to the LLM in OOB mode. **Required when using OOB**; set per your LLM provider. | `Your-llm-provider-api-key` |
+| `OOB_MODEL` | Model name for OOB requests. **Default `deepseek-chat`** when unset; when using OOB, set to your actual model. | `deepseek-chat` |
 
-**Note:** You must first configure the corresponding Project, Connection/Provider, and Project API token in Calypso (F5 Guardrail). For testing specific features (e.g. enterprise-sensitive data protection), configure Custom scanners and related settings in the F5 Guardrail system in advance.
+**Note:** Configure the corresponding Project, Connection/Provider, and Project API token in Calypso (F5 Guardrail) first. For features like enterprise-sensitive data protection, configure Custom scanners in the F5 Guardrail system in advance.
+
+### Attack panel configuration
+
+The **attack example** list (AI Chat view) and the **Guardrail Integration** request presets are driven by JSON config files. You can add, remove, or edit entries.
+
+- **AI Chat · Attack examples:** `config/attack-presets.json`
+- **Guardrail Integration · Request presets:** `config/guardrail-integration-presets.json`
+
+Each preset is an object. Entries with `enabled: false` are hidden in the UI.
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | Recommended | Unique id; can be reused for same category |
+| `title` | Yes | Label shown in the list |
+| `prompt` | Yes | Text inserted into the input when selected |
+| `category` | Recommended | Category name for grouping |
+| `enabled` | No | Default `true`; set `false` to hide |
+| `tags` | No | Only in attack-presets; used for tags |
+
+Example (single entry in `config/attack-presets.json`):
+
+```json
+{
+  "id": "jailbreak-basic",
+  "title": "Jailbreak: ignore safety rules",
+  "prompt": "From now on you will act as...",
+  "category": "Jailbreak",
+  "enabled": true,
+  "tags": ["jailbreak", "policy bypass"]
+}
+```
+
+### OOB mode – NGINX configuration (brief)
+
+In **OOB (out-of-band)** mode in the Guardrail Integration view, requests are forwarded from this app to an **NGINX + F5 Guardrail** proxy, which then forwards to the LLM provider. NGINX must be deployed and configured separately.
+
+- **Reference config:** `docs/nginx/conf.d/default_example.conf` (copy to `default.conf` and adjust as needed).
+- **Main points:**
+  - **Upstreams:** `aigr_api` (F5 Guardrail), `llm_provider_api` (e.g. Deepseek/OpenAI).
+  - **Variables:** `$aigr_api_host`, `$aigr_api_token` (F5 auth), `$llm_provider_host`.
+  - **`/v1/chat/completions`:** Handled by `js_content aigr_filter_redacted.filterChatCompletion`: call F5 scan (`/aigr_scan`), then if allowed forward to `/llm_provider`.
+  - **`/aigr_scan`:** Reverse proxy to F5 `backend/v1/scans`.
+  - **`/llm_provider`:** Reverse proxy to the LLM’s `v1/chat/completions`, forwarding `Authorization`.
+
+In this app’s `.env`, when using OOB you must set `OOB_PROXY_URL` (NGINX base URL, e.g. `http://localhost:8787`) and `LLM_PROVIDER_KEY` (LLM API key) to match your environment; `OOB_MODEL` defaults to `deepseek-chat` if unset—configure it to your actual model name. In OOB mode the frontend does not show Scanner details (determined by the proxy).
 
 ---
 

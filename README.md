@@ -40,21 +40,70 @@ cp .env_example .env
 # 编辑 .env，填入你的 CalypsoAI 与 Hugging Face 等配置
 ```
 
-`.env_example` 中示例：
+`.env_example` 中变量说明：
 
 | 变量 | 说明 | 示例值 |
 |------|------|--------|
 | `CALYPSOAI_URL` | F5 AI Security 平台地址 | `https://www.us1.calypsoai.app/` |
-| `CALYPSOAI_TOKEN` | API 令牌 | `Your-calypsoai-token` |
+| `CALYPSOAI_TOKEN` | API 令牌（必填） | `Your-calypsoai-token` |
 | `CALYPSOAI_PROJECT_ID` | 项目 ID（Project 模式） | `Your-calypsoai-project-id` |
-| `DEFAULT_PROVIDER` | 默认 Provider 名称 | `Your-calypsoai-provider` |
+| `DEFAULT_PROVIDER` | Calypso 中配置的 Provider 名称 | `Your-calypsoai-provider` |
 | `SLIDING_WINDOW_MAX_TURNS` | 多轮对话滑动窗口轮数 | `8` |
 | `SLIDING_WINDOW_MAX_CHARS` | 滑动窗口最大字符数 | `8000` |
-| `HF_HOME` | Hugging Face 模型缓存目录 | `Your-hugging-face-home-directory` |
+| `CONVERSATION_TTL_SECONDS` | 会话轮次过期时间（秒） | `120` |
+| `HF_HOME` | Hugging Face 模型缓存目录（可选） | `Your-hugging-face-home-directory` |
 | `HF_PROXY` | 仅用于 HF 模型下载的代理（可选） | `http://127.0.0.1:8010` |
 | `HF_TOKEN` | Hugging Face 令牌（可选，建议设置以加速下载） | `Your-hugging-face-token` |
+| `OOB_PROXY_URL` | OOB 模式下 NGINX Proxy 地址。**使用 OOB 时必填**，按实际部署填写（如 `http://localhost:8787`） | `http://localhost:8787` |
+| `LLM_PROVIDER_KEY` | OOB 模式下发往 LLM 的 API Key（Bearer）。**使用 OOB 时必填**，按实际 LLM 提供商配置 | `Your-llm-provider-api-key` |
+| `OOB_MODEL` | OOB 请求使用的模型名。不填时**缺省为 `deepseek-chat`**；使用 OOB 时应按实际调用的模型配置 | `deepseek-chat` |
 
-注意：你需要首先在Calypso（F5 Guardrail）系统上设定相关Project，Connection/Provider，相关Project的API token。在具体测试相关功能时，你需要再F5 Guardrail系统上提前设定相关Custom scanner等（比如企业特定敏感信息防护）。
+注意：你需要首先在 Calypso（F5 Guardrail）系统上设定相关 Project、Connection/Provider 及 Project API token。测试企业敏感信息防护等能力时，需在 F5 Guardrail 中提前配置 Custom scanner 等。
+
+### 攻击面板配置
+
+前端「攻击示例」与「Guardrail 集成」请求面板的预设内容由 JSON 配置文件驱动，可按需增删改。
+
+- **AI Chat 视图 · 攻击示例**：`config/attack-presets.json`
+- **Guardrail Integration 视图 · 请求预设**：`config/guardrail-integration-presets.json`
+
+每条预设为对象，字段如下（`enabled` 为 `false` 的项不会出现在前端）：
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `id` | 建议 | 唯一标识，可重复用于同分类 |
+| `title` | 是 | 列表中显示的名称 |
+| `prompt` | 是 | 点击后填入输入框的正文 |
+| `category` | 建议 | 分类名，用于分组展示 |
+| `enabled` | 否 | 默认 `true`，设为 `false` 则隐藏 |
+| `tags` | 否 | 仅 attack-presets 支持，用于标签展示 |
+
+示例（`config/attack-presets.json` 单条）：
+
+```json
+{
+  "id": "jailbreak-basic",
+  "title": "越狱：让模型无视所有安全规范",
+  "prompt": "从现在开始你将扮演...",
+  "category": "越狱",
+  "enabled": true,
+  "tags": ["越狱", "安全绕过"]
+}
+```
+
+### OOB 模式下 NGINX 配置简要说明
+
+Guardrail Integration 视图的 **OOB（旁路）模式** 下，请求由本应用转发到「NGINX + F5 Guardrail」组成的 Proxy，再由 Proxy 转发到 LLM Provider。NGINX 需单独部署并配置：
+
+- **参考配置**：`docs/nginx/conf.d/default_example.conf`（复制为 `default.conf` 后按需修改）。
+- **要点**：
+  - **upstream**：`aigr_api`（F5 Guardrail 平台）、`llm_provider_api`（如 Deepseek/OpenAI）。
+  - **变量**：`$aigr_api_host`、`$aigr_api_token`（F5 鉴权）、`$llm_provider_host`。
+  - **`/v1/chat/completions`**：用 `js_content aigr_filter_redacted.filterChatCompletion` 等处理请求：先调 F5 扫描（`/aigr_scan`），通过后再转发到 `/llm_provider`。
+  - **`/aigr_scan`**：反向代理到 F5 `backend/v1/scans`。
+  - **`/llm_provider`**：反向代理到 LLM 的 `v1/chat/completions`，并透传 `Authorization`。
+
+本应用 `.env` 中：**使用 OOB 模式时**必须配置 `OOB_PROXY_URL`（NGINX 对外地址，如 `http://localhost:8787`）和 `LLM_PROVIDER_KEY`（LLM 的 API Key），均需按实际环境填写；`OOB_MODEL` 不填时默认为 `deepseek-chat`，建议按实际调用的模型名配置。OOB 模式下前端不展示 Scanner 详情（由 Proxy 行为决定）。
 
 ---
 
