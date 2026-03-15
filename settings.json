@@ -5,7 +5,7 @@
   "pi_threshold": 0.7,
   "agent_skill_enabled": true,
   "f5_guardrail_only": true,
-  "debug_guardrail_raw_enabled": true,
+  "debug_guardrail_raw_enabled": false,
   "guardrail_verbose": true,
   "kb_dir": "./enterprise_kb",
   "agent_max_steps": 4,

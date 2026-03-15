@@ -22,4 +22,5 @@ tests/*.log
 
 huggingface/
 docs/local-docs/
+docs/nginx/conf.d/default.conf
 .cursor/
