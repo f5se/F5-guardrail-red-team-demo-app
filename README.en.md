@@ -20,20 +20,20 @@ A multi-engine AI guardrail demo Agent application based on F5 AI Guardrail (Cal
 
 5. Added Skills capability—new Skills can be added and auto-registered at any time
 
-6. Added Inline integration and OOB integration for dynamic visualization display
+6. Added Inline integration for dynamic visualization
+7. Added and OOB integration for dynamic visualization
+8. Added sample templates for attack scenarios
 
-7. Added sample templates for attack scenarios
+9. Added Hugging Face proxy download support
 
-8. Added Hugging Face proxy download support
+10. Added whether to use all engine switches 
 
-9. Added whether to use all engine switches 
+11. Added debug swtich for storing raw json that from F5 guardrail
+12. Load `.env` directly without setting environment variables
 
-10. Added debug swtich for storing raw json that from F5 guardrail
-11. Load `.env` directly without setting environment variables
+13. Added frontend Markdown response rendering
 
-12. Added frontend Markdown response rendering
-
-13. Added the integration pipeline demonstration of F5 Red Team and DevSecOps. 
+14. Added the integration pipeline demonstration of F5 Red Team and DevSecOps. 
 
    Note: Considering the actual time consumption of Red Team and the feasibility of the environment, the Red Team API integration here is mock simulation and does not actually create real objects on the SaaS.
 
