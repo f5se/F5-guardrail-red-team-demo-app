@@ -121,12 +121,22 @@ On first run, the app will download local detection models from Hugging Face (e.
 
 ## 6. Main Features
 
-- **Multi-engine guardrails:** Combines F5 AI Security (CalypsoAI) cloud guardrails with local ML models (toxicity, prompt injection, etc.) to inspect user input and model responses.
-- **Web chat UI:** Chat with the configured LLM Provider in the browser, with multi-turn conversation, sliding-window context, and Skills on/off toggles.
-- **Configurable policies:** Detection thresholds, rule weights, enterprise knowledge base path, etc. via `settings.json` and UI.
-- **Optional local knowledge base Skill:** Skills simulate connecting to a local enterprise knowledge base (this demo uses local directory reads); directory and file types are configurable.
-- **Configurable Reasoning turns:** ReAct-style Agent simulates multi-step reasoning.
-- **F5 Red Team DevSecOps integration:** Simulated CI/CD pipeline view with F5 AI Red Team automated adversarial testing in the build/deploy flow, for validating AI app resilience in DevSecOps.
+- **Multi-engine guardrails:** F5 cloud + local ML (toxicity, prompt injection); optional “F5 only” to skip local engines; optional F5 Scanner detail (verbose).
+- **AI Chat view:** Single/multi-turn (sliding window), attack preset templates, engine status bar, Markdown rendering for replies.
+- **Settings:** Detection thresholds, pattern keywords, KB path, agent steps, etc.; `settings.json` and UI stay in sync.
+- **Skills:** Auto-discovered registry; enterprise KB Skill (local directory, configurable extensions and limits); optional ReAct agent orchestration and step count.
+- **Guardrail Integration view:** Dedicated view for Inline (request via Guardrail) vs OOB (request via Proxy, Guardrail on the side) with flow diagrams and preset prompts.
+- **Red Team pipeline:** Simulated CI/CD (commit→build→deploy→F5 Red Team test→security decision), CASI score and manual review/fail branches, sample report link; demo is Mock (no real Red Team API calls).
+
+| Module | Capability |
+|--------|------------|
+| **Guardrails** | F5 cloud + local ML (toxic-bert, protectai); `f5_guardrail_only` to use F5 only; `guardrail_verbose` to return and show F5 Scanner details |
+| **Frontend views** | Four entries: AI Chatbot/Agent, Red Team, Guardrail Integration, Settings |
+| **Chat** | Single/multi-turn (sliding window), attack preset templates (`attack-presets.json`), engine status bar, Markdown rendering for replies |
+| **Settings** | `settings.json` + UI: thresholds, Pattern, KB path, agent steps, debug raw JSON, etc. |
+| **Skills** | Auto-discover under `skills/`; includes `read_enterprise_kb` (local directory KB); optional ReAct agent orchestration and `agent_max_steps` |
+| **Guardrail Integration** | Dedicated view: Inline (`/api/guardrail-scan`) and OOB (`/api/oob-chat` via Proxy) with flow diagrams and `guardrail-integration-presets.json` presets |
+| **Red Team** | Simulated CI/CD pipeline (5 steps + substeps), CASI score, manual review/fail branches, `/redteam-report` sample report; **demo is Mock, no real Red Team API calls** |
 
 ---
 

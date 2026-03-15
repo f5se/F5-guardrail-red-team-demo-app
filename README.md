@@ -111,12 +111,22 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 
 ## 6. 主要功能
 
-- **多引擎护栏**：结合 F5 AI Security（CalypsoAI）云端护栏与本地 ML 模型（毒性、提示注入等）对用户输入与模型回复进行检测。
-- **Web 对话界面**：通过浏览器与配置的 LLM Provider 对话，支持多轮对话与滑动窗口上下文以及Skills的启用开关。
-- **可配置策略**：通过 `settings.json` 与 UI 设置检测阈值、规则权重、企业知识库路径等。
-- **可选本地知识库Skill**：支持通过Skills模拟连接本地企业知识库（本演示环境采用本地目录读取)，可配置目录与文件类型。
-- **可设定Reasoning轮次**：ReAct风格Agent模拟多轮推理。
-- **F5 Red Team DevSecOps 集成**：提供模拟 CI/CD 流水线视图，在构建/部署流程中集成 F5 AI Red Team 自动化对抗攻击测试，便于在安全开发运维流程中验证 AI 应用韧性。
+- **多引擎护栏**：F5 云端 + 本地 ML（毒性、提示注入）；可选「仅用 F5」跳过本地引擎；支持 F5 Scanner 详情展示（verbose）。
+- **AI 对话视图**：单轮/多轮（滑动窗口）、攻击示例模板一键填充、引擎状态条、回复 Markdown 渲染。
+- **Settings**：检测阈值、Pattern 关键词、知识库路径、Agent 步数等，`settings.json` 与 UI 同步。
+- **Skills**：自动发现注册；企业知识库 Skill（本地目录，可配扩展名与字符上限）；可选 ReAct Agent 编排与步数。
+- **Guardrail 集成演示**：独立视图，Inline（请求经 Guardrail 检测）与 OOB（请求经 Proxy，Guardrail 旁路）两种模式及流程图、预设用例。
+- **Red Team 流水线**：模拟 CI/CD（提交→构建→部署→F5 Red Team 测试→安全决策），CASI 评分与人工审核/失败分支，示例报告；本演示为 Mock，不真实调用 Red Team API。
+
+| 模块 | 实际能力 |
+|------|----------|
+| **护栏** | F5 云端 + 本地 ML（toxic-bert、protectai）；`f5_guardrail_only` 可仅用 F5；`guardrail_verbose` 可返回并展示 F5 Scanner 详情 |
+| **前端视图** | 四个入口：AI Chatbot/Agent、Red Team、Guardrail Integration、Settings |
+| **对话** | 单轮/多轮（滑动窗口）、攻击示例模板（`attack-presets.json`）、引擎状态条、回复 Markdown 渲染 |
+| **配置** | `settings.json` + UI：阈值、Pattern、KB 路径、Agent 步数、debug 写 raw JSON 等 |
+| **Skills** | `skills/` 自动发现注册；当前有 `read_enterprise_kb`（本地目录 KB）；可选 ReAct Agent 编排与 `agent_max_steps` |
+| **Guardrail 集成** | 独立视图：Inline（`/api/guardrail-scan`）与 OOB（`/api/oob-chat` 经 Proxy）两种模式、流程图、`guardrail-integration-presets.json` 预设 |
+| **Red Team** | 模拟 CI/CD 流水线（5 步 + 子步骤）、CASI 评分、人工审核/失败分支、`/redteam-report` 示例报告；**本演示为 Mock，不真实调用 Red Team API** |
 
 ---
 
