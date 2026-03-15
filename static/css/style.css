@@ -1718,7 +1718,7 @@ code{
 }
 .gint-flow-container {
   margin: 12px 0;
-  padding: 16px;
+  padding: 28px 16px 16px 16px;
   border-radius: 14px;
   background: #fff;
   border: 1px solid var(--border);
@@ -1749,6 +1749,11 @@ code{
   font-size: 12px;
   font-weight: 700;
   color: var(--text);
+}
+.gint-node-sublabel {
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--muted);
 }
 .gint-node-status {
   display: block;
@@ -1812,6 +1817,22 @@ code{
   60% { box-shadow: 0 4px 16px rgba(34, 197, 94, 0.25), 0 0 0 10px rgba(34, 197, 94, 0.08); }
   100% { box-shadow: 0 4px 12px rgba(34, 197, 94, 0.15); }
 }
+/* F5 Guardrail 收到请求后的呼吸态，直到 request_check / 后续步骤 */
+.gint-node-guardrail.state-processing {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  animation: gint-guardrail-breathe 1.2s ease-in-out infinite;
+}
+@keyframes gint-guardrail-breathe {
+  0%, 100% {
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25), 0 0 0 0 rgba(59, 130, 246, 0.4);
+    background: #eff6ff;
+  }
+  50% {
+    box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4), 0 0 0 12px rgba(59, 130, 246, 0.12);
+    background: #dbeafe;
+  }
+}
 .gint-node-guardrail.state-success {
   border-color: #22c55e;
   background: #f0fdf4;
@@ -1829,6 +1850,177 @@ code{
 }
 .gint-node-provider.state-idle .gint-node-label {
   color: #94a3b8;
+}
+/* OOB 旁路：Proxy 节点 */
+.gint-node-proxy.state-processing {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  animation: gint-guardrail-breathe 1.2s ease-in-out infinite;
+}
+.gint-node-proxy.state-success {
+  border-color: #22c55e;
+  background: #f0fdf4;
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.2);
+}
+.gint-decision-oob-placeholder {
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: #f8fafc;
+  border: 1px dashed var(--border);
+}
+.gint-oob-placeholder-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+/* OOB 图：AI Client / Proxy / LLM Provider 水平对齐，F5 Guardrail 在 Proxy 正上方 */
+.gint-flow-oob {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+.gint-flow-oob .gint-node {
+  min-height: 58px;
+  box-sizing: border-box;
+}
+.gint-oob-proxy-column {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  min-width: 140px;
+  width: 140px;
+  overflow: hidden;
+  --oob-proxy-spacer: 112px;
+  padding-bottom: var(--oob-proxy-spacer);
+}
+.gint-oob-proxy-column .gint-node {
+  flex-shrink: 0;
+}
+.gint-oob-proxy-column .gint-node-proxy {
+  width: 140px;
+  min-width: 140px;
+  margin-top: 10px;
+  box-sizing: border-box;
+}
+.gint-oob-proxy-column .gint-node-guardrail {
+  width: 140px;
+  min-width: 140px;
+  min-height: 52px;
+  padding: 10px 12px;
+  overflow: hidden;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.gint-oob-proxy-column .gint-node-guardrail .gint-node-label,
+.gint-oob-proxy-column .gint-node-guardrail .gint-node-status {
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.gint-oob-vertical-edges {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: center;
+  gap: 8px;
+  min-height: 60px;
+  width: 100%;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  margin-bottom: -10px;
+}
+.gint-oob-vertical-edges .gint-edge-col-vertical {
+  flex: 0 0 auto;
+  min-width: 28px;
+  width: 28px;
+  max-width: 28px;
+  min-height: 60px;
+  height: 60px;
+}
+.gint-edge-col-vertical {
+  flex-direction: column;
+  min-width: 28px;
+  width: 28px;
+  min-height: 32px;
+  height: 32px;
+}
+.gint-edge-vertical {
+  width: 28px;
+  height: 100%;
+  min-height: 32px;
+}
+.gint-oob-vertical-edges .gint-edge-vertical {
+  height: 60px;
+  min-height: 60px;
+}
+.gint-edge-vertical .gint-edge-svg {
+  width: 28px;
+  height: 100%;
+  min-height: 32px;
+  display: block;
+  overflow: visible;
+}
+.gint-oob-vertical-edges .gint-edge-vertical .gint-edge-svg {
+  height: 60px;
+}
+.gint-oob-edge-guardrail .gint-edge-svg {
+  overflow: visible;
+}
+.gint-edge-vertical-solid path.gint-edge-line,
+.gint-edge-vertical-solid path[stroke] {
+  stroke-dasharray: none;
+}
+.gint-oob-edge-guardrail.result-blocked {
+  color: #eab308;
+}
+.gint-oob-edge-guardrail.result-blocked .gint-edge-arrow {
+  fill: currentColor;
+}
+.gint-packet-vertical {
+  display: block;
+  left: 50%;
+  top: 0;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+}
+.gint-packet-vertical.anim {
+  opacity: 1;
+}
+.gint-packet-yellow {
+  background: #eab308;
+}
+.gint-edge-col-vertical {
+  position: relative;
+}
+.gint-oob-block-bubble {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 100%;
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #991b1b;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  white-space: nowrap;
+  max-width: 220px;
+  white-space: normal;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 5;
+}
+.gint-oob-block-bubble.visible {
+  opacity: 1;
 }
 .gint-edge-col {
   flex: 1;
@@ -1866,6 +2058,9 @@ code{
 }
 .gint-edge.active {
   color: #3b82f6;
+}
+.gint-edge.gint-edge-scan.active {
+  color: #eab308;
 }
 .gint-edge.success {
   color: #22c55e;

@@ -2,9 +2,9 @@
 
 A multi-engine AI guardrail demo Agent application based on F5 AI Guardrail (CalypsoAI) and local ML engines. It provides a web chat interface with configurable prompt/response detection policies and integrates Skills to simulate enterprise system integration.
 
-![image-20260314111005378](README.assets/image-20260314111005378.png)
+![image-20260315091559488](README.assets/image-20260315091559488.png)
 
-![screencapture-127-0-0-1-8000-2026-03-14-11_04_23](README.assets/screencapture-127-0-0-1-8000-2026-03-14-11_04_23.png)
+![screencapture-127-0-0-1-8000-2026-03-15-09_21_04](README.assets/screencapture-127-0-0-1-8000-2026-03-15-09_21_04.png)
 
 ![F5-Red-Team-DevSecOps-failure](README.assets/F5-Red-Team-DevSecOps-failure.png)
 

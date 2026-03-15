@@ -451,7 +451,7 @@
             </div>
             <div class="gint-mode-switch">
               <button type="button" class="gint-mode-btn active" data-mode="inline" id="gintModeInline">Inline <span class="zh">串联</span></button>
-              <button type="button" class="gint-mode-btn" data-mode="oob" id="gintModeOob" disabled title="Coming later">OOB <span class="zh">旁路</span></button>
+              <button type="button" class="gint-mode-btn" data-mode="oob" id="gintModeOob">OOB <span class="zh">旁路</span></button>
             </div>
           </div>
 
@@ -470,7 +470,8 @@
           <div class="gint-flow-section">
             <div class="gint-panel-title">AI Flow Visualization <span class="zh">请求流可视化</span></div>
             <div class="gint-flow-container" id="gintFlowContainer">
-              <div class="gint-flow-diagram" id="gintFlowDiagram">
+              <!-- Inline 串联模式：Client -> Guardrail -> Provider -->
+              <div class="gint-flow-diagram gint-flow-inline" id="gintFlowDiagramInline">
                 <div class="gint-node gint-node-client" id="gintNodeClient">
                   <span class="gint-node-label">AI Client</span>
                 </div>
@@ -515,6 +516,70 @@
                   <span class="gint-node-label">LLM Provider</span>
                 </div>
               </div>
+              <!-- OOB 旁路模式：Client -> Proxy -> Provider；Guardrail 在 Proxy 上方，仅与 Proxy 通信 -->
+              <div class="gint-flow-diagram gint-flow-oob" id="gintFlowDiagramOob" style="display:none;">
+                <div class="gint-node gint-node-client" id="oobNodeClient">
+                  <span class="gint-node-label">AI Client</span>
+                </div>
+                <div class="gint-edge-col">
+                  <div class="gint-edge gint-edge-observed" id="oobEdgeC2P" data-direction="forward">
+                    <svg class="gint-edge-svg" viewBox="0 0 100 24" preserveAspectRatio="none">
+                      <path class="gint-edge-line" d="M 0 12 L 94 12" fill="none" stroke-width="2" stroke-linecap="round" stroke="currentColor" />
+                      <path class="gint-edge-arrow" d="M 100 12 L 94 9 L 94 15 Z" fill="currentColor" />
+                    </svg>
+                    <div class="gint-packet" id="oobPacketC2P"></div>
+                  </div>
+                  <div class="gint-edge gint-edge-observed" id="oobEdgeP2C" data-direction="back">
+                    <svg class="gint-edge-svg" viewBox="0 0 100 24" preserveAspectRatio="none">
+                      <path class="gint-edge-line" d="M 100 12 L 6 12" fill="none" stroke-width="2" stroke-linecap="round" stroke="currentColor" />
+                      <path class="gint-edge-arrow" d="M 0 12 L 6 9 L 6 15 Z" fill="currentColor" />
+                    </svg>
+                    <div class="gint-packet" id="oobPacketP2C"></div>
+                  </div>
+                </div>
+                <div class="gint-oob-proxy-column">
+                  <div class="gint-node gint-node-guardrail" id="oobNodeGuardrail">
+                    <span class="gint-node-label">F5 Guardrail <span class="gint-node-sublabel">(/scan)</span></span>
+                    <span class="gint-node-status" id="oobGuardrailStatus"></span>
+                    <div class="gint-oob-block-bubble" id="oobBlockBubble" aria-live="polite">Request blocked by F5 AI Guardrails</div>
+                  </div>
+                  <div class="gint-oob-vertical-edges">
+                    <div class="gint-edge-col gint-edge-col-vertical" title="Proxy ↔ F5 Guardrail">
+                      <div class="gint-edge gint-edge-inferred gint-edge-vertical gint-edge-vertical-solid gint-oob-edge-guardrail" id="oobEdgeGuardrail">
+                        <svg class="gint-edge-svg" viewBox="0 0 24 100" preserveAspectRatio="none">
+                          <path class="gint-edge-line" d="M 12 0 L 12 100" fill="none" stroke-width="2" stroke-linecap="round" stroke="currentColor" />
+                          <path class="gint-edge-arrow" d="M 12 0 L 9 6 L 15 6 Z" fill="currentColor" />
+                          <path class="gint-edge-arrow" d="M 12 100 L 9 94 L 15 94 Z" fill="currentColor" />
+                        </svg>
+                        <div class="gint-packet gint-packet-vertical gint-packet-yellow" id="oobPacketG2P"></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="gint-node gint-node-proxy" id="oobNodeProxy">
+                    <span class="gint-node-label">Proxy (NGINX)</span>
+                    <span class="gint-node-status" id="oobProxyStatus"></span>
+                  </div>
+                </div>
+                <div class="gint-edge-col">
+                  <div class="gint-edge gint-edge-inferred" id="oobEdgeP2Prov" data-direction="forward">
+                    <svg class="gint-edge-svg" viewBox="0 0 100 24" preserveAspectRatio="none">
+                      <path class="gint-edge-line" d="M 0 12 L 94 12" fill="none" stroke-width="2" stroke-linecap="round" stroke-dasharray="5 4" stroke="currentColor" />
+                      <path class="gint-edge-arrow" d="M 100 12 L 94 9 L 94 15 Z" fill="currentColor" />
+                    </svg>
+                    <div class="gint-packet" id="oobPacketP2Prov"></div>
+                  </div>
+                  <div class="gint-edge gint-edge-inferred" id="oobEdgeProv2P" data-direction="back">
+                    <svg class="gint-edge-svg" viewBox="0 0 100 24" preserveAspectRatio="none">
+                      <path class="gint-edge-line" d="M 100 12 L 6 12" fill="none" stroke-width="2" stroke-linecap="round" stroke-dasharray="5 4" stroke="currentColor" />
+                      <path class="gint-edge-arrow" d="M 0 12 L 6 9 L 6 15 Z" fill="currentColor" />
+                    </svg>
+                    <div class="gint-packet" id="oobPacketProv2P"></div>
+                  </div>
+                </div>
+                <div class="gint-node gint-node-provider" id="oobNodeProvider">
+                  <span class="gint-node-label">LLM Provider</span>
+                </div>
+              </div>
             </div>
             <div class="gint-flow-legend">
               <span class="gint-legend-item"><span class="gint-legend-line solid"></span> Observed (Client ↔ Guardrail)</span>
@@ -539,6 +604,9 @@
 
           <div class="gint-decision-panel">
             <div class="gint-panel-title">Guardrail Decision Panel <span class="zh">安全检测结果</span></div>
+            <div class="gint-decision-oob-placeholder" id="gintDecisionOobPlaceholder" style="display:none;">
+              <p class="gint-oob-placeholder-text">OOB mode: Guardrail scanner result is not available from Proxy. <span class="zh">OOB 模式下 Proxy 不返回Scanner详细检测结果，此处暂不显示。</span></p>
+            </div>
             <div class="gint-decision-content" id="gintDecisionContent">
               <div class="gint-decision-block">
                 <div class="gint-decision-row">

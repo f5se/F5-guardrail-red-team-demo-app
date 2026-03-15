@@ -4,6 +4,8 @@ import json
 import re
 from collections import defaultdict, deque
 from typing import Deque, Dict, List, Optional, Tuple
+from urllib.request import Request as UrlRequest, urlopen
+from urllib.error import HTTPError, URLError
 
 from dotenv import load_dotenv
 load_dotenv()  # 从项目目录 .env 加载环境变量
@@ -21,6 +23,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from calypsoai import CalypsoAI
+import calypsoai.datatypes as cai_dt
 from transformers import pipeline
 
 from skills import get_all_tool_definitions, dispatch_tool
@@ -43,6 +46,10 @@ SLIDING_WINDOW_MAX_TURNS = int(os.getenv("SLIDING_WINDOW_MAX_TURNS", "8"))
 SLIDING_WINDOW_MAX_CHARS = int(os.getenv("SLIDING_WINDOW_MAX_CHARS", "2000"))
 
 CONVERSATION_TTL_SECONDS = int(os.getenv("CONVERSATION_TTL_SECONDS", "120"))  # 2 minutes
+
+# OOB 旁路模式：Proxy(NGINX) 地址与 LLM Provider API Key
+OOB_PROXY_URL = (os.getenv("OOB_PROXY_URL") or "").rstrip("/")
+LLM_PROVIDER_KEY = os.getenv("LLM_PROVIDER_KEY") or ""
 
 if not CALYPSOAI_TOKEN:
     raise RuntimeError("CALYPSOAI_TOKEN must be set")
@@ -213,11 +220,14 @@ async def health():
 # -----------------------------
 # Helpers
 # -----------------------------
-def build_send_kwargs() -> dict:
+def build_send_kwargs(*, verbose: bool = False) -> dict:
     if CALYPSOAI_PROJECT_ID:
-        # The SDK argument is often 'project_id' or 'project'. 
-        # Based on your docs, 'project' is the correct argument name.
-        return {"project": CALYPSOAI_PROJECT_ID}
+        # project: SDK/API 要求的项目标识。
+        # verbose: True 时通过底层 client 传 PostPromptsBody.verbose，返回更详细的 scanner 信息（SDK 的 prompts.send() 未暴露该参数，故需走 client）。
+        kwargs = {"project": CALYPSOAI_PROJECT_ID}
+        if verbose:
+            kwargs["verbose"] = True
+        return kwargs
 
     # Fallback if no Project ID is set (optional, depending on your logic)
     raise HTTPException(status_code=500, detail="CALYPSOAI_PROJECT_ID is not set")
@@ -284,6 +294,7 @@ DEFAULT_SETTINGS = {
     "agent_skill_enabled": False,
     "f5_guardrail_only": False,
     "debug_guardrail_raw_enabled": False,
+    "guardrail_verbose": False,
     "kb_dir": "./enterprise_kb",
     "agent_max_steps": 4,
     "agent_debug_enabled": False,
@@ -327,6 +338,7 @@ def get_runtime_settings(raw: dict) -> dict:
         "agent_skill_enabled": to_bool(raw.get("agent_skill_enabled", False)),
         "f5_guardrail_only": to_bool(raw.get("f5_guardrail_only", False)),
         "debug_guardrail_raw_enabled": to_bool(raw.get("debug_guardrail_raw_enabled", False)),
+        "guardrail_verbose": to_bool(raw.get("guardrail_verbose", False)),
         "kb_dir": str(raw.get("kb_dir") or "./enterprise_kb"),
         "agent_max_steps": to_int(raw.get("agent_max_steps", 4), 4, 1, 8),
         "agent_debug_enabled": to_bool(raw.get("agent_debug_enabled", False)),
@@ -349,10 +361,43 @@ def format_guardrail_reply(data: dict) -> str:
         "the company's AI security policy."
     )
 
+def _call_f5_guardrail_sync(prompt_to_send: str, send_kwargs: dict):
+    """同步调用 F5 Guardrail。若 send_kwargs 含 verbose=True，走底层 client 以传 verbose；否则走 cai.prompts.send。"""
+    use_verbose = send_kwargs.pop("verbose", False)
+    project = send_kwargs.get("project")
+    if use_verbose and project is not None:
+        body = cai_dt.PostPromptsBody(
+            input=prompt_to_send,
+            project=project,
+            skipScanning=False,
+            verbose=True,
+        )
+        response = cai.client.prompts.post(body)
+        if response.id:
+            prompt_obj = cai.client.prompts.getPromptId(response.id).prompt
+            # POST response has scanners (friendly names); GET prompt does not. Merge so frontend can show names.
+            merged = prompt_obj.model_dump()
+            if getattr(response, "scanners", None) is not None:
+                merged["scanners"] = response.scanners.model_dump() if hasattr(response.scanners, "model_dump") else response.scanners
+            else:
+                merged["scanners"] = {}
+            return merged
+        prompt_obj = cai_dt.Prompt(result=response.result)
+        out = prompt_obj.model_dump()
+        if getattr(response, "scanners", None) is not None:
+            out["scanners"] = response.scanners.model_dump() if hasattr(response.scanners, "model_dump") else response.scanners
+        else:
+            out["scanners"] = {}
+        return out
+    return cai.prompts.send(prompt_to_send, **send_kwargs)
+
+
 async def call_f5_guardrail(prompt_to_send: str, send_kwargs: dict) -> Tuple[str, dict]:
     try:
-        result = await run_in_threadpool(cai.prompts.send, prompt_to_send, **send_kwargs)
-        data = result.model_dump()
+        # send_kwargs 会被 _call_f5_guardrail_sync  pop 掉 verbose，复制一份避免影响调用方
+        kwargs = dict(send_kwargs)
+        result = await run_in_threadpool(_call_f5_guardrail_sync, prompt_to_send, kwargs)
+        data = result if isinstance(result, dict) else result.model_dump()
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to call Guardrail: {e}")
     return format_guardrail_reply(data), data
@@ -510,7 +555,7 @@ async def api_chat(payload: ChatIn):
         settings,
         f"api_chat start conversation_id={conversation_id} multi_turn={payload.multi_turn}",
     )
-    send_kwargs = build_send_kwargs()
+    send_kwargs = build_send_kwargs(verbose=settings.get("guardrail_verbose", False))
 
     # Single-turn vs multi-turn
 
@@ -677,11 +722,17 @@ async def api_chat(payload: ChatIn):
 
 
 def _build_guardrail_payload(guardrail_raw: Optional[dict]) -> Optional[dict]:
-    """Build frontend-safe guardrail payload from raw F5 response. Used by api_chat and api_guardrail_scan."""
+    """Build frontend-safe guardrail payload from raw F5 response. Used by api_chat and api_guardrail_scan.
+    When guardrail_verbose is True, root-level 'scanners' is a map id -> { name, direction, ... }; frontend
+    uses result.scannerResults[].scannerId (or .id) to look up scanners[id].name for friendly display.
+    """
     if not isinstance(guardrail_raw, dict):
         return None
     try:
+        # Prefer root-level scanners (verbose response); fallback to result.scanners
         raw_scanners = guardrail_raw.get("scanners")
+        if not raw_scanners and isinstance(guardrail_raw.get("result"), dict):
+            raw_scanners = guardrail_raw["result"].get("scanners")
         raw_sub = {"result": guardrail_raw.get("result"), "scanners": raw_scanners}
         safe_sub = json.loads(json.dumps(raw_sub, default=str))
         guardrail_result = safe_sub.get("result") or {}
@@ -700,19 +751,76 @@ class GuardrailScanIn(BaseModel):
     message: str
 
 
+class OOBChatIn(BaseModel):
+    """OOB 旁路模式：前端以 OpenAI 兼容格式发往 Proxy，本接口转发到 OOB_PROXY_URL。"""
+    message: str
+    stream: bool = False  # 建议 False，否则被拒时 NGINX 可能返回非 SSE 需前端兼容
+
+
+def _forward_oob_chat(message: str, stream: bool = False) -> Tuple[dict, int]:
+    """同步转发到 OOB Proxy，返回 (response_body, status_code)。"""
+    if not OOB_PROXY_URL or not LLM_PROVIDER_KEY:
+        return {"detail": "OOB_PROXY_URL or LLM_PROVIDER_KEY not configured"}, 400
+    url = OOB_PROXY_URL + "/v1/chat/completions"
+    body = {
+        "model": os.getenv("OOB_MODEL", "deepseek-chat"),
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": message or ""},
+        ],
+        "stream": stream,
+    }
+    data = json.dumps(body).encode("utf-8")
+    req = UrlRequest(
+        url,
+        data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + LLM_PROVIDER_KEY,
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=60) as resp:
+            raw = resp.read().decode("utf-8")
+            try:
+                out = json.loads(raw)
+            except json.JSONDecodeError:
+                out = {"raw": raw, "content_type": resp.headers.get("Content-Type", "")}
+            return out, resp.status
+    except HTTPError as e:
+        try:
+            err_body = json.loads(e.read().decode("utf-8"))
+        except Exception:
+            err_body = {"detail": str(e.reason) or "Proxy error"}
+        return err_body, e.code
+    except URLError as e:
+        return {"detail": str(e.reason) or "Proxy unreachable"}, 503
+
+
 @app.post("/api/guardrail-scan")
 async def api_guardrail_scan(payload: GuardrailScanIn):
     """Dedicated endpoint for Guardrail Integration view: only calls F5 Guardrail, returns full guardrail JSON for flow visualization."""
     prompt = (payload.message or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="message is required")
-    send_kwargs = build_send_kwargs()
+    settings = get_runtime_settings(load_settings())
+    send_kwargs = build_send_kwargs(verbose=settings.get("guardrail_verbose", False))
     reply, guardrail_raw = await call_f5_guardrail(prompt, send_kwargs)
     guardrail_payload = _build_guardrail_payload(guardrail_raw)
     return JSONResponse({
         "reply": reply,
         "guardrail": guardrail_payload or {},
     })
+
+
+@app.post("/api/oob-chat")
+async def api_oob_chat(payload: OOBChatIn):
+    """OOB 旁路模式：将请求以 OpenAI 兼容格式转发到 NGINX Proxy，返回 Proxy 的响应供前端判断是否被 Guardrail 拒绝。"""
+    body, status = await run_in_threadpool(
+        _forward_oob_chat, (payload.message or "").strip(), False
+    )
+    return JSONResponse(content=body, status_code=status)
 
 
 @app.get("/api/settings")

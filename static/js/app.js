@@ -266,6 +266,15 @@ function resetGuardrailPanel(){
   if (guardrailListEl) guardrailListEl.innerHTML = "";
 }
 
+/** Shared: resolve root-level scanners map from guardrail (for friendly names). Used by F5 Guardrail Result panel and Guardrail Decision Panel. */
+function getScannersRootFromGuardrail(guardrail) {
+  if (!guardrail || !guardrail.scanners) return null;
+  const inner = guardrail.scanners.scanners;
+  const isInnerMap = inner && typeof inner === "object" && !Array.isArray(inner);
+  const direct = typeof guardrail.scanners === "object" && !Array.isArray(guardrail.scanners) && !("scanners" in guardrail.scanners) && !("configs" in guardrail.scanners) ? guardrail.scanners : null;
+  return isInnerMap ? inner : direct;
+}
+
 function updateGuardrailPanel(guardrail){
   if (!guardrailCardEl) return;
 
@@ -275,15 +284,7 @@ function updateGuardrailPanel(guardrail){
   }
 
   const result = guardrail.result || {};
-  // Support both shapes: (1) guardrail.scanners.scanners = { [id]: {...} } or (2) guardrail.scanners = { [id]: {...} } (direct map)
-  const scannersInner = guardrail.scanners && guardrail.scanners.scanners;
-  const isInnerMap = scannersInner && typeof scannersInner === "object" && !Array.isArray(scannersInner);
-  const directMap = guardrail.scanners && typeof guardrail.scanners === "object" && !Array.isArray(guardrail.scanners)
-    && !("scanners" in guardrail.scanners)
-    && !("configs" in guardrail.scanners)
-    ? guardrail.scanners
-    : null;
-  const scannersRoot = isInnerMap ? scannersInner : directMap;
+  const scannersRoot = getScannersRootFromGuardrail(guardrail);
   const scannerResults = Array.isArray(result.scannerResults) ? result.scannerResults : [];
 
   if (guardrailEmptyEl) guardrailEmptyEl.style.display = "none";
@@ -334,7 +335,8 @@ function updateGuardrailPanel(guardrail){
     }
   }
 
-  // Build scanner meta map: key = scannerId (string), value = { name, direction, source: { type } }
+  // Build scanner meta map from root-level scanners{}: key = scanner id (string), value = { name, direction, ... }
+  // When guardrail_verbose is true, API returns root.scanners[id] with friendly name; we look up by result.scannerResults[].scannerId or .id
   const metaMap = {};
   if (scannersRoot && typeof scannersRoot === "object" && !Array.isArray(scannersRoot)){
     Object.keys(scannersRoot).forEach(k => {
@@ -373,7 +375,8 @@ function updateGuardrailPanel(guardrail){
   };
 
   sortedResults.forEach(r => {
-    const sid = (r.scannerId || "").toString();
+    // Look up scanner by id: result.scannerResults[].scannerId or .id -> root.scanners[id].name
+    const sid = (r.scannerId != null ? r.scannerId : r.id != null ? r.id : "").toString();
     const meta = sid && metaMap[sid] ? metaMap[sid] : null;
     const versionName = r.scannerVersionMeta && r.scannerVersionMeta.name;
     const name = (meta && meta.name) || (versionName && String(versionName)) || sid || "Unnamed scanner";
@@ -1429,6 +1432,10 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
   const packetG2P = document.getElementById("packetG2P");
   const packetP2G = document.getElementById("packetP2G");
   const gintFlowArchDesc = document.getElementById("gintFlowArchDesc");
+  const gintFlowDiagramInline = document.getElementById("gintFlowDiagramInline");
+  const gintFlowDiagramOob = document.getElementById("gintFlowDiagramOob");
+  const gintDecisionContent = document.getElementById("gintDecisionContent");
+  const gintDecisionOobPlaceholder = document.getElementById("gintDecisionOobPlaceholder");
   const gintModeInline = document.getElementById("gintModeInline");
   const gintModeOob = document.getElementById("gintModeOob");
 
@@ -1436,19 +1443,32 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
     en: "In Inline mode, F5 AI Guardrail proxies client requests; end-to-end latency includes LLM communication and LLM response time.",
     zh: "串联模式下，F5 AI Guardrail 代理用户端请求，处理等待时间包含了 LLM 的通信及 LLM 响应时间。"
   };
-  const ARCH_DESC_OOB = { en: "", zh: "" };
+  const ARCH_DESC_OOB = {
+    en: "In OOB mode, the client sends requests to Proxy (NGINX). Proxy calls F5 AI Guardrail /scan; if the check passes, the request is forwarded to the LLM Provider and the response is returned to the client; otherwise Proxy returns a block message.",
+    zh: "旁路模式下，客户端将请求发往 Proxy (NGINX)，Proxy 调用 F5 AI Guardrail /scan 检测；通过则转发至 LLM Provider 并回传响应，否则由 Proxy 返回拒绝信息。"
+  };
+
+  function getGintMode() {
+    if (gintModeOob && gintModeOob.classList.contains("active")) return "oob";
+    return "inline";
+  }
 
   function setGintArchDescByMode(mode) {
     if (!gintFlowArchDesc) return;
     var content = mode === "oob" ? ARCH_DESC_OOB : ARCH_DESC_INLINE;
     gintFlowArchDesc.innerHTML = (content.en ? "<span class=\"en\">" + content.en + "</span>" : "") +
       (content.zh ? "<span class=\"zh\">" + content.zh + "</span>" : "");
+    if (gintFlowDiagramInline) gintFlowDiagramInline.style.display = mode === "oob" ? "none" : "flex";
+    if (gintFlowDiagramOob) gintFlowDiagramOob.style.display = mode === "oob" ? "flex" : "none";
+    if (gintDecisionContent) gintDecisionContent.style.display = mode === "oob" ? "none" : "";
+    if (gintDecisionOobPlaceholder) gintDecisionOobPlaceholder.style.display = mode === "oob" ? "block" : "none";
   }
 
   const STAGE_MS = 650;
   const STAGES = ["c2g", "request_check", "g2p", "p2g", "response_check", "g2c"];
 
   let lastTrace = [];
+  let lastOobTrace = [];
   let lastGuardrail = null;
   let lastReply = "";
   let animTimeout = null;
@@ -1498,8 +1518,25 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
     ];
   }
 
-  function formatFailedScanner(r) {
-    const name = (r.scannerVersionMeta && r.scannerVersionMeta.name) || (r.scannerId || "").toString() || "—";
+  function buildScannersMetaMap(guardrail) {
+    const scannersRoot = getScannersRootFromGuardrail(guardrail);
+    const metaMap = {};
+    if (scannersRoot && typeof scannersRoot === "object") {
+      Object.keys(scannersRoot).forEach(function(k) {
+        const s = scannersRoot[k];
+        if (!s) return;
+        const sid = (s.id != null ? s.id : k).toString();
+        metaMap[sid] = s;
+      });
+    }
+    return metaMap;
+  }
+
+  function formatFailedScanner(r, metaMap) {
+    const sid = (r.scannerId != null ? r.scannerId : r.id != null ? r.id : "").toString();
+    const meta = (metaMap && sid && metaMap[sid]) ? metaMap[sid] : null;
+    const versionName = r.scannerVersionMeta && r.scannerVersionMeta.name;
+    const name = (meta && meta.name) || (versionName && String(versionName)) || sid || "—";
     const dir = (r.scanDirection || r.direction || "").toString();
     const outcome = (r.outcome || "").toString();
     return "Scanner: " + name + "\nDirection: " + dir + "\nOutcome: " + outcome;
@@ -1508,6 +1545,7 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
   function updateDecisionPanel(guardrail) {
     if (!guardrail || !guardrail.result) return;
     const result = guardrail.result;
+    const metaMap = buildScannersMetaMap(guardrail);
     const scannerResults = Array.isArray(result.scannerResults) ? result.scannerResults : [];
     const requestFailedList = scannerResults.filter(r =>
       (r.outcome || "").toString().toLowerCase() === "failed" &&
@@ -1537,7 +1575,7 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
     if (gintRequestFailedWrap && gintRequestFailedDetail) {
       if (requestFailedList.length > 0) {
         gintRequestFailedWrap.style.display = "block";
-        gintRequestFailedDetail.textContent = requestFailedList.map(formatFailedScanner).join("\n\n");
+        gintRequestFailedDetail.textContent = requestFailedList.map(function(r) { return formatFailedScanner(r, metaMap); }).join("\n\n");
       } else {
         gintRequestFailedWrap.style.display = "none";
         gintRequestFailedDetail.textContent = "—";
@@ -1546,7 +1584,7 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
     if (gintResponseFailedWrap && gintResponseFailedDetail) {
       if (responseFailedList.length > 0) {
         gintResponseFailedWrap.style.display = "block";
-        gintResponseFailedDetail.textContent = responseFailedList.map(formatFailedScanner).join("\n\n");
+        gintResponseFailedDetail.textContent = responseFailedList.map(function(r) { return formatFailedScanner(r, metaMap); }).join("\n\n");
       } else {
         gintResponseFailedWrap.style.display = "none";
         gintResponseFailedDetail.textContent = "—";
@@ -1563,7 +1601,7 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
       el.style.opacity = "0";
     });
     if (gintGuardrailStatus) gintGuardrailStatus.textContent = "";
-    if (gintNodeGuardrail) gintNodeGuardrail.classList.remove("state-success", "state-blocked");
+    if (gintNodeGuardrail) gintNodeGuardrail.classList.remove("state-success", "state-blocked", "state-processing");
     if (gintNodeClient) gintNodeClient.classList.remove("sending", "sent", "received");
     if (gintNodeProvider) gintNodeProvider.classList.remove("state-idle", "received", "sent", "receiving", "sending");
     currentStepIndex = 0;
@@ -1619,10 +1657,15 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
         edgeSuccess(edgeC2G);
         packetC2G.style.opacity = "0";
         if (gintNodeClient) gintNodeClient.classList.add("sent");
-        return runStep(stepIndex + 1, trace, baseMs);
+        if (gintNodeGuardrail) gintNodeGuardrail.classList.add("state-processing");
+        var breathMs = 400;
+        return new Promise(function (r) { setTimeout(r, breathMs); }).then(function () {
+          return runStep(stepIndex + 1, trace, baseMs);
+        });
       });
     }
     if (t.stage === "request_check") {
+      if (gintNodeGuardrail) gintNodeGuardrail.classList.remove("state-processing");
       if (gintGuardrailStatus) gintGuardrailStatus.textContent = t.status === "blocked" ? "Request Blocked" : "Request ✓";
       if (t.status === "blocked") {
         edgeBlocked(edgeC2G);
@@ -1714,6 +1757,7 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
       });
     }
     if (t.stage === "request_check") {
+      if (gintNodeGuardrail) gintNodeGuardrail.classList.remove("state-processing");
       if (gintGuardrailStatus) gintGuardrailStatus.textContent = t.status === "blocked" ? "Request Blocked" : "Request ✓";
       if (t.status === "blocked") {
         edgeBlocked(edgeC2G);
@@ -1766,6 +1810,15 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
   }
 
   function stepOnce() {
+    if (getGintMode() === "oob") {
+      if (!lastOobTrace.length) return;
+      if (oobCurrentStepIndex >= lastOobTrace.length) {
+        oobCurrentStepIndex = 0;
+        resetOobFlowVisual();
+      }
+      runOobStep(oobCurrentStepIndex, lastOobTrace, STAGE_MS, true).then(function () { oobCurrentStepIndex++; });
+      return;
+    }
     if (!lastTrace.length) return;
     if (currentStepIndex >= lastTrace.length) {
       currentStepIndex = 0;
@@ -1792,6 +1845,59 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
       if (!msg) return;
       gintSend.disabled = true;
       setResponseContent("…", false);
+
+      if (getGintMode() === "oob") {
+        resetOobFlowVisual();
+        if (oobNodeClient) {
+          oobNodeClient.classList.remove("sending");
+          oobNodeClient.offsetHeight;
+          oobNodeClient.classList.add("sending");
+          setTimeout(function () { if (oobNodeClient) oobNodeClient.classList.remove("sending"); }, 600);
+        }
+        var duration = Math.round(STAGE_MS / speedMultiplier());
+        var oobEdges = [oobEdgeC2P, oobEdgeP2C, oobEdgeGuardrail, oobEdgeP2Prov, oobEdgeProv2P];
+        oobEdges.forEach(function (e) { if (e) e.classList.remove("active", "success", "blocked", "network-error", "result-blocked"); });
+        if (oobEdgeC2P) oobEdgeC2P.classList.add("active");
+        var c2pPromise = runOobPacketAnim(oobEdgeC2P, oobPacketC2P, true, duration);
+        c2pPromise.then(function () {
+          if (oobNodeProxy) oobNodeProxy.classList.add("state-processing");
+        });
+        try {
+          var res = await fetch("/api/oob-chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: msg, stream: false })
+          });
+          var body = await res.json().catch(function () { return { detail: "Invalid response" }; });
+          await c2pPromise;
+          if (oobEdgeC2P) { oobEdgeC2P.classList.remove("active"); oobEdgeC2P.classList.add("success"); }
+          if (oobPacketC2P) oobPacketC2P.style.opacity = "0";
+          if (oobNodeClient) oobNodeClient.classList.add("sent");
+          if (oobNodeProxy) oobNodeProxy.classList.add("state-processing");
+          if (!res.ok) {
+            setResponseContent(getOobResponseText(body) || "Request failed", false);
+            if (oobEdgeC2P) { oobEdgeC2P.classList.remove("success"); oobEdgeC2P.classList.add("network-error"); }
+          } else {
+            lastReply = getOobResponseText(body);
+            var blocked = isOobBlockedResponse(body);
+            setResponseContent(lastReply || "—", blocked);
+            var oobTrace = buildOobTrace(blocked);
+            lastOobTrace = oobTrace;
+            await new Promise(function (r) { setTimeout(r, 400); });
+            oobCurrentStepIndex = 1;
+            var playPromise = playOobTrace(oobTrace, STAGE_MS, 1);
+            if (playPromise) playPromise.then(function () { oobCurrentStepIndex = lastOobTrace.length; });
+          }
+        } catch (e) {
+          await c2pPromise;
+          if (oobEdgeC2P) { oobEdgeC2P.classList.remove("active"); oobEdgeC2P.classList.add("network-error"); }
+          if (oobPacketC2P) oobPacketC2P.style.opacity = "0";
+          setResponseContent("Error: " + (e && e.message || "Request failed"), false);
+        }
+        gintSend.disabled = false;
+        return;
+      }
+
       resetFlowVisual();
       if (gintRequestInspection) { gintRequestInspection.textContent = "—"; gintRequestInspection.className = "gint-decision-value"; }
       if (gintResponseInspection) { gintResponseInspection.textContent = "—"; gintResponseInspection.className = "gint-decision-value"; }
@@ -1809,6 +1915,9 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
       [edgeC2G, edgeG2C, edgeG2P, edgeP2G].forEach(e => e && e.classList.remove("active", "success", "blocked", "network-error"));
       edgeC2G && edgeC2G.classList.add("active");
       var c2gAnimPromise = runPacketAnim(edgeC2G, packetC2G, true, duration);
+      c2gAnimPromise.then(function () {
+        if (gintNodeGuardrail) gintNodeGuardrail.classList.add("state-processing");
+      });
 
       var fetchPromise = fetch("/api/guardrail-scan", {
         method: "POST",
@@ -1825,6 +1934,7 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
         if (edgeC2G) { edgeC2G.classList.remove("active"); edgeC2G.classList.add("success"); }
         if (packetC2G) packetC2G.style.opacity = "0";
         if (gintNodeClient) gintNodeClient.classList.add("sent");
+        if (gintNodeGuardrail) gintNodeGuardrail.classList.add("state-processing");
 
         lastReply = data.reply || "";
         lastGuardrail = data.guardrail && data.guardrail.result ? data.guardrail : null;
@@ -1832,6 +1942,7 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
 
         setResponseContent(lastReply || "—", isPromptRejectedReply(lastReply));
         updateDecisionPanel(lastGuardrail);
+        await new Promise(function (r) { setTimeout(r, 400); });
         playTraceFromStep(lastTrace, 1, STAGE_MS);
       } catch (e) {
         await c2gAnimPromise;
@@ -1846,7 +1957,15 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
     });
   }
 
-  if (gintReplay) gintReplay.addEventListener("click", () => playTrace(lastTrace));
+  if (gintReplay) gintReplay.addEventListener("click", function () {
+    if (getGintMode() === "oob" && lastOobTrace.length) {
+      oobCurrentStepIndex = 0;
+      var p = playOobTrace(lastOobTrace);
+      if (p) p.then(function () { oobCurrentStepIndex = lastOobTrace.length; });
+    } else {
+      playTrace(lastTrace);
+    }
+  });
   if (gintNextStep) gintNextStep.addEventListener("click", stepOnce);
 
   setGintArchDescByMode("inline");
@@ -1866,4 +1985,258 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
       setGintArchDescByMode("oob");
     });
   }
+
+  // ---------- OOB 旁路模式：动画节点与边
+  const oobNodeClient = document.getElementById("oobNodeClient");
+  const oobNodeProxy = document.getElementById("oobNodeProxy");
+  const oobNodeGuardrail = document.getElementById("oobNodeGuardrail");
+  const oobNodeProvider = document.getElementById("oobNodeProvider");
+  const oobEdgeC2P = document.getElementById("oobEdgeC2P");
+  const oobEdgeP2C = document.getElementById("oobEdgeP2C");
+  const oobEdgeGuardrail = document.getElementById("oobEdgeGuardrail");
+  const oobEdgeP2Prov = document.getElementById("oobEdgeP2Prov");
+  const oobEdgeProv2P = document.getElementById("oobEdgeProv2P");
+  const oobPacketC2P = document.getElementById("oobPacketC2P");
+  const oobPacketP2C = document.getElementById("oobPacketP2C");
+  const oobPacketG2P = document.getElementById("oobPacketG2P");
+  const oobPacketP2Prov = document.getElementById("oobPacketP2Prov");
+  const oobPacketProv2P = document.getElementById("oobPacketProv2P");
+  const oobGuardrailStatus = document.getElementById("oobGuardrailStatus");
+  const oobProxyStatus = document.getElementById("oobProxyStatus");
+  const oobBlockBubble = document.getElementById("oobBlockBubble");
+  let oobCurrentStepIndex = 0;
+
+  function isOobBlockedResponse(body) {
+    if (!body || typeof body !== "object") return false;
+    var id = (body.id || "").toString();
+    if (/chatcmpl-error-/.test(id)) return true;
+    try {
+      var choices = body.choices;
+      if (Array.isArray(choices) && choices.length > 0) {
+        var content = (choices[0].message && choices[0].message.content) || "";
+        if (/Request blocked by F5 AI Guardrails/i.test(content)) return true;
+        if (/Request blocked due to sensitive data detected/i.test(content)) return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function getOobResponseText(body) {
+    if (!body || typeof body !== "object") return "";
+    try {
+      var choices = body.choices;
+      if (Array.isArray(choices) && choices.length > 0 && choices[0].message)
+        return (choices[0].message.content || "").toString();
+    } catch (e) {}
+    return body.detail ? String(body.detail) : JSON.stringify(body);
+  }
+
+  function buildOobTrace(blocked) {
+    if (blocked) {
+      return [
+        { stage: "c2p", status: "success" },
+        { stage: "p2g", status: "success" },
+        { stage: "scan_check", status: "blocked" },
+        { stage: "g2p", status: "blocked" },
+        { stage: "p2c", status: "success" }
+      ];
+    }
+    return [
+      { stage: "c2p", status: "success" },
+      { stage: "p2g", status: "success" },
+      { stage: "scan_check", status: "success" },
+      { stage: "p2prov", status: "success" },
+      { stage: "prov2p", status: "success" },
+      { stage: "p2c", status: "success" }
+    ];
+  }
+
+  function resetOobFlowVisual() {
+    [oobEdgeC2P, oobEdgeP2C, oobEdgeGuardrail, oobEdgeP2Prov, oobEdgeProv2P].forEach(function (el) {
+      if (el) el.classList.remove("active", "success", "blocked", "network-error", "idle", "gint-edge-scan", "result-blocked");
+    });
+    [oobPacketC2P, oobPacketP2C, oobPacketG2P, oobPacketP2Prov, oobPacketProv2P].forEach(function (el) {
+      if (!el) return;
+      el.classList.remove("anim", "anim-back");
+      el.style.left = "";
+      el.style.top = "";
+      el.style.opacity = "0";
+    });
+    if (oobGuardrailStatus) oobGuardrailStatus.textContent = "";
+    if (oobProxyStatus) oobProxyStatus.textContent = "";
+    if (oobNodeGuardrail) oobNodeGuardrail.classList.remove("state-success", "state-blocked", "state-processing");
+    if (oobNodeProxy) oobNodeProxy.classList.remove("state-processing", "state-success");
+    if (oobNodeClient) oobNodeClient.classList.remove("sending", "sent", "received");
+    if (oobNodeProvider) oobNodeProvider.classList.remove("state-idle", "received", "sent", "receiving", "sending");
+    if (oobBlockBubble) oobBlockBubble.classList.remove("visible");
+  }
+
+  function resetOobFlowVisualFromProxy() {
+    [oobEdgeGuardrail, oobEdgeP2Prov, oobEdgeProv2P, oobEdgeP2C].forEach(function (el) {
+      if (el) el.classList.remove("active", "success", "blocked", "network-error", "idle", "gint-edge-scan", "result-blocked");
+    });
+    [oobPacketG2P, oobPacketP2Prov, oobPacketProv2P, oobPacketP2C].forEach(function (el) {
+      if (!el) return;
+      el.classList.remove("anim", "anim-back");
+      el.style.left = "";
+      el.style.top = "";
+      el.style.opacity = "0";
+    });
+    if (oobGuardrailStatus) oobGuardrailStatus.textContent = "";
+    if (oobNodeGuardrail) oobNodeGuardrail.classList.remove("state-success", "state-blocked", "state-processing");
+    if (oobNodeProvider) oobNodeProvider.classList.remove("state-idle", "received", "sent", "receiving", "sending");
+    if (oobBlockBubble) oobBlockBubble.classList.remove("visible");
+  }
+
+  function runOobPacketAnim(edgeEl, packetEl, fromStartToEnd, durationMs) {
+    if (!edgeEl || !packetEl) return Promise.resolve();
+    var isVertical = packetEl.classList.contains("gint-packet-vertical");
+    packetEl.style.transition = "none";
+    packetEl.style.opacity = "0";
+    if (isVertical) {
+      packetEl.style.left = "";
+      packetEl.style.top = fromStartToEnd ? "0%" : "100%";
+    } else {
+      packetEl.style.top = "";
+      packetEl.style.left = fromStartToEnd ? "0%" : "100%";
+    }
+    packetEl.offsetHeight;
+    packetEl.style.opacity = "1";
+    packetEl.classList.add("anim");
+    if (!fromStartToEnd) packetEl.classList.add("anim-back");
+    var prop = isVertical ? "top" : "left";
+    packetEl.style.transition = prop + " " + durationMs + "ms linear";
+    if (isVertical)
+      packetEl.style.top = fromStartToEnd ? "100%" : "0%";
+    else
+      packetEl.style.left = fromStartToEnd ? "100%" : "0%";
+    return new Promise(function (r) { setTimeout(r, durationMs); });
+  }
+
+  function runOobStep(stepIndex, trace, baseMs, singleStep) {
+    if (stepIndex >= trace.length) return Promise.resolve();
+    var t = trace[stepIndex];
+    var duration = Math.round(baseMs / speedMultiplier());
+    var next = function () {
+      return singleStep ? Promise.resolve() : runOobStep(stepIndex + 1, trace, baseMs, singleStep);
+    };
+    var allEdges = [oobEdgeC2P, oobEdgeP2C, oobEdgeGuardrail, oobEdgeP2Prov, oobEdgeProv2P];
+    var edgeActive = function (el) {
+      allEdges.forEach(function (e) {
+        if (e) e.classList.remove("active", "gint-edge-scan");
+      });
+      if (el) el.classList.add("active");
+    };
+    var edgeSuccess = function (el) {
+      if (el) { el.classList.remove("active"); el.classList.add("success"); }
+    };
+    var edgeBlocked = function (el) {
+      if (el) { el.classList.remove("active"); el.classList.add("blocked"); }
+    };
+
+    if (t.stage === "c2p" && t.status === "success") {
+      edgeActive(oobEdgeC2P);
+      return runOobPacketAnim(oobEdgeC2P, oobPacketC2P, true, duration).then(function () {
+        edgeSuccess(oobEdgeC2P);
+        oobPacketC2P.style.opacity = "0";
+        if (oobNodeClient) oobNodeClient.classList.add("sent");
+        if (oobNodeProxy) oobNodeProxy.classList.add("state-processing");
+        return new Promise(function (r) { setTimeout(r, 400); }).then(next);
+      });
+    }
+    if (t.stage === "p2g" && t.status === "success") {
+      edgeActive(oobEdgeGuardrail);
+      if (oobNodeGuardrail) oobNodeGuardrail.classList.add("state-processing");
+      return new Promise(function (r) { setTimeout(r, duration); }).then(function () {
+        if (oobEdgeGuardrail) oobEdgeGuardrail.classList.remove("active");
+        return new Promise(function (r) { setTimeout(r, 400); }).then(next);
+      });
+    }
+    if (t.stage === "scan_check") {
+      if (oobNodeGuardrail) oobNodeGuardrail.classList.remove("state-processing");
+      if (oobGuardrailStatus) oobGuardrailStatus.textContent = t.status === "blocked" ? "Request Blocked" : "Request ✓";
+      if (t.status === "blocked") {
+        if (oobNodeGuardrail) { oobNodeGuardrail.classList.remove("state-success"); oobNodeGuardrail.classList.add("state-blocked"); }
+        if (oobNodeProvider) oobNodeProvider.classList.add("state-idle");
+        if (oobEdgeP2Prov) oobEdgeP2Prov.classList.add("idle");
+        if (oobEdgeProv2P) oobEdgeProv2P.classList.add("idle");
+        if (oobBlockBubble) { oobBlockBubble.textContent = "Request blocked by F5 AI Guardrails"; oobBlockBubble.classList.add("visible"); }
+      } else {
+        if (oobNodeGuardrail) oobNodeGuardrail.classList.add("state-success");
+        if (oobEdgeGuardrail) {
+          oobEdgeGuardrail.classList.remove("active");
+          oobEdgeGuardrail.classList.add("success");
+        }
+        if (oobBlockBubble) oobBlockBubble.classList.remove("visible");
+      }
+      return new Promise(function (r) { setTimeout(r, duration); }).then(next);
+    }
+    if (t.stage === "g2p") {
+      if (t.status === "blocked") {
+        if (oobEdgeGuardrail) {
+          oobEdgeGuardrail.classList.remove("active");
+          oobEdgeGuardrail.classList.add("result-blocked");
+        }
+        return new Promise(function (r) { setTimeout(r, duration); }).then(next);
+      }
+      return runOobPacketAnim(oobEdgeGuardrail, oobPacketG2P, true, duration).then(function () {
+        oobPacketG2P.style.opacity = "0";
+        if (oobEdgeGuardrail) {
+          oobEdgeGuardrail.classList.remove("active");
+          oobEdgeGuardrail.classList.add("success");
+        }
+        return new Promise(function (r) { setTimeout(r, 400); }).then(next);
+      });
+    }
+    if (t.stage === "p2prov" && t.status === "success") {
+      edgeActive(oobEdgeP2Prov);
+      return runOobPacketAnim(oobEdgeP2Prov, oobPacketP2Prov, true, duration).then(function () {
+        edgeSuccess(oobEdgeP2Prov);
+        oobPacketP2Prov.style.opacity = "0";
+        if (oobNodeProvider) {
+          oobNodeProvider.classList.remove("state-idle");
+          oobNodeProvider.classList.add("received", "receiving");
+          setTimeout(function () { if (oobNodeProvider) oobNodeProvider.classList.remove("receiving"); }, 400);
+        }
+        return next();
+      });
+    }
+    if (t.stage === "prov2p" && t.status === "success") {
+      edgeActive(oobEdgeProv2P);
+      return runOobPacketAnim(oobEdgeProv2P, oobPacketProv2P, false, duration).then(function () {
+        edgeSuccess(oobEdgeProv2P);
+        oobPacketProv2P.style.opacity = "0";
+        if (oobNodeProvider) {
+          oobNodeProvider.classList.add("sent", "sending");
+          setTimeout(function () { if (oobNodeProvider) oobNodeProvider.classList.remove("sending"); }, 400);
+        }
+        return next();
+      });
+    }
+    if (t.stage === "p2c" && t.status === "success") {
+      edgeActive(oobEdgeP2C);
+      return runOobPacketAnim(oobEdgeP2C, oobPacketP2C, false, duration).then(function () {
+        edgeSuccess(oobEdgeP2C);
+        oobPacketP2C.style.opacity = "0";
+        if (oobNodeClient) oobNodeClient.classList.add("received");
+        if (oobNodeProxy) { oobNodeProxy.classList.remove("state-processing"); oobNodeProxy.classList.add("state-success"); }
+        return Promise.resolve();
+      });
+    }
+    return new Promise(function (r) { setTimeout(r, 50); }).then(next);
+  }
+
+  function playOobTrace(trace, baseMs, startFromStep) {
+    if (!trace.length) return;
+    var fromStep = startFromStep > 0 ? startFromStep : 0;
+    if (fromStep > 0) {
+      resetOobFlowVisualFromProxy();
+    } else {
+      resetOobFlowVisual();
+      oobCurrentStepIndex = 0;
+    }
+    return runOobStep(fromStep, trace, baseMs || STAGE_MS);
+  }
+
+  setGintArchDescByMode(getGintMode());
 })();
