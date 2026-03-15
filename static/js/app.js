@@ -691,6 +691,36 @@ async function loadSettings(){
     if (kbDirInputEl) {
       kbDirInputEl.value = s.kb_dir || "./enterprise_kb";
     }
+    var providerSelect = document.getElementById("providerSelect");
+    if (providerSelect) {
+      var opts = Array.isArray(s.provider_options) ? s.provider_options : [];
+      var current = (s.default_provider || "").trim();
+      providerSelect.innerHTML = "";
+      var emptyOpt = document.createElement("option");
+      emptyOpt.value = "";
+      emptyOpt.textContent = "使用服务器默认 (DEFAULT_PROVIDER)";
+      providerSelect.appendChild(emptyOpt);
+      opts.forEach(function (id) {
+        var opt = document.createElement("option");
+        opt.value = id;
+        opt.textContent = id;
+        if (id === current) opt.selected = true;
+        providerSelect.appendChild(opt);
+      });
+      if (opts.length === 0 && current) {
+        var customOpt = document.createElement("option");
+        customOpt.value = current;
+        customOpt.textContent = current + " (当前)";
+        customOpt.selected = true;
+        providerSelect.appendChild(customOpt);
+      } else if (current && opts.indexOf(current) === -1) {
+        var extra = document.createElement("option");
+        extra.value = current;
+        extra.textContent = current;
+        extra.selected = true;
+        providerSelect.appendChild(extra);
+      }
+    }
     document.getElementById("agentMaxStepsSlider").value = s.agent_max_steps || 4;
     document.getElementById("agentMaxStepsVal").textContent = s.agent_max_steps || 4;
   }catch(e){
@@ -711,7 +741,8 @@ async function saveSettings(showToast = true){
       f5_guardrail_only: !!document.getElementById("toggleF5GuardrailOnly")?.checked,
       debug_guardrail_raw_enabled: !!document.getElementById("toggleGuardrailDebug")?.checked,
       kb_dir: document.getElementById("kbDirInput")?.value || "./enterprise_kb",
-      agent_max_steps: document.getElementById("agentMaxStepsSlider")?.value || 4
+      agent_max_steps: document.getElementById("agentMaxStepsSlider")?.value || 4,
+      default_provider: (document.getElementById("providerSelect")?.value || "").trim()
     })
   });
   if (!res.ok) {
@@ -735,6 +766,7 @@ document.getElementById("toggleAgentSkill")?.addEventListener("change", () => {
 document.getElementById("toggleGuardrailDebug")?.addEventListener("change", () => saveSettings(false));
 document.getElementById("toggleF5GuardrailOnly")?.addEventListener("change", () => saveSettings(false));
 document.getElementById("kbDirInput")?.addEventListener("change", () => saveSettings(false));
+document.getElementById("providerSelect")?.addEventListener("change", () => saveSettings(false));
 document.getElementById("agentMaxStepsSlider")?.addEventListener("change", () => saveSettings(false));
 loadSettings();
 
@@ -1508,6 +1540,16 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
         { stage: "g2c", status: "success" }
       ];
     }
+    if (outcome === "redacted") {
+      return [
+        { stage: "c2g", status: "success" },
+        { stage: "request_check", status: "redacted" },
+        { stage: "g2p", status: "inferred" },
+        { stage: "p2g", status: "inferred" },
+        { stage: "response_check", status: "success" },
+        { stage: "g2c", status: "success" }
+      ];
+    }
     return [
       { stage: "c2g", status: "success" },
       { stage: "request_check", status: "success" },
@@ -1545,6 +1587,7 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
   function updateDecisionPanel(guardrail) {
     if (!guardrail || !guardrail.result) return;
     const result = guardrail.result;
+    const topOutcome = (result.outcome || "").toString().toLowerCase();
     const metaMap = buildScannersMetaMap(guardrail);
     const scannerResults = Array.isArray(result.scannerResults) ? result.scannerResults : [];
     const requestFailedList = scannerResults.filter(r =>
@@ -1559,11 +1602,19 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
     const responseFailed = responseFailedList.length > 0;
 
     if (gintRequestInspection) {
-      gintRequestInspection.textContent = requestFailed ? "✖ Blocked" : "✔ Passed";
-      gintRequestInspection.className = "gint-decision-value " + (requestFailed ? "fail" : "pass");
+      if (topOutcome === "redacted") {
+        gintRequestInspection.textContent = "Redacted";
+        gintRequestInspection.className = "gint-decision-value redacted";
+      } else {
+        gintRequestInspection.textContent = requestFailed ? "✖ Blocked" : "✔ Passed";
+        gintRequestInspection.className = "gint-decision-value " + (requestFailed ? "fail" : "pass");
+      }
     }
     if (gintResponseInspection) {
-      if (requestFailed) {
+      if (topOutcome === "redacted") {
+        gintResponseInspection.textContent = "✔ Passed";
+        gintResponseInspection.className = "gint-decision-value pass";
+      } else if (requestFailed) {
         gintResponseInspection.textContent = "N/A";
         gintResponseInspection.className = "gint-decision-value na";
       } else {
@@ -1666,13 +1717,19 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
     }
     if (t.stage === "request_check") {
       if (gintNodeGuardrail) gintNodeGuardrail.classList.remove("state-processing");
-      if (gintGuardrailStatus) gintGuardrailStatus.textContent = t.status === "blocked" ? "Request Blocked" : "Request ✓";
       if (t.status === "blocked") {
+        if (gintGuardrailStatus) gintGuardrailStatus.textContent = "Request Blocked";
         edgeBlocked(edgeC2G);
         if (gintNodeGuardrail) { gintNodeGuardrail.classList.remove("state-success"); gintNodeGuardrail.classList.add("state-blocked"); }
         if (gintNodeProvider) gintNodeProvider.classList.add("state-idle");
         if (edgeG2P) edgeG2P.classList.add("idle");
         if (edgeP2G) edgeP2G.classList.add("idle");
+      } else if (t.status === "redacted") {
+        if (gintGuardrailStatus) gintGuardrailStatus.textContent = "Request Redacted";
+        if (gintNodeGuardrail) { gintNodeGuardrail.classList.remove("state-blocked"); gintNodeGuardrail.classList.add("state-success"); }
+      } else {
+        if (gintGuardrailStatus) gintGuardrailStatus.textContent = "Request ✓";
+        if (gintNodeGuardrail) { gintNodeGuardrail.classList.remove("state-blocked"); gintNodeGuardrail.classList.add("state-success"); }
       }
       return new Promise(r => setTimeout(r, duration)).then(() => runStep(stepIndex + 1, trace, baseMs));
     }
@@ -1758,13 +1815,19 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
     }
     if (t.stage === "request_check") {
       if (gintNodeGuardrail) gintNodeGuardrail.classList.remove("state-processing");
-      if (gintGuardrailStatus) gintGuardrailStatus.textContent = t.status === "blocked" ? "Request Blocked" : "Request ✓";
       if (t.status === "blocked") {
+        if (gintGuardrailStatus) gintGuardrailStatus.textContent = "Request Blocked";
         edgeBlocked(edgeC2G);
         if (gintNodeGuardrail) { gintNodeGuardrail.classList.remove("state-success"); gintNodeGuardrail.classList.add("state-blocked"); }
         if (gintNodeProvider) gintNodeProvider.classList.add("state-idle");
         if (edgeG2P) edgeG2P.classList.add("idle");
         if (edgeP2G) edgeP2G.classList.add("idle");
+      } else if (t.status === "redacted") {
+        if (gintGuardrailStatus) gintGuardrailStatus.textContent = "Request Redacted";
+        if (gintNodeGuardrail) { gintNodeGuardrail.classList.remove("state-blocked"); gintNodeGuardrail.classList.add("state-success"); }
+      } else {
+        if (gintGuardrailStatus) gintGuardrailStatus.textContent = "Request ✓";
+        if (gintNodeGuardrail) { gintNodeGuardrail.classList.remove("state-blocked"); gintNodeGuardrail.classList.add("state-success"); }
       }
       return new Promise(r => setTimeout(r, duration));
     }
@@ -1839,6 +1902,34 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
     gintResponse.classList.toggle("rejected", !!isRejected);
   }
 
+  /** 对正常响应做打字机流式效果，BLOCK 时一次性显示，便于兼容非流式后端。onDone 在展示完成后调用。 */
+  function setResponseContentWithStreamingEffect(fullText, isRejected, onDone) {
+    if (!gintResponse) {
+      if (onDone) onDone();
+      return;
+    }
+    if (isRejected || !fullText) {
+      setResponseContent(fullText || "—", !!isRejected);
+      if (onDone) onDone();
+      return;
+    }
+    var index = 0;
+    var step = 8;
+    var interval = 24;
+    function tick() {
+      index += step;
+      if (index >= fullText.length) {
+        setResponseContent(fullText, false);
+        if (onDone) onDone();
+        return;
+      }
+      setResponseContent(fullText.slice(0, index), false);
+      setTimeout(tick, interval);
+    }
+    setResponseContent("", false);
+    tick();
+  }
+
   if (gintSend) {
     gintSend.addEventListener("click", async () => {
       const msg = (gintPrompt && gintPrompt.value || "").trim();
@@ -1868,25 +1959,78 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ message: msg, stream: false })
           });
-          var body = await res.json().catch(function () { return { detail: "Invalid response" }; });
           await c2pPromise;
           if (oobEdgeC2P) { oobEdgeC2P.classList.remove("active"); oobEdgeC2P.classList.add("success"); }
           if (oobPacketC2P) oobPacketC2P.style.opacity = "0";
           if (oobNodeClient) oobNodeClient.classList.add("sent");
           if (oobNodeProxy) oobNodeProxy.classList.add("state-processing");
-          if (!res.ok) {
-            setResponseContent(getOobResponseText(body) || "Request failed", false);
-            if (oobEdgeC2P) { oobEdgeC2P.classList.remove("success"); oobEdgeC2P.classList.add("network-error"); }
-          } else {
-            lastReply = getOobResponseText(body);
-            var blocked = isOobBlockedResponse(body);
-            setResponseContent(lastReply || "—", blocked);
-            var oobTrace = buildOobTrace(blocked);
+          var contentType = (res.headers.get("Content-Type") || "").toLowerCase();
+          if (contentType.indexOf("application/json") !== -1) {
+            var body = await res.json().catch(function () { return { detail: "Invalid response" }; });
+            if (!res.ok) {
+              setResponseContent(getOobResponseText(body) || "Request failed", false);
+              if (oobEdgeC2P) { oobEdgeC2P.classList.remove("success"); oobEdgeC2P.classList.add("network-error"); }
+            } else {
+              lastReply = getOobResponseText(body);
+              var blocked = isOobBlockedResponse(body);
+              var oobTrace = buildOobTrace(blocked);
+              lastOobTrace = oobTrace;
+              setResponseContent(lastReply || "—", blocked);
+              setTimeout(function () {
+                oobCurrentStepIndex = 1;
+                var playPromise = playOobTrace(oobTrace, STAGE_MS, 1);
+                if (playPromise) playPromise.then(function () { oobCurrentStepIndex = lastOobTrace.length; });
+              }, 400);
+            }
+          } else if (contentType.indexOf("text/event-stream") !== -1) {
+            var accumulated = "";
+            var readCount = 0;
+            var reader = res.body.getReader();
+            var decoder = new TextDecoder();
+            var buf = "";
+            for (;;) {
+              var chunk = await reader.read();
+              if (chunk.done) break;
+              readCount++;
+              buf += decoder.decode(chunk.value, { stream: true });
+              var events = buf.split(/\n\n/);
+              buf = events.pop() || "";
+              for (var i = 0; i < events.length; i++) {
+                var line = events[i].split("\n").find(function (l) { return l.indexOf("data:") === 0; });
+                if (!line) continue;
+                var payload = line.replace(/^data:\s*/, "").trim();
+                if (payload === "[DONE]") continue;
+                try {
+                  var obj = JSON.parse(payload);
+                  var choice = obj.choices && obj.choices[0];
+                  var delta = choice && choice.delta;
+                  var content = delta && delta.content;
+                  if (typeof content === "string") {
+                    accumulated += content;
+                    setResponseContent(accumulated || "…", false);
+                  }
+                } catch (err) {}
+              }
+            }
+            lastReply = accumulated || "—";
+            var oobTrace = buildOobTrace(false);
             lastOobTrace = oobTrace;
-            await new Promise(function (r) { setTimeout(r, 400); });
-            oobCurrentStepIndex = 1;
-            var playPromise = playOobTrace(oobTrace, STAGE_MS, 1);
-            if (playPromise) playPromise.then(function () { oobCurrentStepIndex = lastOobTrace.length; });
+            function runTrace() {
+              setTimeout(function () {
+                oobCurrentStepIndex = 1;
+                var playPromise = playOobTrace(oobTrace, STAGE_MS, 1);
+                if (playPromise) playPromise.then(function () { oobCurrentStepIndex = lastOobTrace.length; });
+              }, 400);
+            }
+            if (readCount <= 1 && lastReply) {
+              setResponseContentWithStreamingEffect(lastReply, false, runTrace);
+            } else {
+              setResponseContent(lastReply || "—", false);
+              runTrace();
+            }
+          } else {
+            setResponseContent("Unsupported response type", false);
+            if (oobEdgeC2P) { oobEdgeC2P.classList.remove("success"); oobEdgeC2P.classList.add("network-error"); }
           }
         } catch (e) {
           await c2pPromise;

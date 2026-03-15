@@ -3,12 +3,17 @@ import time
 import json
 import re
 from collections import defaultdict, deque
+from datetime import datetime, timezone
 from typing import Deque, Dict, List, Optional, Tuple
 from urllib.request import Request as UrlRequest, urlopen
 from urllib.error import HTTPError, URLError
 
 from dotenv import load_dotenv
-load_dotenv()  # 从项目目录 .env 加载环境变量
+
+# 优先从脚本所在目录加载 .env，避免因启动目录不同而读不到 PROVIDER_OPTIONS 等
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(_script_dir, ".env"))
+load_dotenv()  # 再允许当前工作目录 .env 覆盖
 
 # 仅 Hugging Face 模型下载走代理；CalypsoAI 不走代理。
 # 在 .env 中设置 HF_PROXY 或 PROXY，例如: HF_PROXY=http://127.0.0.1:7890
@@ -16,11 +21,12 @@ load_dotenv()  # 从项目目录 .env 加载环境变量
 HF_PROXY = os.getenv("HF_PROXY") or os.getenv("PROXY")
 
 from fastapi import FastAPI, Request, HTTPException, Body
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
+import httpx
 
 from calypsoai import CalypsoAI
 import calypsoai.datatypes as cai_dt
@@ -50,6 +56,16 @@ CONVERSATION_TTL_SECONDS = int(os.getenv("CONVERSATION_TTL_SECONDS", "120"))  # 
 # OOB 旁路模式：Proxy(NGINX) 地址与 LLM Provider API Key
 OOB_PROXY_URL = (os.getenv("OOB_PROXY_URL") or "").rstrip("/")
 LLM_PROVIDER_KEY = os.getenv("LLM_PROVIDER_KEY") or ""
+
+# Guardrail 调用打点：设为 1/true/yes 时打印，用于判断「请求未发出」vs「未收到响应」
+GUARDRAIL_DEBUG = os.getenv("GUARDRAIL_DEBUG", "").lower() in ("1", "true", "yes")
+
+
+def _guardrail_debug(msg: str):
+    if GUARDRAIL_DEBUG:
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        print(f"[GUARDRAIL-DEBUG] {ts} {msg}")
+
 
 if not CALYPSOAI_TOKEN:
     raise RuntimeError("CALYPSOAI_TOKEN must be set")
@@ -193,6 +209,7 @@ class ChatIn(BaseModel):
     message: str
     conversation_id: str
     multi_turn: bool = False
+    provider: Optional[str] = None  # 可选，覆盖当前默认 Provider（主 Chat/Agent 用）
 
 
 # -----------------------------
@@ -220,11 +237,15 @@ async def health():
 # -----------------------------
 # Helpers
 # -----------------------------
-def build_send_kwargs(*, verbose: bool = False) -> dict:
+def build_send_kwargs(*, verbose: bool = False, provider_override: Optional[str] = None) -> dict:
     if CALYPSOAI_PROJECT_ID:
         # project: SDK/API 要求的项目标识。
+        # provider: 优先用 provider_override（前端选择或请求体），否则用 env DEFAULT_PROVIDER，供 F5/Calypso 路由与展示。
         # verbose: True 时通过底层 client 传 PostPromptsBody.verbose，返回更详细的 scanner 信息（SDK 的 prompts.send() 未暴露该参数，故需走 client）。
         kwargs = {"project": CALYPSOAI_PROJECT_ID}
+        effective_provider = (provider_override or "").strip() or (DEFAULT_PROVIDER or "").strip()
+        if effective_provider:
+            kwargs["provider"] = effective_provider
         if verbose:
             kwargs["verbose"] = True
         return kwargs
@@ -302,6 +323,7 @@ DEFAULT_SETTINGS = {
     "kb_allowed_extensions": ".txt,.md,.json,.csv",
     "kb_max_file_chars": 8000,
     "kb_max_result_chars": 5000,
+    "default_provider": "",  # 前端可选；空则用 env DEFAULT_PROVIDER
 }
 
 def load_settings():
@@ -346,6 +368,7 @@ def get_runtime_settings(raw: dict) -> dict:
         "kb_allowed_extensions": normalize_extensions(raw.get("kb_allowed_extensions", ".txt,.md,.json,.csv")),
         "kb_max_file_chars": to_int(raw.get("kb_max_file_chars", 8000), 8000, 500, 50000),
         "kb_max_result_chars": to_int(raw.get("kb_max_result_chars", 5000), 5000, 500, 20000),
+        "default_provider": str(raw.get("default_provider", "") or ""),
     }
 
 def format_guardrail_reply(data: dict) -> str:
@@ -362,43 +385,55 @@ def format_guardrail_reply(data: dict) -> str:
     )
 
 def _call_f5_guardrail_sync(prompt_to_send: str, send_kwargs: dict):
-    """同步调用 F5 Guardrail。若 send_kwargs 含 verbose=True，走底层 client 以传 verbose；否则走 cai.prompts.send。"""
+    """同步调用 F5 Guardrail。若 send_kwargs 含 verbose=True，走底层 client 以传 verbose；否则走 cai.prompts.send。主 Chat/Agent/Inline 的 provider 由 build_send_kwargs 传入。"""
+    _guardrail_debug(f"sync: 准备发送请求 prompt_len={len(prompt_to_send or '')}")
     use_verbose = send_kwargs.pop("verbose", False)
     project = send_kwargs.get("project")
+    provider = send_kwargs.get("provider")
     if use_verbose and project is not None:
-        body = cai_dt.PostPromptsBody(
+        body_kw = dict(
             input=prompt_to_send,
             project=project,
             skipScanning=False,
             verbose=True,
         )
+        if provider:
+            body_kw["provider"] = provider
+        try:
+            body = cai_dt.PostPromptsBody(**body_kw)
+        except TypeError:
+            # SDK 的 PostPromptsBody 可能不支持 provider，仅用必选字段重试
+            body_kw.pop("provider", None)
+            body = cai_dt.PostPromptsBody(**body_kw)
+        _guardrail_debug("sync: 已调用 Calypso API (client.prompts.post)")
         response = cai.client.prompts.post(body)
-        if response.id:
-            prompt_obj = cai.client.prompts.getPromptId(response.id).prompt
-            # POST response has scanners (friendly names); GET prompt does not. Merge so frontend can show names.
-            merged = prompt_obj.model_dump()
-            if getattr(response, "scanners", None) is not None:
-                merged["scanners"] = response.scanners.model_dump() if hasattr(response.scanners, "model_dump") else response.scanners
-            else:
-                merged["scanners"] = {}
-            return merged
-        prompt_obj = cai_dt.Prompt(result=response.result)
-        out = prompt_obj.model_dump()
+        _guardrail_debug("sync: 已收到 Calypso API 响应 (post)")
+        # verbose 的 POST 响应已包含完整 JSON，根下含 scanners（友好名），直接从此响应提取
+        out = response.model_dump() if hasattr(response, "model_dump") else {}
         if getattr(response, "scanners", None) is not None:
             out["scanners"] = response.scanners.model_dump() if hasattr(response.scanners, "model_dump") else response.scanners
         else:
-            out["scanners"] = {}
+            out.setdefault("scanners", {})
         return out
-    return cai.prompts.send(prompt_to_send, **send_kwargs)
+    _guardrail_debug("sync: 已调用 Calypso API (prompts.send)")
+    out = cai.prompts.send(prompt_to_send, **send_kwargs)
+    _guardrail_debug("sync: 已收到 Calypso API 响应 (send)")
+    return out
 
 
 async def call_f5_guardrail(prompt_to_send: str, send_kwargs: dict) -> Tuple[str, dict]:
+    _guardrail_debug("call_f5_guardrail: 即将发起请求（进入线程池前）")
     try:
         # send_kwargs 会被 _call_f5_guardrail_sync  pop 掉 verbose，复制一份避免影响调用方
         kwargs = dict(send_kwargs)
         result = await run_in_threadpool(_call_f5_guardrail_sync, prompt_to_send, kwargs)
+        _guardrail_debug("call_f5_guardrail: 已收到服务端完整响应")
         data = result if isinstance(result, dict) else result.model_dump()
     except Exception as e:
+        _guardrail_debug(
+            f"call_f5_guardrail: 请求失败（已发出则说明未收到响应或连接被关闭） "
+            f"type={type(e).__name__} err={e!r}"
+        )
         raise HTTPException(status_code=502, detail=f"Failed to call Guardrail: {e}")
     return format_guardrail_reply(data), data
 
@@ -555,7 +590,8 @@ async def api_chat(payload: ChatIn):
         settings,
         f"api_chat start conversation_id={conversation_id} multi_turn={payload.multi_turn}",
     )
-    send_kwargs = build_send_kwargs(verbose=settings.get("guardrail_verbose", False))
+    effective_provider = (payload.provider or "").strip() or (raw_settings.get("default_provider") or "").strip() or DEFAULT_PROVIDER
+    send_kwargs = build_send_kwargs(verbose=settings.get("guardrail_verbose", False), provider_override=effective_provider or None)
 
     # Single-turn vs multi-turn
 
@@ -749,12 +785,13 @@ def _build_guardrail_payload(guardrail_raw: Optional[dict]) -> Optional[dict]:
 
 class GuardrailScanIn(BaseModel):
     message: str
+    provider: Optional[str] = None  # 可选，覆盖当前默认 Provider（Inline 模式用）
 
 
 class OOBChatIn(BaseModel):
     """OOB 旁路模式：前端以 OpenAI 兼容格式发往 Proxy，本接口转发到 OOB_PROXY_URL。"""
     message: str
-    stream: bool = False  # 建议 False，否则被拒时 NGINX 可能返回非 SSE 需前端兼容
+    stream: bool = False  # 当前 NJS 整段缓冲后返回，暂不支持真正流式；False 时始终 JSON
 
 
 def _forward_oob_chat(message: str, stream: bool = False) -> Tuple[dict, int]:
@@ -798,14 +835,90 @@ def _forward_oob_chat(message: str, stream: bool = False) -> Tuple[dict, int]:
         return {"detail": str(e.reason) or "Proxy unreachable"}, 503
 
 
+async def _forward_oob_chat_stream(message: str):
+    """流式转发：上游返回 application/json 时整包返回（BLOCK），否则以 SSE 流式转发（PASS）。"""
+    if not OOB_PROXY_URL or not LLM_PROVIDER_KEY:
+        return JSONResponse(
+            content={"detail": "OOB_PROXY_URL or LLM_PROVIDER_KEY not configured"},
+            status_code=400,
+        )
+    url = OOB_PROXY_URL + "/v1/chat/completions"
+    body = {
+        "model": os.getenv("OOB_MODEL", "deepseek-chat"),
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": message or ""},
+        ],
+        "stream": True,
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + LLM_PROVIDER_KEY,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            async with client.stream("POST", url, json=body, headers=headers) as r:
+                ct = (r.headers.get("content-type") or "").lower()
+                if r.status_code < 200 or r.status_code >= 300:
+                    raw = await r.aread()
+                    return JSONResponse(
+                        content={"detail": raw.decode("utf-8", errors="replace")[:2000]},
+                        status_code=r.status_code,
+                    )
+                # 用首块内容判断是否为 SSE，避免上游误设 Content-Type 为 application/json
+                first_chunk = b""
+                it = r.aiter_bytes()
+                try:
+                    first_chunk = await it.__anext__()
+                except StopAsyncIteration:
+                    pass
+                def looks_like_sse(data: bytes) -> bool:
+                    if not data:
+                        return False
+                    line = data.split(b"\n", 1)[0].lstrip()
+                    return line.startswith(b"data:")
+
+                if looks_like_sse(first_chunk):
+                    async def stream_chunks():
+                        yield first_chunk
+                        async for chunk in it:
+                            yield chunk
+                    return StreamingResponse(
+                        stream_chunks(),
+                        media_type="text/event-stream",
+                        status_code=r.status_code,
+                    )
+                raw = first_chunk
+                async for chunk in it:
+                    raw += chunk
+                try:
+                    data = json.loads(raw.decode("utf-8"))
+                except json.JSONDecodeError:
+                    data = {"detail": raw.decode("utf-8", errors="replace")[:2000]}
+                return JSONResponse(content=data, status_code=r.status_code)
+    except httpx.HTTPStatusError as e:
+        try:
+            err_body = e.response.json()
+        except Exception:
+            err_body = {"detail": str(e)}
+        return JSONResponse(content=err_body, status_code=e.response.status_code)
+    except Exception as e:
+        return JSONResponse(
+            content={"detail": str(e) or "Proxy error"},
+            status_code=503,
+        )
+
+
 @app.post("/api/guardrail-scan")
 async def api_guardrail_scan(payload: GuardrailScanIn):
     """Dedicated endpoint for Guardrail Integration view: only calls F5 Guardrail, returns full guardrail JSON for flow visualization."""
     prompt = (payload.message or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="message is required")
-    settings = get_runtime_settings(load_settings())
-    send_kwargs = build_send_kwargs(verbose=settings.get("guardrail_verbose", False))
+    raw_settings = load_settings()
+    settings = get_runtime_settings(raw_settings)
+    effective_provider = (payload.provider or "").strip() or (raw_settings.get("default_provider") or "").strip() or DEFAULT_PROVIDER
+    send_kwargs = build_send_kwargs(verbose=settings.get("guardrail_verbose", False), provider_override=effective_provider or None)
     reply, guardrail_raw = await call_f5_guardrail(prompt, send_kwargs)
     guardrail_payload = _build_guardrail_payload(guardrail_raw)
     return JSONResponse({
@@ -816,16 +929,28 @@ async def api_guardrail_scan(payload: GuardrailScanIn):
 
 @app.post("/api/oob-chat")
 async def api_oob_chat(payload: OOBChatIn):
-    """OOB 旁路模式：将请求以 OpenAI 兼容格式转发到 NGINX Proxy，返回 Proxy 的响应供前端判断是否被 Guardrail 拒绝。"""
-    body, status = await run_in_threadpool(
-        _forward_oob_chat, (payload.message or "").strip(), False
-    )
+    """OOB 旁路模式：将请求以 OpenAI 兼容格式转发到 NGINX Proxy。stream=True 时 PASS 返回 SSE、BLOCK 返回 JSON；stream=False 时始终返回 JSON。"""
+    msg = (payload.message or "").strip()
+    if payload.stream:
+        return await _forward_oob_chat_stream(msg)
+    body, status = await run_in_threadpool(_forward_oob_chat, msg, False)
     return JSONResponse(content=body, status_code=status)
+
+
+def _get_provider_options() -> list:
+    """从环境变量 PROVIDER_OPTIONS（逗号分隔）读取可选 Provider 列表，供前端下拉使用。每次请求时重新加载项目 .env 以便不重启即可生效。"""
+    load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
+    raw = (os.getenv("PROVIDER_OPTIONS") or "").strip()
+    if not raw:
+        return []
+    return [p.strip() for p in raw.split(",") if p.strip()]
 
 
 @app.get("/api/settings")
 async def get_settings():
-    return load_settings()
+    out = dict(load_settings())
+    out["provider_options"] = _get_provider_options()
+    return out
 
 @app.post("/api/settings")
 async def post_settings(payload: dict = Body(default=None)):

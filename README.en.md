@@ -29,11 +29,12 @@ A multi-engine AI guardrail demo Agent application based on F5 AI Guardrail (Cal
 10. Added whether to use all engine switches 
 
 11. Added debug swtich for storing raw json that from F5 guardrail
-12. Load `.env` directly without setting environment variables
+12. Added the F5 AI/Calypso multi-provider configuration capability, allowing users to switch and select different providers corresponding to the Project on the front end
+13. Load `.env` directly without setting environment variables
 
-13. Added frontend Markdown response rendering
+14. Added frontend Markdown response rendering
 
-14. Added the integration pipeline demonstration of F5 Red Team and DevSecOps. 
+15. Added the integration pipeline demonstration of F5 Red Team and DevSecOps. 
 
    Note: Considering the actual time consumption of Red Team and the feasibility of the environment, the Red Team API integration here is mock simulation and does not actually create real objects on the SaaS.
 
@@ -57,14 +58,16 @@ Variables in `.env_example`:
 | `CALYPSOAI_URL` | F5 AI Security platform URL | `https://www.us1.calypsoai.app/` |
 | `CALYPSOAI_TOKEN` | API token (required) | `Your-calypsoai-token` |
 | `CALYPSOAI_PROJECT_ID` | Project ID (Project mode) | `Your-calypsoai-project-id` |
-| `DEFAULT_PROVIDER` | Provider name configured in Calypso | `Your-calypsoai-provider` |
+| `DEFAULT_PROVIDER` | Provider name configured in Calypso; server default for main Chat/Agent/Inline mode; can be overridden by frontend selection | `Your-calypsoai-provider` |
+| `PROVIDER_OPTIONS` | Comma-separated list of providers shown in the Settings “LLM Provider” dropdown; when set, users can choose which provider to use in the UI | `jinglin-google-gemini-133540,deepseek-JingLin-real-charge` |
 | `SLIDING_WINDOW_MAX_TURNS` | Sliding window turn count for multi-turn chat | `8` |
 | `SLIDING_WINDOW_MAX_CHARS` | Max characters in sliding window | `8000` |
 | `CONVERSATION_TTL_SECONDS` | Conversation turn TTL in seconds | `120` |
+| `GUARDRAIL_DEBUG` | When set to `1`/`true`/`yes`, prints F5 Guardrail request checkpoints to the terminal for debugging timeouts or 502 (optional) | `1` |
 | `HF_HOME` | Hugging Face model cache directory (optional) | `Your-hugging-face-home-directory` |
-| `HF_PROXY` | Proxy for HF model download only (optional) | `http://127.0.0.1:8010` |
-| `HF_TOKEN` | Hugging Face token (optional; recommended for faster downloads) | `Your-hugging-face-token` |
-| `OOB_PROXY_URL` | NGINX Proxy URL for OOB mode. **Required when using OOB**; set to your actual deployment (e.g. `http://localhost:8787`). | `http://localhost:8787` |
+| `HF_PROXY` | Proxy for HF model download only; not used for CalypsoAI (optional) | `http://127.0.0.1:8010` |
+| `HF_TOKEN` | Hugging Face token (optional; recommended for faster downloads and to avoid rate limits) | `Your-hugging-face-token` |
+| `OOB_PROXY_URL` | NGINX Proxy URL for OOB mode. **Required when using OOB**; must match the docs/nginx listen address (e.g. `http://localhost:8787`). | `http://localhost:8787` |
 | `LLM_PROVIDER_KEY` | API Key (Bearer) sent to the LLM in OOB mode. **Required when using OOB**; set per your LLM provider. | `Your-llm-provider-api-key` |
 | `OOB_MODEL` | Model name for OOB requests. **Default `deepseek-chat`** when unset; when using OOB, set to your actual model. | `deepseek-chat` |
 
@@ -137,7 +140,7 @@ source .venv/bin/activate   # Linux/macOS
 2. **Other dependencies**
 
 ```bash
-pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf
+pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf httpx
 ```
 
 ---
@@ -189,6 +192,32 @@ On first run, the app will download local detection models from Hugging Face (e.
 
 ---
 
-## 7. Disclaimer
+## 7. Debug logging (F5 Guardrail checkpoints)
+
+When F5 Guardrail calls time out or return 502, you can use debug checkpoints to tell whether the **request was never sent** or **no response was received**.
+
+In `.env` set:
+
+```bash
+GUARDRAIL_DEBUG=1
+```
+
+After restarting the app, the terminal will show timestamped `[GUARDRAIL-DEBUG]` lines. Use the **last** checkpoint that appears to interpret:
+
+| Last checkpoint | Meaning |
+|-----------------|---------|
+| About to send request (before entering threadpool) | Request likely never actually sent (stuck in threadpool or earlier). |
+| Preparing to send request | Inside sync path but not yet the Calypso HTTP call. |
+| About to call Calypso API (post or prompts.send) | **Request has been sent**; if you never see “received Calypso API response”, the server **did not respond** (timeout, connection closed, etc.). |
+| Received Calypso API response | Server responded; issue is in later handling. |
+| Request failed ... type=... err=... | Check `type`/`err`: e.g. `RemoteDisconnected` means the remote closed the connection—request was sent but no normal response. |
+
+The actual log messages are in Chinese; match them to the rows above by order and context.
+
+Agent-related logs (enable “Agent Debug” in Settings) emit timestamped `[AGENT-DEBUG]` lines, which you can use together with Guardrail checkpoints when troubleshooting.
+
+---
+
+## 8. Disclaimer
 
 This is a demo application for the F5 AI Guardrail and AI Red Team system and is not production-ready. Please open issues for any problems.

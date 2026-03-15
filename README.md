@@ -21,9 +21,10 @@
 9. 增加了HF的代理下载能力
 10. 增加了是否使用所有引擎开关
 11. 增加了后端原始响应json调试开关
-12. 将env文件直接加载，无需设置环境变量
-13. 增加了前端Markdown响应的渲染
-14. 增加了F5 Red Team与DevSecOps的集成流水线演示。
+12. 增加了F5 AI/Calypso多Provider配置能力，容许用户前端切换选择Project对应的多个Providers
+13. 将env文件直接加载，无需设置环境变量
+14. 增加了前端Markdown响应的渲染
+15. 增加了F5 Red Team与DevSecOps的集成流水线演示。
 
    注意：考虑到实际Red Team耗时及环境可行性，这里的Red Team API集成是mock模拟的，并不实际在SaaS端创建真实对象。
 
@@ -47,16 +48,18 @@ cp .env_example .env
 | `CALYPSOAI_URL` | F5 AI Security 平台地址 | `https://www.us1.calypsoai.app/` |
 | `CALYPSOAI_TOKEN` | API 令牌（必填） | `Your-calypsoai-token` |
 | `CALYPSOAI_PROJECT_ID` | 项目 ID（Project 模式） | `Your-calypsoai-project-id` |
-| `DEFAULT_PROVIDER` | Calypso 中配置的 Provider 名称 | `Your-calypsoai-provider` |
+| `DEFAULT_PROVIDER` | Calypso 中配置的 Provider 名称，作为服务器默认值；主 Chat/Agent/Inline 模式下可被前端选择覆盖 | `Your-calypsoai-provider` |
+| `PROVIDER_OPTIONS` | 前端设置页「LLM Provider」下拉的可选列表，逗号分隔；配置后用户可在界面选择使用的 Provider | `jinglin-google-gemini-133540,deepseek-JingLin-real-charge` |
 | `SLIDING_WINDOW_MAX_TURNS` | 多轮对话滑动窗口轮数 | `8` |
 | `SLIDING_WINDOW_MAX_CHARS` | 滑动窗口最大字符数 | `8000` |
 | `CONVERSATION_TTL_SECONDS` | 会话轮次过期时间（秒） | `120` |
+| `GUARDRAIL_DEBUG` | 设为 `1`/`true`/`yes` 时在终端打印 F5 Guardrail 请求打点，用于排查超时或 502（可选） | `1` |
 | `HF_HOME` | Hugging Face 模型缓存目录（可选） | `Your-hugging-face-home-directory` |
-| `HF_PROXY` | 仅用于 HF 模型下载的代理（可选） | `http://127.0.0.1:8010` |
-| `HF_TOKEN` | Hugging Face 令牌（可选，建议设置以加速下载） | `Your-hugging-face-token` |
-| `OOB_PROXY_URL` | OOB 模式下 NGINX Proxy 地址。**使用 OOB 时必填**，按实际部署填写（如 `http://localhost:8787`） | `http://localhost:8787` |
+| `HF_PROXY` | 仅用于 HF 模型下载的代理，不用于连接 CalypsoAI（可选） | `http://127.0.0.1:8010` |
+| `HF_TOKEN` | Hugging Face 令牌（可选，建议设置以加速下载、避免限流） | `Your-hugging-face-token` |
+| `OOB_PROXY_URL` | OOB 模式下 NGINX Proxy 地址。**使用 OOB 时必填**，按实际部署填写（需与 docs/nginx 监听地址一致，如 `http://localhost:8787`） | `http://localhost:8787` |
 | `LLM_PROVIDER_KEY` | OOB 模式下发往 LLM 的 API Key（Bearer）。**使用 OOB 时必填**，按实际 LLM 提供商配置 | `Your-llm-provider-api-key` |
-| `OOB_MODEL` | OOB 请求使用的模型名。不填时**缺省为 `deepseek-chat`**；使用 OOB 时应按实际调用的模型配置 | `deepseek-chat` |
+| `OOB_MODEL` | OOB 请求使用的模型名。不填时**缺省为 `deepseek-chat`**；使用 OOB 时建议按实际调用的模型配置 | `deepseek-chat` |
 
 注意：你需要首先在 Calypso（F5 Guardrail）系统上设定相关 Project、Connection/Provider 及 Project API token。测试企业敏感信息防护等能力时，需在 F5 Guardrail 中提前配置 Custom scanner 等。
 
@@ -127,7 +130,7 @@ source .venv/bin/activate   # Linux/macOS
 2. **其他依赖**
 
 ```bash
-pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf
+pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf httpx
 ```
 
 ---
@@ -179,6 +182,30 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 
 ---
 
-## 7. 说明
+## 7. 调试日志（F5 Guardrail 打点）
+
+当调用 F5 Guardrail 出现超时或 502 时，可通过打点日志判断是「请求未发出」还是「未收到服务器响应」。
+
+在 `.env` 中设置：
+
+```bash
+GUARDRAIL_DEBUG=1
+```
+
+重启应用后，终端会输出带时间戳的 `[GUARDRAIL-DEBUG]` 日志。根据**最后一次**出现的打点可判断：
+
+| 最后一条打点 | 含义 |
+|--------------|------|
+| `即将发起请求（进入线程池前）` | 请求很可能还没真正发出去（卡在线程池或更早）。 |
+| `准备发送请求` | 已进入同步调用，但尚未发出 Calypso 的 HTTP 请求。 |
+| `已调用 Calypso API (post)` 或 `(prompts.send)` | **请求已经发出**；若之后没有「已收到 Calypso API 响应」，即**未收到服务器响应**（超时、连接被关闭等）。 |
+| `已收到 Calypso API 响应` | 服务端已返回，问题在后续处理逻辑。 |
+| `请求失败 ... type=... err=...` | 查看 `type`/`err`：例如 `RemoteDisconnected` 表示对端关闭连接，即请求已发出但未收到正常响应。 |
+
+Agent 相关日志（需在 Settings 中开启 Agent Debug）会输出带时间戳的 `[AGENT-DEBUG]`，便于与 Guardrail 打点对照排查。
+
+---
+
+## 8. 说明
 
 本程序为F5 AI Guardrail与AI Red Team系统的演示程序，非生产级。如有问题请提issues。

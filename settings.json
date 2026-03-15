@@ -3,9 +3,9 @@
   "heuristic_threshold": 6,
   "toxic_threshold": 0.75,
   "pi_threshold": 0.7,
-  "agent_skill_enabled": true,
+  "agent_skill_enabled": false,
   "f5_guardrail_only": true,
-  "debug_guardrail_raw_enabled": false,
+  "debug_guardrail_raw_enabled": true,
   "guardrail_verbose": true,
   "kb_dir": "./enterprise_kb",
   "agent_max_steps": 4,
@@ -18,5 +18,6 @@
     ".csv"
   ],
   "kb_max_file_chars": 8000,
-  "kb_max_result_chars": 5000
+  "kb_max_result_chars": 5000,
+  "default_provider": "jinglin-google-gemini-133540"
 }

@@ -2222,6 +2222,9 @@ code{
   color: var(--muted);
   font-style: italic;
 }
+.gint-decision-value.redacted {
+  color: #d97706;
+}
 .gint-decision-failed {
   margin-top: 12px;
   padding: 10px;

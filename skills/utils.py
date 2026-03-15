@@ -1,6 +1,7 @@
 """Shared utility functions used by skills and main application."""
 
 import os
+from datetime import datetime, timezone
 from typing import Any, List, Optional
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -65,4 +66,5 @@ def normalize_extensions(raw: Any) -> List[str]:
 
 def agent_debug_log(settings: dict, message: str):
     if settings.get("agent_debug_enabled"):
-        print(f"[AGENT-DEBUG] {message}")
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        print(f"[AGENT-DEBUG] {ts} {message}")
