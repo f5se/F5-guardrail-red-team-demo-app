@@ -99,6 +99,9 @@ cp .env_example .env
 Guardrail Integration 视图的 **OOB（旁路）模式** 下，请求由本应用转发到「NGINX + F5 Guardrail」组成的 Proxy，再由 Proxy 转发到 LLM Provider。NGINX 需单独部署并配置：
 
 - **参考配置**：`docs/nginx/conf.d/default_example.conf`（复制为 `default.conf` 后按需修改）。
+- 正确配置主`nginx.onf`。
+- 安装NGINX JS（NJS）模块，并在`nginx.conf`中load。
+- 将相关Js文件放置在`/etc/nginx/js/`目录下
 - **要点**：
   - **upstream**：`aigr_api`（F5 Guardrail 平台）、`llm_provider_api`（如 Deepseek/OpenAI）。
   - **变量**：`$aigr_api_host`、`$aigr_api_token`（F5 鉴权）、`$llm_provider_host`。
@@ -145,6 +148,14 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 浏览器访问：`http://localhost:8000`。
+
+> 请注意，在首次启动时，应设置TRANSFORMERS_OFFLINE=0以便程序可以在发现本地没有引擎模型时，自动去hugging face下载
+>
+> 以后启动，设置为1即可。
+>
+> 如果是非特权用户运行，可能会遇到下载文件的目录权限问题，可通过指定python虚拟环境下的python bin文件方式避免sudo导致的python可执行文件的切换，例如
+>
+> sudo /home/myuser/miniconda3/envs/calypsoai-demo-app/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
 
 ---
 

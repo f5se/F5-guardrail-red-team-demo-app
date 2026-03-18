@@ -109,6 +109,8 @@ Example (single entry in `config/attack-presets.json`):
 In **OOB (out-of-band)** mode in the Guardrail Integration view, requests are forwarded from this app to an **NGINX + F5 Guardrail** proxy, which then forwards to the LLM provider. NGINX must be deployed and configured separately.
 
 - **Reference config:** `docs/nginx/conf.d/default_example.conf` (copy to `default.conf` and adjust as needed).
+- Install` NGINX JS(NJS)` module, and load it in the `nginx.conf`
+- Put related njs file into `/etc/nginx/js/`
 - **Main points:**
   - **Upstreams:** `aigr_api` (F5 Guardrail), `llm_provider_api` (e.g. Deepseek/OpenAI).
   - **Variables:** `$aigr_api_host`, `$aigr_api_token` (F5 auth), `$llm_provider_host`.
@@ -155,6 +157,14 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 Open in browser: `http://localhost:8000`.
+
+> Please note that when starting up for the first time, TRANSFORMERS_OFFLINE=0 should be set so that the program can automatically download from hugging face when it finds that there is no engine model locally 
+>
+> From now on, when starting up, just set it to 1. 
+>
+> If a non-privileged user runs it, you may encounter directory permission issues for downloading files. You can avoid the switching of python executable files caused by sudo by specifying the python bin file method in the python virtual environment, for example:
+>
+> sudo /home/myuser/miniconda3 envs/calypsoai - demo - app/bin/python3 -m uvicorn main: app - host 0.0.0.0 -- port 8000
 
 ---
 
