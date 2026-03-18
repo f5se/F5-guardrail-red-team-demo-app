@@ -1746,8 +1746,8 @@ code{
 }
 .gint-node-label {
   display: block;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 800;
   color: var(--text);
 }
 .gint-node-sublabel {

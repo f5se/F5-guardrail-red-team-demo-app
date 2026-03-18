@@ -1476,8 +1476,8 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
     zh: "串联模式下，F5 AI Guardrail 代理用户端请求，处理等待时间包含了 LLM 的通信及 LLM 响应时间。"
   };
   const ARCH_DESC_OOB = {
-    en: "In OOB mode, the client sends requests to Proxy (NGINX). Proxy calls F5 AI Guardrail /scan; if the check passes, the request is forwarded to the LLM Provider and the response is returned to the client; otherwise Proxy returns a block message.",
-    zh: "旁路模式下，客户端将请求发往 Proxy (NGINX)，Proxy 调用 F5 AI Guardrail /scan 检测；通过则转发至 LLM Provider 并回传响应，否则由 Proxy 返回拒绝信息。"
+    en: "In OOB mode, the client sends requests(OpenAI compatible API) to Proxy (NGINX). Proxy calls F5 AI Guardrail /scan; if the check passes, the request is forwarded to the LLM Provider and the response is returned to the client; otherwise Proxy returns a block message.",
+    zh: "旁路模式下，客户端将请求(OpenAI 兼容 API)发往 Proxy (NGINX)，Proxy 调用 F5 AI Guardrail /scan 检测；通过则转发至 LLM Provider 并回传响应，否则由 Proxy 返回拒绝信息。"
   };
 
   function getGintMode() {
