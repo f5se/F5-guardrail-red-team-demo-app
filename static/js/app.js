@@ -5,6 +5,13 @@ const btnClear = document.getElementById("btnClear");
 const chatTitleEl = document.getElementById("chatTitle");
 const modeBadgeEl = document.getElementById("modeBadge");
 const kbSkillBadgeEl = document.getElementById("kbSkillBadge");
+const f5GuardrailOnlyBadgeEl = document.getElementById("f5GuardrailOnlyBadge");
+const localEngineCards = [
+  document.getElementById("cardPattern"),
+  document.getElementById("cardHeuristic"),
+  document.getElementById("cardToxic"),
+  document.getElementById("cardProtect")
+].filter(Boolean);
 const navButtons = Array.from(document.querySelectorAll(".navBtn"));
 
 // 攻击示例面板元素
@@ -452,7 +459,27 @@ function setEnterpriseKBSkillEnabled(v){
   kbSkillBadgeEl.classList.toggle("kbSkillOn", !!v);
   kbSkillBadgeEl.classList.toggle("kbSkillOff", !v);
 }
+
+function setF5GuardrailOnlyBadge(v){
+  if (!f5GuardrailOnlyBadgeEl) return;
+  f5GuardrailOnlyBadgeEl.textContent = v ? "F5 Guardrail Only ON" : "F5 Guardrail Only OFF";
+  f5GuardrailOnlyBadgeEl.classList.toggle("f5GuardrailOnlyOn", !!v);
+  f5GuardrailOnlyBadgeEl.classList.toggle("f5GuardrailOnlyOff", !v);
+  updateLocalEngineCardsGray();
+}
+
+/** 当 F5 Guardrail Only 为 ON 时，本地引擎卡片置灰（与 Enterprise KB Skill 无关） */
+function updateLocalEngineCardsGray(){
+  const f5OnlyOn = !!toggleF5GuardrailOnlyEl?.checked;
+  localEngineCards.forEach(el => {
+    if (!el) return;
+    el.classList.toggle("localDisabled", !!f5OnlyOn);
+  });
+}
+
 setEnterpriseKBSkillEnabled(!!toggleAgentSkillEl?.checked);
+setF5GuardrailOnlyBadge(!!toggleF5GuardrailOnlyEl?.checked);
+updateLocalEngineCardsGray();
 
 toggleMultiTurnEl.addEventListener("change", () => {
   setMultiTurnEnabled(toggleMultiTurnEl.checked);
@@ -479,7 +506,7 @@ function setActiveView(view){
   redteamView.style.display = "none";
   if (guardrailIntegrationView) guardrailIntegrationView.style.display = "none";
 
-  const chatOnlyEls = [engineRow, modeBadgeEl, kbSkillBadgeEl, btnClear];
+  const chatOnlyEls = [engineRow, modeBadgeEl, kbSkillBadgeEl, f5GuardrailOnlyBadgeEl, btnClear];
   chatOnlyEls.forEach(el => { if(el) el.style.display = "none"; });
 
   const subEl = document.querySelector(".sub");
@@ -687,6 +714,7 @@ async function loadSettings(){
     }
     if (toggleF5GuardrailOnlyEl) {
       toggleF5GuardrailOnlyEl.checked = asBool(s.f5_guardrail_only);
+      setF5GuardrailOnlyBadge(!!toggleF5GuardrailOnlyEl.checked);
     }
     if (kbDirInputEl) {
       kbDirInputEl.value = s.kb_dir || "./enterprise_kb";
@@ -764,7 +792,10 @@ document.getElementById("toggleAgentSkill")?.addEventListener("change", () => {
   saveSettings(false);
 });
 document.getElementById("toggleGuardrailDebug")?.addEventListener("change", () => saveSettings(false));
-document.getElementById("toggleF5GuardrailOnly")?.addEventListener("change", () => saveSettings(false));
+document.getElementById("toggleF5GuardrailOnly")?.addEventListener("change", () => {
+  setF5GuardrailOnlyBadge(!!toggleF5GuardrailOnlyEl?.checked);
+  saveSettings(false);
+});
 document.getElementById("kbDirInput")?.addEventListener("change", () => saveSettings(false));
 document.getElementById("providerSelect")?.addEventListener("change", () => saveSettings(false));
 document.getElementById("agentMaxStepsSlider")?.addEventListener("change", () => saveSettings(false));

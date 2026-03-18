@@ -316,6 +316,34 @@ body{
   background:#f1f5f9;
   color:#475569;
 }
+
+/* F5 Guardrail Only 状态突出显示：不同颜色区分 */
+#f5GuardrailOnlyBadge{
+  border-bottom:1px solid #94a3b8;
+  box-shadow:none;
+}
+#f5GuardrailOnlyBadge.f5GuardrailOnlyOn{
+  border-bottom-color:#2563eb;
+  background:#eff6ff;
+  color:#1d4ed8;
+}
+#f5GuardrailOnlyBadge.f5GuardrailOnlyOff{
+  border-bottom-color:#94a3b8;
+  background:#f1f5f9;
+  color:#475569;
+}
+
+/* 本地引擎卡片：F5 Guardrail Only 为 ON 时置灰 */
+.engineCard.localDisabled{
+  background:#f1f5f9;
+  border-color:#e2e8f0;
+  opacity:0.75;
+}
+.engineCard.localDisabled .engineTitle,
+.engineCard.localDisabled .engineStatus{
+  color:#94a3b8;
+}
+
 .sub{
   font-size:12px;
   color:var(--muted);
