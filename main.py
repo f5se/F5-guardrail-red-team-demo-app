@@ -21,7 +21,7 @@ load_dotenv()  # 再允许当前工作目录 .env 覆盖
 HF_PROXY = os.getenv("HF_PROXY") or os.getenv("PROXY")
 
 from fastapi import FastAPI, Request, HTTPException, Body
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
@@ -232,6 +232,20 @@ async def index(request: Request):
 @app.get("/health")
 async def health():
     return {"status": "ok", "ts": int(time.time())}
+
+
+@app.get("/api/test-guide")
+async def api_test_guide():
+    """Return docs/test-guide.md as raw markdown text for frontend rendering."""
+    path = os.path.join(BASE_DIR, "docs", "test-guide.md")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="test-guide.md not found")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to read test-guide.md: {e}")
+    return PlainTextResponse(content, media_type="text/markdown; charset=utf-8")
 
 
 # -----------------------------

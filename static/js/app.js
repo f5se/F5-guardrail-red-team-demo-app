@@ -494,8 +494,28 @@ toggleMultiTurnEl.addEventListener("change", () => {
 
 const redteamView = document.getElementById("redteamView");
 const guardrailIntegrationView = document.getElementById("guardrailIntegrationView");
+const testGuideView = document.getElementById("testGuideView");
+const testGuideContentEl = document.getElementById("testGuideContent");
 const engineRow = document.getElementById("engineRow");
 const layoutEl = document.querySelector(".layout");
+
+let testGuideLoaded = false;
+
+async function loadTestGuide(){
+  if (!testGuideContentEl) return;
+  if (testGuideLoaded) return;
+  testGuideContentEl.innerHTML = `<div class="mdDoc__status">加载中…</div>`;
+  try {
+    const resp = await fetch("/api/test-guide", { cache: "no-cache" });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const md = await resp.text();
+    testGuideContentEl.innerHTML = renderMarkdown(md);
+    testGuideLoaded = true;
+  } catch (e) {
+    const msg = (e && e.message) ? e.message : String(e);
+    testGuideContentEl.innerHTML = `<div class="mdDoc__status mdDoc__status--error">加载失败：${escapeHtml(msg)}</div>`;
+  }
+}
 
 function setActiveView(view){
   activeView = view;
@@ -505,6 +525,7 @@ function setActiveView(view){
   settingsView.style.display = "none";
   redteamView.style.display = "none";
   if (guardrailIntegrationView) guardrailIntegrationView.style.display = "none";
+  if (testGuideView) testGuideView.style.display = "none";
 
   const chatOnlyEls = [engineRow, modeBadgeEl, kbSkillBadgeEl, f5GuardrailOnlyBadgeEl, btnClear];
   chatOnlyEls.forEach(el => { if(el) el.style.display = "none"; });
@@ -537,6 +558,11 @@ function setActiveView(view){
       if (guardrailIntegrationView) guardrailIntegrationView.style.display = "";
       if (attackCardEl) attackCardEl.style.display = "";
       if (subEl) subEl.textContent = "F5 AI Guardrail 与 LLM Provider 集成架构与安全检查流程演示";
+    } else if (view === "TEST_GUIDE"){
+      chatTitleEl.textContent = "Test Guide";
+      if (testGuideView) testGuideView.style.display = "";
+      if (subEl) subEl.textContent = "使用说明与测试指引（Markdown 渲染）";
+      loadTestGuide();
     }
   }
   if (view === "CHAT" || view === "GUARDRAIL_INTEGRATION") renderAttackPresets();

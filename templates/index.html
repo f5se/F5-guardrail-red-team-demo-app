@@ -20,6 +20,7 @@
             <button class="navBtn active" data-view="CHAT" id="btnChat">💬 AI Chatbot/Agent</button>
             <button class="navBtn" data-view="REDTEAM" id="btnRedTeam">🎯 Red Team</button>
             <button class="navBtn" data-view="GUARDRAIL_INTEGRATION" id="btnGuardrailIntegration">🛡️ Guardrail Integration</button>
+            <button class="navBtn" data-view="TEST_GUIDE" id="btnTestGuide">📖 Test Guide</button>
             <button class="navBtn" data-view="SETTINGS" id="btnSettings">⚙️ Settings</button>
           </div>
         </aside>
@@ -225,6 +226,11 @@
 
 	  <button id="btnSaveSettings" style="margin-top:12px;">Update Rules</button>
           
+        </div>
+
+        <!-- TEST GUIDE VIEW -->
+        <div class="panel" id="testGuideView" style="display:none;">
+          <div class="mdDoc" id="testGuideContent"></div>
         </div>
 
         <!-- RED TEAM PIPELINE VIEW -->
