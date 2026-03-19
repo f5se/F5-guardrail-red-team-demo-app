@@ -1527,6 +1527,8 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
   const gintDecisionOobPlaceholder = document.getElementById("gintDecisionOobPlaceholder");
   const gintModeInline = document.getElementById("gintModeInline");
   const gintModeOob = document.getElementById("gintModeOob");
+  const gintSubtitleModeEn = document.getElementById("gintSubtitleModeEn");
+  const gintSubtitleModeZh = document.getElementById("gintSubtitleModeZh");
 
   const ARCH_DESC_INLINE = {
     en: "In Inline mode, F5 AI Guardrail proxies client requests; end-to-end latency includes LLM communication and LLM response time.",
@@ -1542,11 +1544,20 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
     return "inline";
   }
 
+  const SUBTITLE_MODE = {
+    inline: { en: "· Inline mode", zh: "· Inline 串联模式" },
+    oob: { en: "· OOB mode", zh: "· OOB 旁路模式" }
+  };
+
   function setGintArchDescByMode(mode) {
-    if (!gintFlowArchDesc) return;
     var content = mode === "oob" ? ARCH_DESC_OOB : ARCH_DESC_INLINE;
-    gintFlowArchDesc.innerHTML = (content.en ? "<span class=\"en\">" + content.en + "</span>" : "") +
-      (content.zh ? "<span class=\"zh\">" + content.zh + "</span>" : "");
+    if (gintFlowArchDesc) {
+      gintFlowArchDesc.innerHTML = (content.en ? "<span class=\"en\">" + content.en + "</span>" : "") +
+        (content.zh ? "<span class=\"zh\">" + content.zh + "</span>" : "");
+    }
+    var sub = SUBTITLE_MODE[mode === "oob" ? "oob" : "inline"];
+    if (gintSubtitleModeEn) gintSubtitleModeEn.textContent = sub.en;
+    if (gintSubtitleModeZh) gintSubtitleModeZh.textContent = sub.zh;
     if (gintFlowDiagramInline) gintFlowDiagramInline.style.display = mode === "oob" ? "none" : "flex";
     if (gintFlowDiagramOob) gintFlowDiagramOob.style.display = mode === "oob" ? "flex" : "none";
     if (gintDecisionContent) gintDecisionContent.style.display = mode === "oob" ? "none" : "";
