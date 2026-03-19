@@ -1965,10 +1965,10 @@ code{
   color: var(--muted);
   line-height: 1.5;
 }
-/* OOB 图：AI Client / Proxy / LLM Provider 水平对齐，F5 Guardrail 在 Proxy 正上方 */
+/* OOB 图：AI Client / Proxy / LLM Provider 底边对齐在同一水平线，F5 Guardrail 在 Proxy 正上方 */
 .gint-flow-oob {
   flex-wrap: nowrap;
-  align-items: center;
+  align-items: flex-end;
 }
 .gint-flow-oob .gint-node {
   min-height: 58px;
@@ -1983,8 +1983,7 @@ code{
   min-width: 140px;
   width: 140px;
   overflow: hidden;
-  --oob-proxy-spacer: 112px;
-  padding-bottom: var(--oob-proxy-spacer);
+  padding-bottom: 0;
 }
 .gint-oob-proxy-column .gint-node {
   flex-shrink: 0;
