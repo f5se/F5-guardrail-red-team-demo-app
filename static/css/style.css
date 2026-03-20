@@ -32,6 +32,20 @@ body{
   padding:14px 18px;
   font-weight:700;
   letter-spacing:.2px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-height:52px;
+}
+.topbarLogo{
+  height:24px;
+  width:auto;
+  display:block;
+  object-fit:contain;
+  flex-shrink:0;
+}
+.topbarTitle{
+  line-height:1.2;
 }
 .wrap{
   max-width:1400px;
