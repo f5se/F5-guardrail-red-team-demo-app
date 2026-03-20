@@ -19,9 +19,9 @@
 
 当在setting中打开`Agent Skill Orchestration (F5 Guardrail Only)` 选项后，界面顶部会显示**Enterprise KB Skill ON**徽章，表示启用了Agent能力，此时系统会自动结合大模型推理用户问题意图，当需要查询本地知识库时，会自动查询本地知识库系统。Agent模式下，企业知识仅发送给F5 Guardrail进行检测，本地模型引擎不会看到企业知识。
 
-目前系统仅模拟了企业员工电话表，企业内部原材料采购价格如：石墨、磷酸锂、电解液、LiPF6，以及员工薪资表只是。
+目前系统仅模拟了企业员工电话表，企业内部原材料采购价格如：石墨、磷酸锂、电解液、LiPF6，以及员工薪资表信息等,如果用户话题中涉及了这些，Agent借助模型推理是否使用知识库系统回答问题。
 
-在页面左侧快捷测试面板里，有些测试需要依赖打开Enterprise KB Skill，在点击此类测试前，需确认设置界面中`Agent Skill Orchestration (F5 Guardrail Only)`为打开模式，即界面顶部应显示**Enterprise KB Skill ON** 而不是OFF。
+在页面左侧快捷测试面板里，**有些测试需要依赖打开Enterprise KB Skill**，在点击此类测试前，需确认设置界面中`Agent Skill Orchestration (F5 Guardrail Only)`为打开模式，即界面顶部应显示**Enterprise KB Skill ON** 而不是OFF。
 
 #### 1.3 本地测试引擎与F5 Guardrail
 
@@ -40,15 +40,17 @@
 
 #### 1.5 F5 Guardrail Result
 
-界面右侧会显示每次提交请求的扫描结果情况，可以通过此处了解到阻断时发生在请求还是响应阶段，是被哪些以及哪种类型的Scanner阻断的。Direction表示该Scanner对Request的扫描还是Response或两者都进行的扫描，例如**China-phone-number** 这个Scanner就是双向都扫描，**Sensitive-information-of-raw-materials**是仅对Response的扫描。Failed表示内容经过扫描后内容不合法 , Passed表示请求内容合法。Custom标记表示该Scanner是自定义Scanner，System表示是系统内置Scanner。
+界面右侧会显示每次提交请求的扫描结果情况，可以通过此处了解到阻断是发生在请求还是响应阶段，是被哪些以及哪种类型的Scanner阻断的。Direction表示该Scanner对Request的扫描还是Response或两者都进行的扫描，例如**China-phone-number** 这个Scanner就是双向都扫描，**Sensitive-information-of-raw-materials**是仅对Response的扫描。Failed表示内容经过扫描后内容不合法 , Passed表示请求内容合法。Custom标记表示该Scanner是自定义Scanner，System表示是系统内置Scanner。
 
 
 
 #### >注意问题
 
-1. 当前F5 Guardrail的SaaS侧，禁用了Prompt injection检测（保留了system prompt injection检测）的scanner，这是因为在ReAct Agent下，Agent会在Prompt里插入大量json内容以及合法的指示性提示词。导致系统会误报。该问题已经提交给CalypsoAI  Team。
+1. 当前F5 Guardrail的SaaS侧，禁用了Prompt injection检测（保留了system prompt injection检测）的scanner，这是因为在ReAct Agent下模式下（即`Enterprise KB Skill ON`），Agent会在Prompt里插入大量json内容以及合法的指示性提示词。导致系统会误报。该问题已经提交给CalypsoAI Team。
+   
+2. 在启用`Enterprise KB Skill ON`时，Agent指令里插入的JSON格式与指示性信息有时会干扰模型对核心用户输入语义的理解，进而导致一些自定义Scanner处理效果不佳，此时可考虑在这类自定义Scanner中增加`让忽略相关JSON格式与其内部指令`的说明。
 
-2. 如果你在发送prompt消息，页面返回类似如下错误，一般是由于接入本系统的APM SSL Session超时，需要刷新页面重新登录：
+3. 如果你在发送prompt消息，页面返回类似如下错误，一般是由于接入本系统的APM SSL Session超时，需要刷新页面重新登录：
 
    ```
    Failed to reach backend: Unexpected token '<', "<!DOCTYPE "... is not valid JSON
@@ -88,7 +90,7 @@
 
 此模式下也可以对LLM Response进行检测，默认本系统没有开启，需系统管理员在程序后台的NGINX相关参数设定中进行开启。
 
-注意：
+#### >注意：
 
-在可视化数据流中，动画是在客户端收到最后响应后才进行的全过程动画模拟，因此第一个动画在展现请求发送给F5 Guardrail（inline模式下）或NGINX（OOB模式下）后，会有一个明显的等待时间，这是符合预期。完整的动画可以通过replay按钮重放，或Next step按钮一步一步播放。
+在可视化数据流中，由于客户端应用无法跨越Proxy获取其它阶段状态，因此动画是在客户端收到最终响应后才进行的全过程动画模拟，因此在动画展现第一个请求`发送给F5 Guardrail（inline模式下）或NGINX（OOB模式下）`后，会有一个明显的等待时间，这是符合预期。完整的动画可以通过replay按钮重放，或Next step按钮一步一步播放。
 
