@@ -219,12 +219,16 @@ class ChatIn(BaseModel):
 async def index(request: Request):
     attack_presets = load_attack_presets()
     guardrail_integration_presets = load_guardrail_integration_presets()
+    raw_settings = load_settings()
+    effective_provider = (str(raw_settings.get("default_provider", "") or "").strip() or (DEFAULT_PROVIDER or "").strip())
+    chat_subtitle = f"F5 AI Demo Chatbot · Connected to Backend {effective_provider}" if effective_provider else "F5 AI Demo Chatbot · Connected to Backend LLM"
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
             "attack_presets_json": json.dumps(attack_presets, ensure_ascii=False),
             "guardrail_integration_presets_json": json.dumps(guardrail_integration_presets, ensure_ascii=False),
+            "chat_subtitle": chat_subtitle,
         },
     )
 
@@ -964,6 +968,7 @@ def _get_provider_options() -> list:
 async def get_settings():
     out = dict(load_settings())
     out["provider_options"] = _get_provider_options()
+    out["effective_provider"] = (str(out.get("default_provider", "") or "").strip() or (DEFAULT_PROVIDER or "").strip())
     return out
 
 @app.post("/api/settings")

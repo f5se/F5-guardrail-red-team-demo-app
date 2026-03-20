@@ -22,6 +22,7 @@ const attackPresets = Array.isArray(window.ATTACK_PRESETS) ? window.ATTACK_PRESE
 const guardrailIntegrationPresets = Array.isArray(window.GUARDRAIL_INTEGRATION_PRESETS) ? window.GUARDRAIL_INTEGRATION_PRESETS : [];
 let attackTooltipEl = null;
 let activeView = "CHAT";
+let currentBackendProviderName = "";
 
 function getCurrentAttackPresets() {
   return activeView === "GUARDRAIL_INTEGRATION" ? guardrailIntegrationPresets : attackPresets;
@@ -537,7 +538,7 @@ function setActiveView(view){
     chatView.style.display = "";
     chatOnlyEls.forEach(el => { if(el) el.style.display = ""; });
     if (attackCardEl) attackCardEl.style.display = "";
-    if (subEl) subEl.textContent = "F5 AI Demo Chatbot · Connected to Backend LLM";
+    setChatSubtitle();
     if (guardrailCardEl) guardrailCardEl.style.display = "";
     if (layoutEl) layoutEl.classList.add("layout--with-guardrail");
     inputEl.focus();
@@ -570,6 +571,19 @@ function setActiveView(view){
 navButtons.forEach(btn => {
   btn.addEventListener("click", () => setActiveView(btn.dataset.view));
 });
+
+function buildChatSubtitle(){
+  const provider = (currentBackendProviderName || "").trim();
+  return provider
+    ? `F5 AI Demo Chatbot · Connected to Backend ${provider}`
+    : "F5 AI Demo Chatbot · Connected to Backend LLM";
+}
+
+function setChatSubtitle(){
+  const subEl = document.querySelector(".sub");
+  if (!subEl) return;
+  subEl.textContent = buildChatSubtitle();
+}
 
 function addBubble(role, text, extraClass=""){
   const div = document.createElement("div");
@@ -775,6 +789,8 @@ async function loadSettings(){
         providerSelect.appendChild(extra);
       }
     }
+    currentBackendProviderName = (s.effective_provider || s.default_provider || "").trim();
+    if (activeView === "CHAT") setChatSubtitle();
     document.getElementById("agentMaxStepsSlider").value = s.agent_max_steps || 4;
     document.getElementById("agentMaxStepsVal").textContent = s.agent_max_steps || 4;
   }catch(e){
