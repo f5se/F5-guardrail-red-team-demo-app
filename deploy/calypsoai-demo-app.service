@@ -1,0 +1,43 @@
+# CalypsoAI / F5 Guardrail 演示应用 — systemd unit（Ubuntu 24，用户 myf5，Conda 环境）
+#
+# 安装前请确认：
+# 1. 将下面 WorkingDirectory、EnvironmentFile、日志路径中的项目目录改为你的实际克隆路径。
+# 2. 创建日志目录：  mkdir -p /var/log/calypsoai-demo
+# 3. 安装 unit：      sudo cp deploy/calypsoai-demo-app.service /etc/systemd/system/
+#                    sudo systemctl daemon-reload
+#                    sudo systemctl enable --now calypsoai-demo-app.service
+# 4. 安装 logrotate： sudo cp deploy/calypsoai-demo-app.logrotate /etc/logrotate.d/calypsoai-demo-app
+#
+# 若 Torch/SSL 等因未 conda activate 报错，可改用 `conda run -n calypsoai-demo-app --no-capture-output`
+# 包一层 ExecStart（需安装 conda 到该用户可调用）。
+
+[Unit]
+Description=CalypsoAI / F5 Guardrail demo (uvicorn FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=myf5
+Group=myf5
+
+# 与手工启动时一致：在项目根目录运行（main:app、.env、config/ 等相对路径）
+WorkingDirectory=/home/myf5/f5-ai-gr-rt/F5-guardrail-red-team-demo-app
+
+# 从 .env 加载密钥与配置；
+EnvironmentFile=-/home/myf5/f5-ai-gr-rt/F5-guardrail-red-team-demo-app/.env
+
+# Dont Rely on online HF
+Environment=TRANSFORMERS_OFFLINE=1
+
+ExecStart=/home/myf5/miniconda3/envs/calypsoai-demo-app/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
+
+Restart=on-failure
+RestartSec=5
+
+# 固定日志文件（配合 deploy/calypsoai-demo-app.logrotate 轮转）
+StandardOutput=append:/var/log/calypsoai-demo/stdout.log
+StandardError=append:/var/log/calypsoai-demo/stderr.log
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+# 安装：sudo cp deploy/calypsoai-demo-app.logrotate /etc/logrotate.d/calypsoai-demo-app
+#
+# copytruncate：轮转时截断原文件，无需让 systemd/uvicorn 重新打开 fd，适合 append 日志。
+
+/var/log/calypsoai-demo/*.log {
+    weekly
+    rotate 12
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    su myf5 myf5
+}
