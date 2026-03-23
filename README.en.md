@@ -79,6 +79,7 @@ Variables in `.env_example`:
 
 **Note:** Configure the corresponding Project, Connection/Provider, and Project API token in Calypso (F5 Guardrail) first. For features like enterprise-sensitive data protection, configure Custom scanners in the F5 Guardrail system in advance.
 Security note: Keys shown in README and `.env_example` are placeholders only.
+In **direct chat** mode, the **Enterprise KB Skill** toggle matches the main Chat: when ON, the direct LLM runs the same ReAct-style tool loop as the Guardrail Agent path (e.g. enterprise KB); when OFF, a single direct completion is used.
 
 ### User Authentication Setup (Before First Run)
 

@@ -808,7 +808,8 @@ async function send(){
       ? {
           messages: [
             { role: "user", content: msg }
-          ]
+          ],
+          agent_skill_enabled: getEffectiveAgentSkillEnabled()
         }
       : {
           message: msg,

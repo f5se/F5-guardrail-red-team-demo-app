@@ -1003,6 +1003,124 @@ async def run_agent_skill_loop(user_input: str, send_kwargs: dict, settings: dic
         "guardrail": last_guardrail_data,
     }
 
+
+async def _post_direct_chat_completions(
+    messages: List[dict],
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    timeout: float = 120.0,
+) -> str:
+    """POST OpenAI-compatible chat/completions; return assistant text."""
+    url = base_url + "/chat/completions"
+    body = {"model": model, "messages": messages, "stream": False}
+    headers = {"Content-Type": "application/json", "Authorization": "Bearer " + api_key}
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        r = await client.post(url, json=body, headers=headers)
+    if r.status_code < 200 or r.status_code >= 300:
+        err_text = r.text[:2000] if isinstance(r.text, str) else ""
+        raise HTTPException(status_code=r.status_code, detail=err_text or "Direct provider request failed")
+    return _extract_openai_reply(r.json())
+
+
+async def run_agent_skill_loop_direct(
+    user_input: str,
+    settings: dict,
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+) -> dict:
+    """
+    Same ReAct-style tool loop as run_agent_skill_loop, but each planner step calls the
+    direct OpenAI-compatible provider (no F5 Guardrail).
+    """
+    max_steps = settings["agent_max_steps"]
+    tool_defs = get_all_tool_definitions()
+    scratchpad_entries: List[str] = []
+    trace: List[dict] = []
+    tool_calls: List[dict] = []
+    agent_debug_log(
+        settings,
+        f"direct_skill_loop start max_steps={max_steps} user_input_chars={len(user_input)}",
+    )
+
+    for step in range(1, max_steps + 1):
+        prompt = build_agent_prompt(
+            user_input=user_input,
+            scratchpad="\n".join(scratchpad_entries),
+            tool_defs=tool_defs,
+            step=step,
+            max_steps=max_steps,
+        )
+        messages = [{"role": "user", "content": prompt}]
+        reply = await _post_direct_chat_completions(
+            messages, base_url=base_url, api_key=api_key, model=model
+        )
+        agent_debug_log(settings, f"direct_skill_loop step={step} reply_chars={len(reply or '')}")
+
+        obj, parse_err = extract_json_object(reply)
+        if parse_err:
+            agent_debug_log(settings, f"direct_skill_loop parse_error step={step} err={parse_err}")
+            trace.append({"step": step, "event": "parse_error", "detail": parse_err})
+            scratchpad_entries.append(
+                f"Observation(parse_error): {parse_err}. raw_reply={reply[:400]}"
+            )
+            continue
+
+        event_type = str(obj.get("type", "")).lower()
+        if event_type == "final":
+            answer = str(obj.get("answer", "")).strip() or "(empty response)"
+            agent_debug_log(settings, f"direct_skill_loop final step={step} answer_chars={len(answer)}")
+            trace.append({"step": step, "event": "final"})
+            return {
+                "reply": answer,
+                "trace": trace,
+                "tool_calls": tool_calls,
+                "skill_used": len(tool_calls) > 0,
+            }
+
+        if event_type != "tool_call":
+            agent_debug_log(
+                settings,
+                f"direct_skill_loop invalid_event step={step} event_type={event_type or 'missing'}",
+            )
+            trace.append({"step": step, "event": "invalid_event", "detail": event_type or "missing type"})
+            scratchpad_entries.append(f"Observation(error): invalid event type={event_type or 'missing'}")
+            continue
+
+        tool_name = str(obj.get("name", "")).strip()
+        arguments = obj.get("arguments") or {}
+        if not isinstance(arguments, dict):
+            arguments = {}
+
+        trace.append({"step": step, "event": "tool_call", "name": tool_name})
+        tool_calls.append({"step": step, "name": tool_name, "arguments": arguments})
+        agent_debug_log(settings, f"direct_skill_loop tool_call step={step} name={tool_name}")
+
+        tool_result = dispatch_tool(tool_name, arguments, settings)
+
+        compact_result = json.dumps(tool_result, ensure_ascii=False)
+        agent_debug_log(
+            settings,
+            f"direct_skill_loop tool_result step={step} ok={tool_result.get('ok', False)}",
+        )
+        scratchpad_entries.append(
+            f"Action: {tool_name}({json.dumps(arguments, ensure_ascii=False)})\n"
+            f"Observation: {compact_result[:1500]}"
+        )
+
+    fallback = "I could not finish the tool reasoning loop in time. Please retry with a more specific request."
+    agent_debug_log(settings, "direct_skill_loop fallback_max_steps_reached")
+    return {
+        "reply": fallback,
+        "trace": trace,
+        "tool_calls": tool_calls,
+        "skill_used": len(tool_calls) > 0,
+    }
+
+
 # -----------------------------
 # API used by the UI
 # -----------------------------
@@ -1242,6 +1360,23 @@ class DirectChatIn(BaseModel):
     """Chat direct mode: OpenAI-compatible request body."""
     messages: List[dict]
     stream: bool = False
+    agent_skill_enabled: Optional[bool] = None  # 与主 Chat 一致：会话临时覆盖 Enterprise KB Skill
+
+
+def _extract_last_user_text_from_messages(messages: List[dict]) -> str:
+    """取 messages 中最后一条 user 的文本，供直连 Agent 模式使用。"""
+    for m in reversed(messages or []):
+        if not isinstance(m, dict):
+            continue
+        if str(m.get("role") or "").lower() != "user":
+            continue
+        content = m.get("content")
+        if isinstance(content, str):
+            return content.strip()
+        if content is None:
+            return ""
+        return str(content).strip()
+    return ""
 
 
 def _get_direct_provider_config() -> Tuple[str, str, str]:
@@ -1442,14 +1577,21 @@ async def api_oob_chat(payload: OOBChatIn):
 
 
 @app.post("/api/chat-direct")
-async def api_chat_direct(payload: DirectChatIn):
+async def api_chat_direct(request: Request, payload: DirectChatIn):
     """
     Direct mode: send OpenAI-compatible payload straight to provider URL.
-    This endpoint bypasses F5 Guardrail processing.
+    Bypasses F5 Guardrail. When Enterprise KB Skill (agent_skill_enabled) is ON,
+    runs the same ReAct-style tool loop as /api/chat but with the direct LLM.
     """
+    username = require_user(request)
     messages = payload.messages if isinstance(payload.messages, list) else []
     if not messages:
         raise HTTPException(status_code=400, detail="messages is required")
+
+    raw_settings = get_effective_raw_settings(username)
+    settings = get_runtime_settings(raw_settings)
+    if isinstance(payload.agent_skill_enabled, bool):
+        settings["agent_skill_enabled"] = payload.agent_skill_enabled
 
     base_url, api_key, model = _get_direct_provider_config()
     if not base_url or not api_key or not model:
@@ -1458,24 +1600,35 @@ async def api_chat_direct(payload: DirectChatIn):
             detail="Direct mode unavailable: missing LLM_PROVIDER_URL / LLM_PROVIDER_KEY_Direct / LLM_PROVIDER_MODEL",
         )
 
-    url = base_url + "/chat/completions"
-    body = {
-        "model": model,
-        "messages": messages,
-        "stream": False,
-    }
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + api_key,
-    }
+    if settings.get("agent_skill_enabled"):
+        user_text = _extract_last_user_text_from_messages(messages)
+        if not user_text:
+            raise HTTPException(status_code=400, detail="messages must include a user role with content")
+        agent_debug_log(settings, "api_chat_direct mode=direct_agent_skill")
+        loop_result = await run_agent_skill_loop_direct(
+            user_text,
+            settings,
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+        )
+        return JSONResponse(
+            {
+                "reply": loop_result["reply"],
+                "mode": "direct",
+                "direct_agent_skill": True,
+                "skill_used": loop_result["skill_used"],
+                "agent_trace": loop_result["trace"],
+                "agent_tool_calls": loop_result["tool_calls"],
+            }
+        )
+
+    agent_debug_log(settings, "api_chat_direct mode=direct_plain")
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            r = await client.post(url, json=body, headers=headers)
-        if r.status_code < 200 or r.status_code >= 300:
-            err_text = r.text[:2000] if isinstance(r.text, str) else ""
-            raise HTTPException(status_code=r.status_code, detail=err_text or "Direct provider request failed")
-        data = r.json()
-        return JSONResponse({"reply": _extract_openai_reply(data), "mode": "direct"})
+        reply = await _post_direct_chat_completions(
+            messages, base_url=base_url, api_key=api_key, model=model, timeout=60.0
+        )
+        return JSONResponse({"reply": reply, "mode": "direct", "direct_agent_skill": False})
     except HTTPException:
         raise
     except Exception as e:

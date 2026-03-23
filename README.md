@@ -68,6 +68,7 @@ cp .env_example .env
 
 注意：你需要首先在 Calypso（F5 Guardrail）系统上设定相关 Project、Connection/Provider 及 Project API token。测试企业敏感信息防护等能力时，需在 F5 Guardrail 中提前配置 Custom scanner 等。
 提示：README 与 `.env_example` 中的 Key 都是示例占位符。
+直连聊天模式下，**Enterprise KB Skill** 开关与主 Chat 一致：开启时由直连 LLM 执行与 Guardrail Agent 路径相同的 ReAct 工具推理（调用企业 KB 等）；关闭时为单次直连对话。
 
 ### 用户验证配置（首次启用前）
 
