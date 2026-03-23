@@ -13,18 +13,20 @@
 1. 修正了多轮对话中的bug
 2. 修正了对Redacted消息的处理问题
 3. 修正界面布局与窗口适应性问题
-4. 增加同时显示F5 Guardrail的scanner处理结果能力
-5. 增加了Skills能力，可随时增加新的Skills并自动注册Skill
-6. 增加了Inline集成动画展现
-7. 增加了OOB集成动画展现
-8. 增加攻击场景示例模板
-9. 增加了HF的代理下载能力
-10. 增加了是否使用所有引擎开关
-11. 增加了后端原始响应json调试开关
-12. 增加了F5 AI/Calypso多Provider配置能力，容许用户前端切换选择Project对应的多个Providers
-13. 将env文件直接加载，无需设置环境变量
-14. 增加了前端Markdown响应的渲染
-15. 增加了F5 Red Team与DevSecOps的集成流水线演示。
+4. 增加了多用户体系，不同用户间设定互不干扰
+5. 增加同时显示F5 Guardrail的scanner处理结果能力
+6. 增加了Skills能力，可随时增加新的Skills并自动注册Skill
+7. 增加了Inline集成动画展现
+8. 增加了OOB集成动画展现
+9. 增加攻击场景示例模板
+10. 增加在聊天界面临时绕过所有检测，直通模型开关
+11. 增加了HF的代理下载能力
+12. 增加了是否使用所有引擎开关
+13. 增加了后端原始响应json调试开关
+14. 增加了F5 AI/Calypso多Provider配置能力，容许用户前端切换选择Project对应的多个Providers
+15. 将env文件直接加载，无需设置环境变量
+16. 增加了前端Markdown响应的渲染
+17. 增加了F5 Red Team与DevSecOps的集成流水线演示。
 
    注意：考虑到实际Red Team耗时及环境可行性，这里的Red Team API集成是mock模拟的，并不实际在SaaS端创建真实对象。
 
@@ -65,13 +67,13 @@ cp .env_example .env
 | `OOB_MODEL` | OOB 请求使用的模型名。不填时**缺省为 `deepseek-chat`**；使用 OOB 时建议按实际调用的模型配置 | `deepseek-chat` |
 
 注意：你需要首先在 Calypso（F5 Guardrail）系统上设定相关 Project、Connection/Provider 及 Project API token。测试企业敏感信息防护等能力时，需在 F5 Guardrail 中提前配置 Custom scanner 等。
-提示：README 与 `.env_example` 中的 Key 都是示例占位符，请勿提交真实密钥到仓库。
+提示：README 与 `.env_example` 中的 Key 都是示例占位符。
 
 ### 用户验证配置（首次启用前）
 
-本项目已启用登录鉴权，中间件会对除 `/login`、`/api/login`、`/health` 与静态资源外的请求进行会话校验。建议在首次启动前先完成用户配置，避免使用默认账户。
+本项目已启用登录鉴权。建议在首次启动前先完成用户配置，避免使用默认账户。
 
-1. 复制示例配置为正式配置（你已准备好示例文件）：
+1. 复制示例配置为正式配置：
 
 ```bash
 cp settings_example.json settings.json
@@ -79,12 +81,12 @@ cp settings_example.json settings.json
 
 2. 按需修改 `settings.json` 中以下字段：
 - `auth.users`：登录用户列表（`username`、`password_hash`、`enabled`）
-- `auth.session_ttl_seconds`：登录会话有效期（秒）
+- `auth.session_ttl_seconds`：登录最大绝对会话有效期（秒），应大于空闲会话超时默认的1200s
 - `user_settings`：每个用户名对应的个性化设置（建议与 `auth.users` 保持一致）
 
 > 提示：请以 `settings_example.json` 为模板，复制后重命名为 `settings.json` 再进行修改。
 
-### 使用脚本批量生成用户密码哈希
+#### 使用脚本批量生成用户密码哈希
 
 `scripts/gen_password_hash.py` 可批量生成 `auth.users` 所需条目，输出为 JSON 数组，可直接粘贴到 `settings.json` 的 `auth.users` 中。
 
@@ -108,8 +110,8 @@ python scripts/gen_password_hash.py \
 
 建议：
 - 为每个账号使用强密码（长度、复杂度、不可复用）。
-- `auth.users` 更新后，同时补齐 `user_settings.<username>`，确保用户登录后有默认配置。
-- 不要将真实密码或生产配置提交到仓库。
+- `auth.users` 更新后，同时补齐 `user_settings.<username>`，确保用户登录后有默认配置。具体参考`settings_example.json`.
+
 
 ### 攻击面板配置
 

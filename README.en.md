@@ -15,26 +15,29 @@ A multi-engine AI guardrail demo Agent application based on F5 AI Guardrail (Cal
 2. Fixed the issue of handling Redacted messages 
 
 3. Correct the front-end layout and window adaptability issues
+   
+4. Added multi-user system, and the Settings of different users do not interfere with each other
 
-4. Added the ability to simultaneously display the scanner processing results of F5 Guardrail
+5. Added the ability to simultaneously display the scanner processing results of F5 Guardrail
 
-5. Added Skills capability—new Skills can be added and auto-registered at any time
+6. Added Skills capability—new Skills can be added and auto-registered at any time
 
-6. Added Inline integration for dynamic visualization
-7. Added and OOB integration for dynamic visualization
-8. Added sample templates for attack scenarios
+7. Added Inline integration for dynamic visualization
+8. Added and OOB integration for dynamic visualization
+9.  Added sample templates for attack scenarios
+10. Add a switch that temporarily bypasses all detections in the chat interface and directly connects to the model
 
-9. Added Hugging Face proxy download support
+11. Added Hugging Face proxy download support
 
-10. Added whether to use all engine switches 
+12. Added whether to use all engine switches 
 
-11. Added debug swtich for storing raw json that from F5 guardrail
-12. Added the F5 AI/Calypso multi-provider configuration capability, allowing users to switch and select different providers corresponding to the Project on the front end
-13. Load `.env` directly without setting environment variables
+13. Added debug swtich for storing raw json that from F5 guardrail
+14. Added the F5 AI/Calypso multi-provider configuration capability, allowing users to switch and select different providers corresponding to the Project on the front end
+15. Load `.env` directly without setting environment variables
 
-14. Added frontend Markdown response rendering
+16. Added frontend Markdown response rendering
 
-15. Added the integration pipeline demonstration of F5 Red Team and DevSecOps. 
+17. Added the integration pipeline demonstration of F5 Red Team and DevSecOps. 
 
    Note: Considering the actual time consumption of Red Team and the feasibility of the environment, the Red Team API integration here is mock simulation and does not actually create real objects on the SaaS.
 
@@ -75,11 +78,11 @@ Variables in `.env_example`:
 | `OOB_MODEL` | Model name for OOB requests. **Default `deepseek-chat`** when unset; when using OOB, set to your actual model. | `deepseek-chat` |
 
 **Note:** Configure the corresponding Project, Connection/Provider, and Project API token in Calypso (F5 Guardrail) first. For features like enterprise-sensitive data protection, configure Custom scanners in the F5 Guardrail system in advance.
-Security note: Keys shown in README and `.env_example` are placeholders only. Never commit real API keys.
+Security note: Keys shown in README and `.env_example` are placeholders only.
 
 ### User Authentication Setup (Before First Run)
 
-This project uses login/session authentication. Requests are protected by middleware except `/login`, `/api/login`, `/health`, and static assets. Configure users before first start to avoid relying on default credentials.
+This project uses login/session authentication.Configure users before first start to avoid relying on default credentials.
 
 1. Copy the example settings to the active config file (you already prepared the example file):
 
@@ -118,8 +121,7 @@ python scripts/gen_password_hash.py \
 
 Recommendations:
 - Use strong, unique passwords for each account.
-- After updating `auth.users`, also add matching `user_settings.<username>` entries.
-- Never commit plaintext passwords or production secrets.
+- After updating `auth.users`, also add matching `user_settings.<username>` entries. Reference `settings_example.json` for detail.
 
 ### Attack panel configuration
 
