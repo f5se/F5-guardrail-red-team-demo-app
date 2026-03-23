@@ -1,3 +1,5 @@
+> 注意此系统仅供F5 sales以及SE 演示使用，勿直接发给客户自行使用！
+
 ### 1. AI Chatbot/Agent
 
 这是一个AI聊天Agent，具有以下能力：
@@ -110,6 +112,8 @@ Q3:集成动画里为什么感觉第一个动画路径后有延迟感
 Q4:作为SE，我想快速贡献攻击模板内的内容，该怎么办
 - 在 https://github.com/f5se/F5-guardrail-red-team-demo-app/tree/main/config 目录下存在两个json文件，attack-presets.json就是主聊天面板的攻击面板设定，另一个是集成界面的模板。直接PR提交你想增加的攻击示例即可，注意json格式，以及参考Readme理解字段含义。
   
+Q5:系统可以在手机或Pad界面使用吗
+- 前端页面设计非面向移动端，由于界面功能区块比较多，在移动端会存在体验不佳问题，建议电脑端使用。iPad Pro、surface Pro可使用（部分元素会被遮挡），手机端不建议使用。 
   ```
   想提Bug或者改进建议，和谁联系
   A:与j.lin@f5.com联系即可
