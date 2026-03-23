@@ -378,6 +378,21 @@ body{
   border:1px solid #e0e7ff;
   font-weight:700;
 }
+.badge--toggle{
+  cursor:pointer;
+  user-select:none;
+  transition:filter .12s ease, transform .08s ease;
+}
+.badge--toggle:hover{
+  filter:brightness(0.97);
+}
+.badge--toggle:active{
+  transform:scale(0.98);
+}
+.badge--toggle:focus-visible{
+  outline:2px solid #6366f1;
+  outline-offset:2px;
+}
 /* Enterprise KB Skill 状态突出显示：扁平底边色条 */
 #kbSkillBadge{
   border-bottom:1px solid #94a3b8;

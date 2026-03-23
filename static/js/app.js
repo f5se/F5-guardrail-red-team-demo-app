@@ -459,6 +459,7 @@ function setEnterpriseKBSkillEnabled(v){
   kbSkillBadgeEl.textContent = v ? "Enterprise KB Skill ON" : "Enterprise KB Skill OFF";
   kbSkillBadgeEl.classList.toggle("kbSkillOn", !!v);
   kbSkillBadgeEl.classList.toggle("kbSkillOff", !v);
+  kbSkillBadgeEl.setAttribute("aria-pressed", v ? "true" : "false");
 }
 
 function setF5GuardrailOnlyBadge(v){
@@ -466,6 +467,7 @@ function setF5GuardrailOnlyBadge(v){
   f5GuardrailOnlyBadgeEl.textContent = v ? "F5 Guardrail Only ON" : "F5 Guardrail Only OFF";
   f5GuardrailOnlyBadgeEl.classList.toggle("f5GuardrailOnlyOn", !!v);
   f5GuardrailOnlyBadgeEl.classList.toggle("f5GuardrailOnlyOff", !v);
+  f5GuardrailOnlyBadgeEl.setAttribute("aria-pressed", v ? "true" : "false");
   updateLocalEngineCardsGray();
 }
 
@@ -838,6 +840,28 @@ document.getElementById("toggleF5GuardrailOnly")?.addEventListener("change", () 
   setF5GuardrailOnlyBadge(!!toggleF5GuardrailOnlyEl?.checked);
   saveSettings(false);
 });
+
+/** 聊天标题栏徽章：点击即切换 Settings 中对应开关（与滑动开关行为一致，含持久化） */
+function wireSettingsBadgeToggle(badgeEl, toggleInputEl){
+  if (!badgeEl || !toggleInputEl) return;
+  const flip = () => {
+    toggleInputEl.checked = !toggleInputEl.checked;
+    toggleInputEl.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  badgeEl.addEventListener("click", e => {
+    e.preventDefault();
+    flip();
+  });
+  badgeEl.addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      flip();
+    }
+  });
+}
+wireSettingsBadgeToggle(kbSkillBadgeEl, toggleAgentSkillEl);
+wireSettingsBadgeToggle(f5GuardrailOnlyBadgeEl, toggleF5GuardrailOnlyEl);
+
 document.getElementById("kbDirInput")?.addEventListener("change", () => saveSettings(false));
 document.getElementById("providerSelect")?.addEventListener("change", () => saveSettings(false));
 document.getElementById("agentMaxStepsSlider")?.addEventListener("change", () => saveSettings(false));
