@@ -2,6 +2,11 @@ import os
 import time
 import json
 import re
+import hmac
+import base64
+import hashlib
+import secrets
+import threading
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Deque, Dict, List, Optional, Tuple
@@ -21,10 +26,11 @@ load_dotenv()  # 再允许当前工作目录 .env 覆盖
 HF_PROXY = os.getenv("HF_PROXY") or os.getenv("PROXY")
 
 from fastapi import FastAPI, Request, HTTPException, Body
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
+from starlette import status
 from pydantic import BaseModel
 import httpx
 
@@ -56,6 +62,9 @@ CONVERSATION_TTL_SECONDS = int(os.getenv("CONVERSATION_TTL_SECONDS", "120"))  # 
 # OOB 旁路模式：Proxy(NGINX) 地址与 LLM Provider API Key
 OOB_PROXY_URL = (os.getenv("OOB_PROXY_URL") or "").rstrip("/")
 LLM_PROVIDER_KEY = os.getenv("LLM_PROVIDER_KEY") or ""
+LLM_PROVIDER_URL = (os.getenv("LLM_PROVIDER_URL") or "").rstrip("/")
+LLM_PROVIDER_KEY_DIRECT = os.getenv("LLM_PROVIDER_KEY_Direct") or ""
+LLM_PROVIDER_MODEL = os.getenv("LLM_PROVIDER_MODEL") or ""
 
 # Guardrail 调用打点：设为 1/true/yes 时打印，用于判断「请求未发出」vs「未收到响应」
 GUARDRAIL_DEBUG = os.getenv("GUARDRAIL_DEBUG", "").lower() in ("1", "true", "yes")
@@ -201,6 +210,7 @@ def load_guardrail_integration_presets() -> List[dict]:
 # -----------------------------
 ConversationStore = Dict[str, Deque[dict]]
 conversations: ConversationStore = defaultdict(lambda: deque(maxlen=SLIDING_WINDOW_MAX_TURNS))
+conversation_owners: Dict[str, str] = {}
 
 # -----------------------------
 # Models
@@ -210,16 +220,92 @@ class ChatIn(BaseModel):
     conversation_id: str
     multi_turn: bool = False
     provider: Optional[str] = None  # 可选，覆盖当前默认 Provider（主 Chat/Agent 用）
+    agent_skill_enabled: Optional[bool] = None  # 会话临时覆盖，不落盘
+    f5_guardrail_only: Optional[bool] = None  # 会话临时覆盖，不落盘
 
 
 # -----------------------------
 # UI Routes
 # -----------------------------
+@app.middleware("http")
+async def auth_guard(request: Request, call_next):
+    path = request.url.path
+    public_prefixes = ("/static/", "/redteam-report/")
+    public_paths = {"/health", "/login", "/api/login"}
+    if path in public_paths or any(path.startswith(p) for p in public_prefixes):
+        return await call_next(request)
+
+    session = get_current_session(request)
+    if not session:
+        if path.startswith("/api/"):
+            return JSONResponse({"detail": "unauthorized"}, status_code=401)
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    touch_session_activity(session["session_id"], path)
+    request.state.session_id = session["session_id"]
+    request.state.username = session["username"]
+    return await call_next(request)
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    if get_current_session(request):
+        return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
+    return templates.TemplateResponse("login.html", {"request": request})
+
+
+@app.post("/api/login")
+async def api_login(request: Request, payload: dict = Body(default=None)):
+    username = str((payload or {}).get("username") or "").strip()
+    password = str((payload or {}).get("password") or "")
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="username and password are required")
+
+    client_key = _login_client_key(request, username)
+    remain = _check_login_lock(client_key)
+    if remain > 0:
+        raise HTTPException(status_code=429, detail=f"too many failed attempts, retry after {remain}s")
+
+    structured = load_structured_settings()
+    users = get_enabled_users(structured)
+    user_item = users.get(username)
+    if not user_item or not verify_password(password, user_item.get("password_hash", "")):
+        _register_login_failure(client_key)
+        raise HTTPException(status_code=401, detail="invalid username or password")
+
+    _clear_login_failure(client_key)
+    upsert_user_settings(username)
+    ttl = to_int(structured.get("auth", {}).get("session_ttl_seconds", 86400), 86400, 300, 604800)
+    sid = create_session(username, ttl, _client_ip(request))
+    resp = JSONResponse({"status": "ok", "username": username})
+    resp.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=sid,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=ttl,
+    )
+    return resp
+
+
+@app.post("/api/logout")
+async def api_logout(request: Request):
+    sid = request.cookies.get(SESSION_COOKIE_NAME)
+    if sid:
+        with SESSIONS_LOCK:
+            SESSIONS.pop(sid, None)
+    resp = JSONResponse({"status": "ok"})
+    resp.delete_cookie(SESSION_COOKIE_NAME)
+    return resp
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     attack_presets = load_attack_presets()
     guardrail_integration_presets = load_guardrail_integration_presets()
-    raw_settings = load_settings()
+    username = require_user(request)
+    raw_settings = get_effective_raw_settings(username)
     effective_provider = (str(raw_settings.get("default_provider", "") or "").strip() or (DEFAULT_PROVIDER or "").strip())
     chat_subtitle = f"F5 AI Demo Chatbot · Connected to Backend {effective_provider}" if effective_provider else "F5 AI Demo Chatbot · Connected to Backend LLM"
     return templates.TemplateResponse(
@@ -323,13 +409,15 @@ def classify_rejection(reply: str) -> tuple[str, Optional[str]]:
     return "ok", None
 
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
+LOGIN_ACTIVITY_FILE = os.path.join(BASE_DIR, "login_activity.log")
 print(f"[CONFIG] SETTINGS_FILE={SETTINGS_FILE}")
 
 DEFAULT_SETTINGS = {
     "patterns": "ignore:3\nsystem:3\nprompt:2",
-    "heuristic_threshold": 10,
+    "heuristic_threshold": 6,
     "toxic_threshold": 0.75,
     "pi_threshold": 0.7,
+    "multi_turn_enabled": False,
     "agent_skill_enabled": False,
     "f5_guardrail_only": False,
     "debug_guardrail_raw_enabled": False,
@@ -343,16 +431,341 @@ DEFAULT_SETTINGS = {
     "kb_max_result_chars": 5000,
     "default_provider": "",  # 前端可选；空则用 env DEFAULT_PROVIDER
 }
+NEW_USER_PATTERNS_FALLBACK = "ignore:3\nsystem:3\nprompt:2\n忽略:3\n系统提示词:3\n忘记:2\n角色:4\n"
 
-def load_settings():
+USER_SCOPED_KEYS = {
+    "patterns",
+    "heuristic_threshold",
+    "toxic_threshold",
+    "pi_threshold",
+    "multi_turn_enabled",
+    "agent_skill_enabled",
+    "f5_guardrail_only",
+    "debug_guardrail_raw_enabled",
+    "default_provider",
+}
+GLOBAL_SCOPED_KEYS = {k for k in DEFAULT_SETTINGS if k not in USER_SCOPED_KEYS}
+SETTINGS_LOCK = threading.Lock()
+SESSIONS_LOCK = threading.Lock()
+LOGIN_GUARD_LOCK = threading.Lock()
+SESSIONS: Dict[str, dict] = {}
+ACTIVITY_GAP_SECONDS = 30
+ACTIVITY_THRESHOLD_SECONDS = 120
+SESSION_COOKIE_NAME = "aigr_session"
+SESSION_IDLE_TIMEOUT_SECONDS = 20 * 60
+AUDIT_TRIGGER_PATHS = {
+    "/api/chat",
+    "/api/guardrail-scan",
+    "/api/oob-chat",
+    "/api/chat-direct",
+}
+LOGIN_FAIL_LIMIT = 5
+LOGIN_LOCK_SECONDS = 300
+LOGIN_ATTEMPTS: Dict[str, dict] = {}
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _client_ip(request: Request) -> str:
+    xff = (request.headers.get("x-forwarded-for") or "").strip()
+    if xff:
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    xrip = (request.headers.get("x-real-ip") or "").strip()
+    if xrip:
+        return xrip
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _login_client_key(request: Request, username: str) -> str:
+    # 使用 username + IP + UA 组合，尽量在共享公网IP场景下减少误伤。
+    ua = (request.headers.get("user-agent") or "").strip().lower()
+    ip = _client_ip(request)
+    return f"{username.lower()}|{ip}|{ua}"
+
+
+def _check_login_lock(client_key: str) -> int:
+    now = time.time()
+    with LOGIN_GUARD_LOCK:
+        rec = LOGIN_ATTEMPTS.get(client_key)
+        if not rec:
+            return 0
+        lock_until = float(rec.get("lock_until", 0))
+        if lock_until > now:
+            return int(lock_until - now)
+        if lock_until and lock_until <= now:
+            LOGIN_ATTEMPTS.pop(client_key, None)
+            return 0
+        return 0
+
+
+def _register_login_failure(client_key: str):
+    now = time.time()
+    with LOGIN_GUARD_LOCK:
+        rec = LOGIN_ATTEMPTS.get(client_key) or {"count": 0, "first_ts": now, "lock_until": 0}
+        lock_until = float(rec.get("lock_until", 0))
+        if lock_until > now:
+            LOGIN_ATTEMPTS[client_key] = rec
+            return
+        first_ts = float(rec.get("first_ts", now))
+        # 失败窗口按 5 分钟滚动统计；超窗则重置计数
+        if now - first_ts > LOGIN_LOCK_SECONDS:
+            rec = {"count": 0, "first_ts": now, "lock_until": 0}
+        rec["count"] = int(rec.get("count", 0)) + 1
+        if rec["count"] >= LOGIN_FAIL_LIMIT:
+            rec["lock_until"] = now + LOGIN_LOCK_SECONDS
+            rec["count"] = 0
+            rec["first_ts"] = now
+        LOGIN_ATTEMPTS[client_key] = rec
+
+
+def _clear_login_failure(client_key: str):
+    with LOGIN_GUARD_LOCK:
+        LOGIN_ATTEMPTS.pop(client_key, None)
+
+
+def _pbkdf2_hash_password(password: str, salt: str, iterations: int) -> str:
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), iterations)
+    return base64.urlsafe_b64encode(dk).decode("ascii").rstrip("=")
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    try:
+        algo, iter_s, salt, digest = str(password_hash or "").split("$", 3)
+        if algo != "pbkdf2_sha256":
+            return False
+        iterations = int(iter_s)
+        expected = _pbkdf2_hash_password(password, salt, iterations)
+        return hmac.compare_digest(expected, digest)
+    except Exception:
+        return False
+
+
+def make_hash_entry(username: str, password: str, *, iterations: int = 120000) -> dict:
+    salt = base64.urlsafe_b64encode(secrets.token_bytes(12)).decode("ascii").rstrip("=")
+    return {
+        "username": username,
+        "password_hash": f"pbkdf2_sha256${iterations}${salt}${_pbkdf2_hash_password(password, salt, iterations)}",
+        "enabled": True,
+    }
+
+
+def default_structured_settings() -> dict:
+    return {
+        "auth": {
+            "users": [make_hash_entry("admin", "admin123456")],
+            "session_ttl_seconds": 86400,
+        },
+        "global_settings": {k: DEFAULT_SETTINGS[k] for k in GLOBAL_SCOPED_KEYS},
+        "user_settings": {},
+    }
+
+
+def normalize_structured_settings(loaded: Optional[dict]) -> dict:
+    baseline = default_structured_settings()
+    if not isinstance(loaded, dict):
+        return baseline
+
+    is_new_schema = any(k in loaded for k in ("auth", "global_settings", "user_settings"))
+    if not is_new_schema:
+        global_settings = {k: loaded.get(k, DEFAULT_SETTINGS[k]) for k in GLOBAL_SCOPED_KEYS}
+        default_user = {k: loaded.get(k, DEFAULT_SETTINGS[k]) for k in USER_SCOPED_KEYS}
+        return {
+            "auth": baseline["auth"],
+            "global_settings": global_settings,
+            "user_settings": {"admin": default_user},
+        }
+
+    auth = loaded.get("auth") if isinstance(loaded.get("auth"), dict) else {}
+    global_settings = loaded.get("global_settings") if isinstance(loaded.get("global_settings"), dict) else {}
+    user_settings = loaded.get("user_settings") if isinstance(loaded.get("user_settings"), dict) else {}
+
+    users = auth.get("users")
+    if not isinstance(users, list) or not users:
+        users = baseline["auth"]["users"]
+
+    merged_auth = {
+        "users": users,
+        "session_ttl_seconds": to_int(auth.get("session_ttl_seconds", 86400), 86400, 300, 604800),
+    }
+    merged_global = {k: global_settings.get(k, DEFAULT_SETTINGS[k]) for k in GLOBAL_SCOPED_KEYS}
+    normalized_user_settings = {}
+    for username, val in user_settings.items():
+        if not isinstance(val, dict):
+            continue
+        normalized_user_settings[str(username)] = {k: val.get(k, DEFAULT_SETTINGS[k]) for k in USER_SCOPED_KEYS}
+
+    return {
+        "auth": merged_auth,
+        "global_settings": merged_global,
+        "user_settings": normalized_user_settings,
+    }
+
+
+def _atomic_write_json(path: str, data: dict):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def load_structured_settings() -> dict:
     if not os.path.exists(SETTINGS_FILE):
-        return DEFAULT_SETTINGS.copy()
-    with open(SETTINGS_FILE) as f:
+        structured = default_structured_settings()
+        with SETTINGS_LOCK:
+            _atomic_write_json(SETTINGS_FILE, structured)
+        return structured
+    with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
         loaded = json.load(f)
-    merged = DEFAULT_SETTINGS.copy()
-    if isinstance(loaded, dict):
-        merged.update(loaded)
+    return normalize_structured_settings(loaded)
+
+
+def save_structured_settings(data: dict):
+    with SETTINGS_LOCK:
+        _atomic_write_json(SETTINGS_FILE, data)
+
+
+def get_effective_raw_settings(username: Optional[str]) -> dict:
+    structured = load_structured_settings()
+    merged = dict(structured["global_settings"])
+    if username:
+        user_part = structured["user_settings"].get(username, {})
+        for k in USER_SCOPED_KEYS:
+            if k in user_part:
+                merged[k] = user_part[k]
     return merged
+
+
+def _new_user_settings_from_template(structured: dict) -> dict:
+    new_user_settings = {k: DEFAULT_SETTINGS[k] for k in USER_SCOPED_KEYS}
+    admin_patterns = None
+    user_settings = structured.get("user_settings", {})
+    if isinstance(user_settings, dict):
+        admin = user_settings.get("admin")
+        if isinstance(admin, dict):
+            admin_patterns = admin.get("patterns")
+    if isinstance(admin_patterns, str) and admin_patterns.strip():
+        new_user_settings["patterns"] = admin_patterns
+    else:
+        new_user_settings["patterns"] = NEW_USER_PATTERNS_FALLBACK
+    return new_user_settings
+
+
+def upsert_user_settings(username: str):
+    structured = load_structured_settings()
+    if username not in structured["user_settings"]:
+        structured["user_settings"][username] = _new_user_settings_from_template(structured)
+        save_structured_settings(structured)
+    return structured
+
+
+def get_enabled_users(structured: dict) -> Dict[str, dict]:
+    users_map: Dict[str, dict] = {}
+    users = structured.get("auth", {}).get("users", [])
+    if not isinstance(users, list):
+        return users_map
+    for item in users:
+        if not isinstance(item, dict):
+            continue
+        username = str(item.get("username") or "").strip()
+        if not username:
+            continue
+        if item.get("enabled", True) is False:
+            continue
+        users_map[username] = item
+    return users_map
+
+
+def create_session(username: str, ttl_seconds: int, client_ip: str) -> str:
+    sid = secrets.token_urlsafe(24)
+    now = time.time()
+    with SESSIONS_LOCK:
+        SESSIONS[sid] = {
+            "username": username,
+            "created_at": now,
+            "last_seen": now,
+            "active_seconds": 0.0,
+            "logged_120s": False,
+            "expires_at": now + ttl_seconds,
+            "login_iso": _utc_now_iso(),
+            "client_ip": client_ip or "unknown",
+        }
+    return sid
+
+
+def append_login_activity(username: str, login_iso: str, session_id: str, client_ip: str):
+    rec = {
+        "username": username,
+        "login_datetime": login_iso,
+        "threshold_reached_datetime": _utc_now_iso(),
+        "session_id": session_id,
+        "client_ip": client_ip or "unknown",
+    }
+    line = json.dumps(rec, ensure_ascii=False)
+    with open(LOGIN_ACTIVITY_FILE, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+
+def touch_session_activity(session_id: str, request_path: str = ""):
+    now = time.time()
+    with SESSIONS_LOCK:
+        sess = SESSIONS.get(session_id)
+        if not sess:
+            return
+        if now > sess["expires_at"]:
+            del SESSIONS[session_id]
+            return
+        idle = now - sess["last_seen"]
+        if idle > SESSION_IDLE_TIMEOUT_SECONDS:
+            del SESSIONS[session_id]
+            return
+        sess["last_seen"] = now
+
+        # 新规则：会话存活期间（未超时/未退出），命中指定API任意一次即记录一次。
+        if (not sess["logged_120s"]) and request_path in AUDIT_TRIGGER_PATHS:
+            sess["logged_120s"] = True
+            append_login_activity(
+                sess["username"],
+                sess["login_iso"],
+                session_id,
+                str(sess.get("client_ip") or "unknown"),
+            )
+
+
+def get_current_session(request: Request) -> Optional[dict]:
+    sid = request.cookies.get(SESSION_COOKIE_NAME)
+    if not sid:
+        return None
+    with SESSIONS_LOCK:
+        sess = SESSIONS.get(sid)
+        if not sess:
+            return None
+        if time.time() > sess["expires_at"]:
+            del SESSIONS[sid]
+            return None
+        if (time.time() - sess["last_seen"]) > SESSION_IDLE_TIMEOUT_SECONDS:
+            del SESSIONS[sid]
+            return None
+        return {"session_id": sid, **sess}
+
+
+def require_user(request: Request) -> str:
+    if getattr(request.state, "username", None):
+        return request.state.username
+    sess = get_current_session(request)
+    if not sess:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    touch_session_activity(sess["session_id"], request.url.path)
+    request.state.session_id = sess["session_id"]
+    request.state.username = sess["username"]
+    return sess["username"]
 
 def parse_patterns(raw: str) -> dict:
     result = {}
@@ -372,9 +785,10 @@ def get_runtime_settings(raw: dict) -> dict:
         patterns = str(patterns)
     return {
         "patterns": patterns,
-        "heuristic_threshold": to_int(raw.get("heuristic_threshold", 10), 10, 1, 100),
+        "heuristic_threshold": to_int(raw.get("heuristic_threshold", DEFAULT_SETTINGS["heuristic_threshold"]), DEFAULT_SETTINGS["heuristic_threshold"], 1, 100),
         "toxic_threshold": to_float(raw.get("toxic_threshold", 0.75), 0.75, 0.0, 1.0),
         "pi_threshold": to_float(raw.get("pi_threshold", 0.7), 0.7, 0.0, 1.0),
+        "multi_turn_enabled": to_bool(raw.get("multi_turn_enabled", DEFAULT_SETTINGS["multi_turn_enabled"])),
         "agent_skill_enabled": to_bool(raw.get("agent_skill_enabled", False)),
         "f5_guardrail_only": to_bool(raw.get("f5_guardrail_only", False)),
         "debug_guardrail_raw_enabled": to_bool(raw.get("debug_guardrail_raw_enabled", False)),
@@ -593,7 +1007,7 @@ async def run_agent_skill_loop(user_input: str, send_kwargs: dict, settings: dic
 # API used by the UI
 # -----------------------------
 @app.post("/api/chat")
-async def api_chat(payload: ChatIn):
+async def api_chat(request: Request, payload: ChatIn):
     user_message = (payload.message or "").strip()
     if not user_message:
         raise HTTPException(status_code=400, detail="Message is required")
@@ -602,11 +1016,22 @@ async def api_chat(payload: ChatIn):
     if not conversation_id:
         raise HTTPException(status_code=400, detail="conversation_id is required")
 
-    raw_settings = load_settings()
+    username = require_user(request)
+    owner = conversation_owners.get(conversation_id)
+    if owner and owner != username:
+        raise HTTPException(status_code=403, detail="conversation_id belongs to another user")
+    conversation_owners[conversation_id] = username
+
+    raw_settings = get_effective_raw_settings(username)
     settings = get_runtime_settings(raw_settings)
+    if isinstance(payload.agent_skill_enabled, bool):
+        settings["agent_skill_enabled"] = payload.agent_skill_enabled
+    if isinstance(payload.f5_guardrail_only, bool):
+        settings["f5_guardrail_only"] = payload.f5_guardrail_only
     agent_debug_log(
         settings,
-        f"api_chat start conversation_id={conversation_id} multi_turn={payload.multi_turn}",
+        f"api_chat start conversation_id={conversation_id} multi_turn={payload.multi_turn} "
+        f"agent_skill={settings.get('agent_skill_enabled')} f5_only={settings.get('f5_guardrail_only')}",
     )
     effective_provider = (payload.provider or "").strip() or (raw_settings.get("default_provider") or "").strip() or DEFAULT_PROVIDER
     send_kwargs = build_send_kwargs(verbose=settings.get("guardrail_verbose", False), provider_override=effective_provider or None)
@@ -653,6 +1078,7 @@ async def api_chat(payload: ChatIn):
 
     if not payload.multi_turn:
         conversations.pop(conversation_id, None)
+        conversation_owners.pop(conversation_id, None)
 
     status, rejection_type = classify_rejection(reply)
     
@@ -812,6 +1238,65 @@ class OOBChatIn(BaseModel):
     stream: bool = False  # 当前 NJS 整段缓冲后返回，暂不支持真正流式；False 时始终 JSON
 
 
+class DirectChatIn(BaseModel):
+    """Chat direct mode: OpenAI-compatible request body."""
+    messages: List[dict]
+    stream: bool = False
+
+
+def _get_direct_provider_config() -> Tuple[str, str, str]:
+    """Reload .env on each request so direct config can change without restart."""
+    load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
+    base_url = (os.getenv("LLM_PROVIDER_URL") or LLM_PROVIDER_URL or "").strip().rstrip("/")
+    # 兼容多种命名：LLM_PROVIDER_KEY_Direct / LLM_PROVIDER_KEY_DIRECT；并兜底读取 .env 原始文本
+    api_key = (
+        os.getenv("LLM_PROVIDER_KEY_Direct")
+        or os.getenv("LLM_PROVIDER_KEY_DIRECT")
+        or LLM_PROVIDER_KEY_DIRECT
+        or ""
+    ).strip()
+    model = (os.getenv("LLM_PROVIDER_MODEL") or LLM_PROVIDER_MODEL or "").strip()
+    if not api_key:
+        env_path = os.path.join(BASE_DIR, ".env")
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    s = line.strip()
+                    if not s or s.startswith("#") or "=" not in s:
+                        continue
+                    k, v = s.split("=", 1)
+                    key_name = k.strip()
+                    if key_name in ("LLM_PROVIDER_KEY_Direct", "LLM_PROVIDER_KEY_DIRECT"):
+                        api_key = v.strip()
+                        break
+        except Exception:
+            pass
+    return base_url, api_key, model
+
+
+def _extract_openai_reply(data: dict) -> str:
+    """Extract text from OpenAI-compatible response; fallback to compact JSON."""
+    if not isinstance(data, dict):
+        return "(empty reply)"
+    choices = data.get("choices")
+    if isinstance(choices, list) and choices:
+        message = choices[0].get("message") if isinstance(choices[0], dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, str):
+            return content or "(empty reply)"
+        if isinstance(content, list):
+            parts: List[str] = []
+            for item in content:
+                if isinstance(item, dict):
+                    text_val = item.get("text")
+                    if isinstance(text_val, str):
+                        parts.append(text_val)
+            joined = "".join(parts).strip()
+            if joined:
+                return joined
+    return json.dumps(data, ensure_ascii=False)
+
+
 def _forward_oob_chat(message: str, stream: bool = False) -> Tuple[dict, int]:
     """同步转发到 OOB Proxy，返回 (response_body, status_code)。"""
     if not OOB_PROXY_URL or not LLM_PROVIDER_KEY:
@@ -928,12 +1413,13 @@ async def _forward_oob_chat_stream(message: str):
 
 
 @app.post("/api/guardrail-scan")
-async def api_guardrail_scan(payload: GuardrailScanIn):
+async def api_guardrail_scan(request: Request, payload: GuardrailScanIn):
     """Dedicated endpoint for Guardrail Integration view: only calls F5 Guardrail, returns full guardrail JSON for flow visualization."""
     prompt = (payload.message or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="message is required")
-    raw_settings = load_settings()
+    username = require_user(request)
+    raw_settings = get_effective_raw_settings(username)
     settings = get_runtime_settings(raw_settings)
     effective_provider = (payload.provider or "").strip() or (raw_settings.get("default_provider") or "").strip() or DEFAULT_PROVIDER
     send_kwargs = build_send_kwargs(verbose=settings.get("guardrail_verbose", False), provider_override=effective_provider or None)
@@ -955,6 +1441,47 @@ async def api_oob_chat(payload: OOBChatIn):
     return JSONResponse(content=body, status_code=status)
 
 
+@app.post("/api/chat-direct")
+async def api_chat_direct(payload: DirectChatIn):
+    """
+    Direct mode: send OpenAI-compatible payload straight to provider URL.
+    This endpoint bypasses F5 Guardrail processing.
+    """
+    messages = payload.messages if isinstance(payload.messages, list) else []
+    if not messages:
+        raise HTTPException(status_code=400, detail="messages is required")
+
+    base_url, api_key, model = _get_direct_provider_config()
+    if not base_url or not api_key or not model:
+        raise HTTPException(
+            status_code=400,
+            detail="Direct mode unavailable: missing LLM_PROVIDER_URL / LLM_PROVIDER_KEY_Direct / LLM_PROVIDER_MODEL",
+        )
+
+    url = base_url + "/chat/completions"
+    body = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + api_key,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            r = await client.post(url, json=body, headers=headers)
+        if r.status_code < 200 or r.status_code >= 300:
+            err_text = r.text[:2000] if isinstance(r.text, str) else ""
+            raise HTTPException(status_code=r.status_code, detail=err_text or "Direct provider request failed")
+        data = r.json()
+        return JSONResponse({"reply": _extract_openai_reply(data), "mode": "direct"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Direct provider unreachable: {e}")
+
+
 def _get_provider_options() -> list:
     """从环境变量 PROVIDER_OPTIONS（逗号分隔）读取可选 Provider 列表，供前端下拉使用。每次请求时重新加载项目 .env 以便不重启即可生效。"""
     load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
@@ -965,18 +1492,42 @@ def _get_provider_options() -> list:
 
 
 @app.get("/api/settings")
-async def get_settings():
-    out = dict(load_settings())
+async def get_settings(request: Request):
+    username = require_user(request)
+    out = dict(get_effective_raw_settings(username))
     out["provider_options"] = _get_provider_options()
     out["effective_provider"] = (str(out.get("default_provider", "") or "").strip() or (DEFAULT_PROVIDER or "").strip())
+    out["username"] = username
+    direct_url, direct_key, direct_model = _get_direct_provider_config()
+    direct_ready = bool(direct_url and direct_key and direct_model)
+    out["direct_available"] = direct_ready
+    if not direct_ready:
+        out["direct_unavailable_reason"] = "未配置 LLM_PROVIDER_URL / LLM_PROVIDER_KEY_Direct / LLM_PROVIDER_MODEL"
     return out
 
 @app.post("/api/settings")
-async def post_settings(payload: dict = Body(default=None)):
-    merged = load_settings()
-    if isinstance(payload, dict) and payload:
-        merged.update(payload)
-    merged = get_runtime_settings(merged)
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(merged, f, indent=2, ensure_ascii=False)
-    return {"status": "ok", "settings": merged}
+async def post_settings(request: Request, payload: dict = Body(default=None)):
+    username = require_user(request)
+    clean_payload = payload if isinstance(payload, dict) else {}
+    structured = load_structured_settings()
+    if username not in structured["user_settings"]:
+        structured["user_settings"][username] = _new_user_settings_from_template(structured)
+
+    for k, v in clean_payload.items():
+        if k in USER_SCOPED_KEYS:
+            structured["user_settings"][username][k] = v
+        elif k in GLOBAL_SCOPED_KEYS:
+            structured["global_settings"][k] = v
+
+    runtime = get_runtime_settings(
+        {
+            **structured["global_settings"],
+            **structured["user_settings"].get(username, {}),
+        }
+    )
+    for k in USER_SCOPED_KEYS:
+        structured["user_settings"][username][k] = runtime[k]
+    for k in GLOBAL_SCOPED_KEYS:
+        structured["global_settings"][k] = runtime[k]
+    save_structured_settings(structured)
+    return {"status": "ok", "settings": runtime}

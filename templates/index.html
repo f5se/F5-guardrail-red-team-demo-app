@@ -13,7 +13,10 @@
   </div>
 
   <div class="wrap">
-    <div class="crumb">Home &nbsp;›&nbsp; Assistant</div>
+    <div class="crumbRow">
+      <div class="crumb">Home &nbsp;›&nbsp; Assistant</div>
+      <button id="btnLogout" class="logoutBtn" type="button">退出登录 · Logout</button>
+    </div>
 
     <div class="layout layout--with-guardrail">
       <div class="sidebarStack">
@@ -49,7 +52,7 @@
               <div class="dot"></div>
               <div class="title">
                 <span id="chatTitle">AI Assistant</span>
-                <span class="badge" id="modeBadge">Single-turn</span>
+                <span class="badge badge--toggle" id="modeBadge" role="button" tabindex="0" aria-pressed="false" title="点击切换：与 Settings 中 Multi-turn Detection 相同">Single-turn</span>
                 <span class="badge badge--toggle" id="kbSkillBadge" role="button" tabindex="0" aria-pressed="false" title="点击切换：与 Settings 中 Agent Skill Orchestration 相同">Enterprise KB Skill OFF</span>
                 <span class="badge badge--toggle" id="f5GuardrailOnlyBadge" role="button" tabindex="0" aria-pressed="false" title="点击切换：与 Settings 中 Only use F5 Guardrail 相同">F5 Guardrail Only OFF</span>
               </div>
@@ -99,6 +102,15 @@
             <div class="row">
               <textarea id="input" placeholder="Type your question"></textarea>
               <button id="btnSend" class="send" title="Send">➤</button>
+            </div>
+            <div class="hint">
+              <span>
+                <label class="composerOptionLabel" for="directModeToggle">
+                  <input type="checkbox" id="directModeToggle">
+                  直连模型（OpenAI-compatible）
+                </label>
+                <span class="composerOptionHint" id="directModeHint">默认关闭 · Direct mode OFF by default</span>
+              </span>
             </div>
             <div class="hint">
               <span>Enter to send · Shift+Enter new line</span>

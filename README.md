@@ -57,11 +57,59 @@ cp .env_example .env
 | `HF_HOME` | Hugging Face 模型缓存目录（可选） | `Your-hugging-face-home-directory` |
 | `HF_PROXY` | 仅用于 HF 模型下载的代理，不用于连接 CalypsoAI（可选） | `http://127.0.0.1:8010` |
 | `HF_TOKEN` | Hugging Face 令牌（可选，建议设置以加速下载、避免限流） | `Your-hugging-face-token` |
+| `LLM_PROVIDER_URL` | 聊天界面“直连模型（OpenAI-compatible）”模式下的直连地址（OpenAI-compatible Base URL）。**使用直连模式时必填** | `https://api.example-llm.com/v1` |
+| `LLM_PROVIDER_MODEL` | 直连模式使用的模型名。**使用直连模式时必填** | `example-chat-model` |
+| `LLM_PROVIDER_KEY_Direct` | 直连模式使用的 API Key（Bearer）。**使用直连模式时必填**；也兼容 `LLM_PROVIDER_KEY_DIRECT` 命名 | `sk-your-direct-provider-key` |
 | `OOB_PROXY_URL` | OOB 模式下 NGINX Proxy 地址。**使用 OOB 时必填**，按实际部署填写（需与 docs/nginx 监听地址一致，如 `http://localhost:8787`） | `http://localhost:8787` |
 | `LLM_PROVIDER_KEY` | OOB 模式下发往 LLM 的 API Key（Bearer）。**使用 OOB 时必填**，按实际 LLM 提供商配置 | `Your-llm-provider-api-key` |
 | `OOB_MODEL` | OOB 请求使用的模型名。不填时**缺省为 `deepseek-chat`**；使用 OOB 时建议按实际调用的模型配置 | `deepseek-chat` |
 
 注意：你需要首先在 Calypso（F5 Guardrail）系统上设定相关 Project、Connection/Provider 及 Project API token。测试企业敏感信息防护等能力时，需在 F5 Guardrail 中提前配置 Custom scanner 等。
+提示：README 与 `.env_example` 中的 Key 都是示例占位符，请勿提交真实密钥到仓库。
+
+### 用户验证配置（首次启用前）
+
+本项目已启用登录鉴权，中间件会对除 `/login`、`/api/login`、`/health` 与静态资源外的请求进行会话校验。建议在首次启动前先完成用户配置，避免使用默认账户。
+
+1. 复制示例配置为正式配置（你已准备好示例文件）：
+
+```bash
+cp settings_example.json settings.json
+```
+
+2. 按需修改 `settings.json` 中以下字段：
+- `auth.users`：登录用户列表（`username`、`password_hash`、`enabled`）
+- `auth.session_ttl_seconds`：登录会话有效期（秒）
+- `user_settings`：每个用户名对应的个性化设置（建议与 `auth.users` 保持一致）
+
+> 提示：请以 `settings_example.json` 为模板，复制后重命名为 `settings.json` 再进行修改。
+
+### 使用脚本批量生成用户密码哈希
+
+`scripts/gen_password_hash.py` 可批量生成 `auth.users` 所需条目，输出为 JSON 数组，可直接粘贴到 `settings.json` 的 `auth.users` 中。
+
+示例（一次生成多个用户）：
+
+```bash
+python scripts/gen_password_hash.py \
+  --iterations 120000 \
+  --user "admin:YourStrongPassword1!" \
+  --user "analyst:YourStrongPassword2!" \
+  --user "auditor:YourStrongPassword3!"
+```
+
+将输出保存到文件再处理也可以：
+
+```bash
+python scripts/gen_password_hash.py \
+  --user "admin:YourStrongPassword1!" \
+  --user "analyst:YourStrongPassword2!" > users.generated.json
+```
+
+建议：
+- 为每个账号使用强密码（长度、复杂度、不可复用）。
+- `auth.users` 更新后，同时补齐 `user_settings.<username>`，确保用户登录后有默认配置。
+- 不要将真实密码或生产配置提交到仓库。
 
 ### 攻击面板配置
 

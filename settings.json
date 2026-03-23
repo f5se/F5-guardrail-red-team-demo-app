@@ -1,23 +1,108 @@
 {
-  "patterns": "ignore:3\nsystem:3\nprompt:2\n忽略:3\n系统提示词:3\n忘记:2\n角色:3",
-  "heuristic_threshold": 6,
-  "toxic_threshold": 0.75,
-  "pi_threshold": 0.7,
-  "agent_skill_enabled": true,
-  "f5_guardrail_only": true,
-  "debug_guardrail_raw_enabled": false,
-  "guardrail_verbose": true,
-  "kb_dir": "./enterprise_kb",
-  "agent_max_steps": 4,
-  "agent_debug_enabled": true,
-  "kb_top_k": 3,
-  "kb_allowed_extensions": [
-    ".txt",
-    ".md",
-    ".json",
-    ".csv"
-  ],
-  "kb_max_file_chars": 8000,
-  "kb_max_result_chars": 5000,
-  "default_provider": "jinglin-google-gemini-133540"
+  "auth": {
+    "users": [
+      {
+        "username": "admin",
+        "password_hash": "pbkdf2_sha256$120000$PImnGiQPheBAclvw$GAWCW_DfZES4KCVhd0380kpaaYiT_SfIkEUDoFR86dE",
+        "enabled": true
+      },
+      {
+        "username": "north",
+        "password_hash": "pbkdf2_sha256$120000$vS0-FHgrL3ypHhB8$acKK2kluIYwVslVsGw0sD9_Yaq7vFYDdUb8Qix5uZmQ",
+        "enabled": true
+      },
+      {
+        "username": "south",
+        "password_hash": "pbkdf2_sha256$120000$LPnWQwkdl0xoyLbw$Cya5hw6zNfDoyiSKa9nqHdrcjvyrMHBDx4txpO1vLyc",
+        "enabled": true
+      },
+      {
+        "username": "east",
+        "password_hash": "pbkdf2_sha256$120000$j8RLKyWsbQvK2TOl$z6mfJC3TPJsP56X096AaNWknUtmwlzWncBG6w22yui4",
+        "enabled": true
+      },
+      {
+        "username": "bfsi",
+        "password_hash": "pbkdf2_sha256$120000$eZL14ZJinnpsBNXE$KX6hEVzQGwwnmKRW4oZDhrFnpt5xJs2YXIUfkrEuAIs",
+        "enabled": true
+      },
+      {
+        "username": "csp",
+        "password_hash": "pbkdf2_sha256$120000$EAGf9xn-_bQsJ8p5$2i6StjPQH6JPufS-HsvXK-QDCI3ODO0W8vVX6HOWKXM",
+        "enabled": true
+      },
+      {
+        "username": "auto",
+        "password_hash": "pbkdf2_sha256$120000$Wic7ODPdUwGi-enB$O6STJF_wpK9YAJkT7rc0yv_kPnBWLFMP6Hjw03dqcJk",
+        "enabled": true
+      },
+      {
+        "username": "channel",
+        "password_hash": "pbkdf2_sha256$120000$amCZt8IT8aRX2_wi$dMIBRjTYUZpxcFYoJFjWKdX933tA2muKUvhB45dD050",
+        "enabled": true
+      }
+    ],
+    "session_ttl_seconds": 86400
+  },
+  "global_settings": {
+    "kb_max_result_chars": 5000,
+    "kb_allowed_extensions": [
+      ".txt",
+      ".md",
+      ".json",
+      ".csv"
+    ],
+    "agent_max_steps": 4,
+    "kb_top_k": 3,
+    "guardrail_verbose": true,
+    "kb_max_file_chars": 8000,
+    "kb_dir": "./enterprise_kb",
+    "agent_debug_enabled": true
+  },
+  "user_settings": {
+    "admin": {
+      "f5_guardrail_only": true,
+      "patterns": "ignore:3\nsystem:3\nprompt:2\n忽略:3\n系统提示词:3\n忘记:2\n角色:4\n",
+      "agent_skill_enabled": true,
+      "heuristic_threshold": 6,
+      "multi_turn_enabled": false,
+      "debug_guardrail_raw_enabled": false,
+      "pi_threshold": 0.7,
+      "default_provider": "deepseek-JingLin-real-charge",
+      "toxic_threshold": 0.75
+    },
+    "bfsi": {
+      "f5_guardrail_only": true,
+      "patterns": "ignore:3\nsystem:3\nprompt:2",
+      "agent_skill_enabled": true,
+      "heuristic_threshold": 10,
+      "multi_turn_enabled": false,
+      "debug_guardrail_raw_enabled": false,
+      "pi_threshold": 0.7,
+      "default_provider": "",
+      "toxic_threshold": 0.75
+    },
+    "csp": {
+      "f5_guardrail_only": false,
+      "patterns": "ignore:3\nsystem:3\nprompt:2\n忽略:3\n系统提示词:3\n忘记:2\n角色:4\n",
+      "agent_skill_enabled": false,
+      "heuristic_threshold": 10,
+      "multi_turn_enabled": true,
+      "debug_guardrail_raw_enabled": false,
+      "pi_threshold": 0.7,
+      "default_provider": "",
+      "toxic_threshold": 0.75
+    },
+    "north": {
+      "f5_guardrail_only": true,
+      "patterns": "ignore:3\nsystem:3\nprompt:2\n忽略:3\n系统提示词:3\n忘记:2\n角色:4\n",
+      "agent_skill_enabled": true,
+      "heuristic_threshold": 10,
+      "multi_turn_enabled": false,
+      "debug_guardrail_raw_enabled": false,
+      "pi_threshold": 0.7,
+      "default_provider": "",
+      "toxic_threshold": 0.75
+    }
+  }
 }

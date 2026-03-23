@@ -24,3 +24,5 @@ huggingface/
 docs/local-docs/
 docs/nginx/conf.d/
 .cursor/
+settings.json
+login_activity.log

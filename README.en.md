@@ -67,11 +67,59 @@ Variables in `.env_example`:
 | `HF_HOME` | Hugging Face model cache directory (optional) | `Your-hugging-face-home-directory` |
 | `HF_PROXY` | Proxy for HF model download only; not used for CalypsoAI (optional) | `http://127.0.0.1:8010` |
 | `HF_TOKEN` | Hugging Face token (optional; recommended for faster downloads and to avoid rate limits) | `Your-hugging-face-token` |
+| `LLM_PROVIDER_URL` | Direct endpoint used by the chat checkbox mode “Direct model (OpenAI-compatible)” (OpenAI-compatible base URL). **Required when using direct mode** | `https://api.example-llm.com/v1` |
+| `LLM_PROVIDER_MODEL` | Model name used in direct mode. **Required when using direct mode** | `example-chat-model` |
+| `LLM_PROVIDER_KEY_Direct` | API key (Bearer) used in direct mode. **Required when using direct mode**; `LLM_PROVIDER_KEY_DIRECT` is also supported as an alias | `sk-your-direct-provider-key` |
 | `OOB_PROXY_URL` | NGINX Proxy URL for OOB mode. **Required when using OOB**; must match the docs/nginx listen address (e.g. `http://localhost:8787`). | `http://localhost:8787` |
 | `LLM_PROVIDER_KEY` | API Key (Bearer) sent to the LLM in OOB mode. **Required when using OOB**; set per your LLM provider. | `Your-llm-provider-api-key` |
 | `OOB_MODEL` | Model name for OOB requests. **Default `deepseek-chat`** when unset; when using OOB, set to your actual model. | `deepseek-chat` |
 
 **Note:** Configure the corresponding Project, Connection/Provider, and Project API token in Calypso (F5 Guardrail) first. For features like enterprise-sensitive data protection, configure Custom scanners in the F5 Guardrail system in advance.
+Security note: Keys shown in README and `.env_example` are placeholders only. Never commit real API keys.
+
+### User Authentication Setup (Before First Run)
+
+This project uses login/session authentication. Requests are protected by middleware except `/login`, `/api/login`, `/health`, and static assets. Configure users before first start to avoid relying on default credentials.
+
+1. Copy the example settings to the active config file (you already prepared the example file):
+
+```bash
+cp settings_example.json settings.json
+```
+
+2. Update these fields in `settings.json`:
+- `auth.users`: login user list (`username`, `password_hash`, `enabled`)
+- `auth.session_ttl_seconds`: session TTL in seconds
+- `user_settings`: per-user runtime settings (recommended to align usernames with `auth.users`)
+
+> Tip: use `settings_example.json` as template, then rename/copy it to `settings.json` before editing.
+
+### Generate Users in Batch with `scripts/gen_password_hash.py`
+
+Use `scripts/gen_password_hash.py` to generate `auth.users` entries in batch. The script prints a JSON array that you can paste directly into `auth.users` in `settings.json`.
+
+Example (multiple users at once):
+
+```bash
+python scripts/gen_password_hash.py \
+  --iterations 120000 \
+  --user "admin:YourStrongPassword1!" \
+  --user "analyst:YourStrongPassword2!" \
+  --user "auditor:YourStrongPassword3!"
+```
+
+You can also save output to a file first:
+
+```bash
+python scripts/gen_password_hash.py \
+  --user "admin:YourStrongPassword1!" \
+  --user "analyst:YourStrongPassword2!" > users.generated.json
+```
+
+Recommendations:
+- Use strong, unique passwords for each account.
+- After updating `auth.users`, also add matching `user_settings.<username>` entries.
+- Never commit plaintext passwords or production secrets.
 
 ### Attack panel configuration
 

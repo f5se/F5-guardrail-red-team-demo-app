@@ -2,10 +2,13 @@ const messagesEl = document.getElementById("messages");
 const inputEl = document.getElementById("input");
 const btnSend = document.getElementById("btnSend");
 const btnClear = document.getElementById("btnClear");
+const btnLogout = document.getElementById("btnLogout");
 const chatTitleEl = document.getElementById("chatTitle");
 const modeBadgeEl = document.getElementById("modeBadge");
 const kbSkillBadgeEl = document.getElementById("kbSkillBadge");
 const f5GuardrailOnlyBadgeEl = document.getElementById("f5GuardrailOnlyBadge");
+const directModeToggleEl = document.getElementById("directModeToggle");
+const directModeHintEl = document.getElementById("directModeHint");
 const localEngineCards = [
   document.getElementById("cardPattern"),
   document.getElementById("cardHeuristic"),
@@ -23,6 +26,41 @@ const guardrailIntegrationPresets = Array.isArray(window.GUARDRAIL_INTEGRATION_P
 let attackTooltipEl = null;
 let activeView = "CHAT";
 let currentBackendProviderName = "";
+let directModeAvailable = false;
+
+async function authFetch(url, options) {
+  const resp = await fetch(url, options);
+  if (resp.status === 401) {
+    clearSessionBadgeOverrides();
+    window.location.href = "/login";
+    throw new Error("Unauthorized");
+  }
+  return resp;
+}
+
+function setLogoutButtonLabel(username) {
+  if (!btnLogout) return;
+  const name = (username || "").trim();
+  btnLogout.textContent = name
+    ? `退出登录（${name}） · Logout`
+    : "退出登录 · Logout";
+}
+
+function setDirectModeAvailability(available, reason) {
+  directModeAvailable = !!available;
+  if (!directModeToggleEl) return;
+  directModeToggleEl.disabled = !directModeAvailable;
+  if (!directModeAvailable) {
+    directModeToggleEl.checked = false;
+  }
+  if (directModeHintEl) {
+    directModeHintEl.textContent = directModeAvailable
+      ? "默认关闭 · Direct mode OFF by default"
+      : (reason || "未配置直连参数 · Direct mode unavailable");
+    directModeHintEl.classList.toggle("unavailable", !directModeAvailable);
+  }
+}
+setDirectModeAvailability(false, "直连配置检测中 · Checking direct mode config");
 
 function getCurrentAttackPresets() {
   return activeView === "GUARDRAIL_INTEGRATION" ? guardrailIntegrationPresets : attackPresets;
@@ -431,6 +469,70 @@ function updateGuardrailPanel(guardrail){
 }
 
 let isSending = false;
+const persistedBadgeSettings = {
+  multiTurn: false,
+  agentSkill: false,
+  f5GuardrailOnly: false
+};
+const sessionBadgeOverrides = {
+  multiTurn: null,
+  agentSkill: null,
+  f5GuardrailOnly: null
+};
+let activeSettingsUsername = "";
+
+function getBadgeSessionStorageKey(username){
+  const u = String(username || "").trim();
+  return u ? ("badgeSessionOverrides:" + u) : "";
+}
+
+function normalizeOverrideValue(v){
+  if (typeof v === "boolean") return v;
+  return null;
+}
+
+function loadSessionBadgeOverrides(username){
+  activeSettingsUsername = String(username || "").trim();
+  sessionBadgeOverrides.multiTurn = null;
+  sessionBadgeOverrides.agentSkill = null;
+  sessionBadgeOverrides.f5GuardrailOnly = null;
+  const key = getBadgeSessionStorageKey(activeSettingsUsername);
+  if (!key) return;
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return;
+    sessionBadgeOverrides.multiTurn = normalizeOverrideValue(parsed.multiTurn);
+    sessionBadgeOverrides.agentSkill = normalizeOverrideValue(parsed.agentSkill);
+    sessionBadgeOverrides.f5GuardrailOnly = normalizeOverrideValue(parsed.f5GuardrailOnly);
+  } catch (_) {
+    // ignore invalid sessionStorage value
+  }
+}
+
+function persistSessionBadgeOverrides(){
+  const key = getBadgeSessionStorageKey(activeSettingsUsername);
+  if (!key) return;
+  try {
+    sessionStorage.setItem(key, JSON.stringify(sessionBadgeOverrides));
+  } catch (_) {
+    // ignore storage errors
+  }
+}
+
+function clearSessionBadgeOverrides(){
+  const key = getBadgeSessionStorageKey(activeSettingsUsername);
+  sessionBadgeOverrides.multiTurn = null;
+  sessionBadgeOverrides.agentSkill = null;
+  sessionBadgeOverrides.f5GuardrailOnly = null;
+  if (!key) return;
+  try {
+    sessionStorage.removeItem(key);
+  } catch (_) {
+    // ignore storage errors
+  }
+}
 
 function uuidv4(){
   if (crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -443,27 +545,60 @@ function uuidv4(){
 
 let conversationId = uuidv4();
 
-const LS_KEY = "multi_turn_enabled";
-function getMultiTurnEnabled(){
-  return localStorage.getItem(LS_KEY) === "true";
-}
 function setMultiTurnEnabled(v){
-  localStorage.setItem(LS_KEY, v ? "true" : "false");
-  toggleMultiTurnEl.checked = !!v;
-  modeBadgeEl.textContent = v ? "Multi-turn" : "Single-turn";
+  if (toggleMultiTurnEl) toggleMultiTurnEl.checked = !!v;
+  refreshModeBadge();
 }
-setMultiTurnEnabled(getMultiTurnEnabled());
+function getMultiTurnEnabled(){
+  return getEffectiveMultiTurnEnabled();
+}
+setMultiTurnEnabled(false);
 
 function setEnterpriseKBSkillEnabled(v){
   if (!kbSkillBadgeEl) return;
+  if (toggleAgentSkillEl) toggleAgentSkillEl.checked = !!v;
+  refreshEnterpriseKBSkillBadge();
+}
+
+function setF5GuardrailOnlyBadge(v){
+  if (toggleF5GuardrailOnlyEl) toggleF5GuardrailOnlyEl.checked = !!v;
+  refreshF5GuardrailOnlyBadge();
+}
+
+function getEffectiveMultiTurnEnabled(){
+  if (sessionBadgeOverrides.multiTurn === null) return !!persistedBadgeSettings.multiTurn;
+  return !!sessionBadgeOverrides.multiTurn;
+}
+function getEffectiveAgentSkillEnabled(){
+  if (sessionBadgeOverrides.agentSkill === null) return !!persistedBadgeSettings.agentSkill;
+  return !!sessionBadgeOverrides.agentSkill;
+}
+function getEffectiveF5GuardrailOnlyEnabled(){
+  if (sessionBadgeOverrides.f5GuardrailOnly === null) return !!persistedBadgeSettings.f5GuardrailOnly;
+  return !!sessionBadgeOverrides.f5GuardrailOnly;
+}
+
+function refreshModeBadge(){
+  if (!modeBadgeEl) return;
+  const v = getEffectiveMultiTurnEnabled();
+  modeBadgeEl.textContent = v ? "Multi-turn" : "Single-turn";
+  modeBadgeEl.classList.toggle("multiTurnOn", !!v);
+  modeBadgeEl.classList.toggle("multiTurnOff", !v);
+  modeBadgeEl.setAttribute("aria-pressed", v ? "true" : "false");
+}
+
+function refreshEnterpriseKBSkillBadge(){
+  if (!kbSkillBadgeEl) return;
+  const v = getEffectiveAgentSkillEnabled();
   kbSkillBadgeEl.textContent = v ? "Enterprise KB Skill ON" : "Enterprise KB Skill OFF";
   kbSkillBadgeEl.classList.toggle("kbSkillOn", !!v);
   kbSkillBadgeEl.classList.toggle("kbSkillOff", !v);
   kbSkillBadgeEl.setAttribute("aria-pressed", v ? "true" : "false");
 }
 
-function setF5GuardrailOnlyBadge(v){
+function refreshF5GuardrailOnlyBadge(){
   if (!f5GuardrailOnlyBadgeEl) return;
+  const v = getEffectiveF5GuardrailOnlyEnabled();
   f5GuardrailOnlyBadgeEl.textContent = v ? "F5 Guardrail Only ON" : "F5 Guardrail Only OFF";
   f5GuardrailOnlyBadgeEl.classList.toggle("f5GuardrailOnlyOn", !!v);
   f5GuardrailOnlyBadgeEl.classList.toggle("f5GuardrailOnlyOff", !v);
@@ -473,7 +608,7 @@ function setF5GuardrailOnlyBadge(v){
 
 /** 当 F5 Guardrail Only 为 ON 时，本地引擎卡片置灰（与 Enterprise KB Skill 无关） */
 function updateLocalEngineCardsGray(){
-  const f5OnlyOn = !!toggleF5GuardrailOnlyEl?.checked;
+  const f5OnlyOn = getEffectiveF5GuardrailOnlyEnabled();
   localEngineCards.forEach(el => {
     if (!el) return;
     el.classList.toggle("localDisabled", !!f5OnlyOn);
@@ -485,7 +620,10 @@ setF5GuardrailOnlyBadge(!!toggleF5GuardrailOnlyEl?.checked);
 updateLocalEngineCardsGray();
 
 toggleMultiTurnEl.addEventListener("change", () => {
-  setMultiTurnEnabled(toggleMultiTurnEl.checked);
+  sessionBadgeOverrides.multiTurn = null;
+  persistedBadgeSettings.multiTurn = !!toggleMultiTurnEl.checked;
+  refreshModeBadge();
+  saveSettings(false);
 
   // 🔥 RESET CONVERSATION
   conversationId = uuidv4();
@@ -509,7 +647,7 @@ async function loadTestGuide(){
   if (testGuideLoaded) return;
   testGuideContentEl.innerHTML = `<div class="mdDoc__status">加载中…</div>`;
   try {
-    const resp = await fetch("/api/test-guide", { cache: "no-cache" });
+    const resp = await authFetch("/api/test-guide", { cache: "no-cache" });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const md = await resp.text();
     testGuideContentEl.innerHTML = renderMarkdown(md);
@@ -653,25 +791,36 @@ async function send(){
 
   const msg = inputEl.value.trim();
   if(!msg) return;
+  const useDirectMode = !!(directModeToggleEl && directModeToggleEl.checked && !directModeToggleEl.disabled);
 
   isSending = true;
   btnSend.disabled = true;
   inputEl.disabled = true;
 
-  addBubble("user", msg);
+  addBubble("user", msg, useDirectMode ? "direct-mode" : "");
   inputEl.value = "";
 
   const assistantBubble = addBubble("assistant", "…");
 
   try{
-    const res = await fetch("/api/chat", {
+    const endpoint = useDirectMode ? "/api/chat-direct" : "/api/chat";
+    const requestBody = useDirectMode
+      ? {
+          messages: [
+            { role: "user", content: msg }
+          ]
+        }
+      : {
+          message: msg,
+          conversation_id: conversationId,
+          multi_turn: getEffectiveMultiTurnEnabled(),
+          agent_skill_enabled: getEffectiveAgentSkillEnabled(),
+          f5_guardrail_only: getEffectiveF5GuardrailOnlyEnabled()
+        };
+    const res = await authFetch(endpoint, {
       method:"POST",
       headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({
-        message: msg,
-        conversation_id: conversationId,
-        multi_turn: getMultiTurnEnabled()
-      })
+      body: JSON.stringify(requestBody)
     });
 
     const data = await res.json();
@@ -682,19 +831,23 @@ async function send(){
     }
 
     const reply = data.reply || "(empty reply)";
-    updateEngines(data.engines);
-    if (data.guardrail) {
-      updateGuardrailPanel(data.guardrail);
-    } else {
-      // If backend did not send guardrail payload, keep previous or reset.
-      // Here we choose to reset to avoid showing stale data for incompatible responses.
+    if (useDirectMode) {
+      updateEngines(null);
       resetGuardrailPanel();
-    }
-
-    if (isRejected(reply)){
-      renderRejectedBubble(assistantBubble, reply);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-      return;
+    } else {
+      updateEngines(data.engines);
+      if (data.guardrail) {
+        updateGuardrailPanel(data.guardrail);
+      } else {
+        // If backend did not send guardrail payload, keep previous or reset.
+        // Here we choose to reset to avoid showing stale data for incompatible responses.
+        resetGuardrailPanel();
+      }
+      if (isRejected(reply)){
+        renderRejectedBubble(assistantBubble, reply);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return;
+      }
     }
 
     assistantBubble.textContent = "";
@@ -722,6 +875,16 @@ btnClear.addEventListener("click", () => {
   resetGuardrailPanel();
 });
 
+btnLogout?.addEventListener("click", async () => {
+  clearSessionBadgeOverrides();
+  try {
+    await authFetch("/api/logout", { method: "POST" });
+  } catch (_) {
+    // ignore and continue to login page
+  }
+  window.location.href = "/login";
+});
+
 inputEl.addEventListener("keydown", (e) => {
   if(e.key === "Enter" && !e.shiftKey){
     e.preventDefault();
@@ -734,12 +897,19 @@ inputEl.addEventListener("keydown", (e) => {
 // ======================
 async function loadSettings(){
   try{
-    const r = await fetch("/api/settings", { cache: "no-store" });
+    const r = await authFetch("/api/settings", { cache: "no-store" });
     if(!r.ok) return;
     const s = await r.json();
+    const username = String(s.username || "").trim();
+    setLogoutButtonLabel(username);
+    if (username && username !== activeSettingsUsername) {
+      loadSessionBadgeOverrides(username);
+    }
+    persistedBadgeSettings.multiTurn = asBool(s.multi_turn_enabled);
+    setMultiTurnEnabled(persistedBadgeSettings.multiTurn);
 
     document.getElementById("patternBox").value = s.patterns || "";
-    document.getElementById("heuristicSlider").value = s.heuristic_threshold || 10;
+    document.getElementById("heuristicSlider").value = s.heuristic_threshold || 6;
     document.getElementById("toxSlider").value = s.toxic_threshold || 0.75;
     document.getElementById("piSlider").value = s.pi_threshold || 0.7;
     document.getElementById("heuristicVal").textContent = s.heuristic_threshold;
@@ -748,16 +918,17 @@ async function loadSettings(){
 
     if (toggleAgentSkillEl) {
       const enabled = asBool(s.agent_skill_enabled);
-      toggleAgentSkillEl.checked = enabled;
+      persistedBadgeSettings.agentSkill = enabled;
       setEnterpriseKBSkillEnabled(enabled);
     }
     if (toggleGuardrailDebugEl) {
       toggleGuardrailDebugEl.checked = asBool(s.debug_guardrail_raw_enabled);
     }
     if (toggleF5GuardrailOnlyEl) {
-      toggleF5GuardrailOnlyEl.checked = asBool(s.f5_guardrail_only);
-      setF5GuardrailOnlyBadge(!!toggleF5GuardrailOnlyEl.checked);
+      persistedBadgeSettings.f5GuardrailOnly = asBool(s.f5_guardrail_only);
+      setF5GuardrailOnlyBadge(persistedBadgeSettings.f5GuardrailOnly);
     }
+    setDirectModeAvailability(asBool(s.direct_available), s.direct_unavailable_reason || "");
     if (kbDirInputEl) {
       kbDirInputEl.value = s.kb_dir || "./enterprise_kb";
     }
@@ -801,7 +972,7 @@ async function loadSettings(){
 }
 
 async function saveSettings(showToast = true){
-  const res = await fetch("/api/settings", {
+  const res = await authFetch("/api/settings", {
     method:"POST",
     headers:{"Content-Type":"application/json"},
     body: JSON.stringify({
@@ -809,6 +980,7 @@ async function saveSettings(showToast = true){
       heuristic_threshold: document.getElementById("heuristicSlider").value,
       toxic_threshold: document.getElementById("toxSlider").value,
       pi_threshold: document.getElementById("piSlider").value,
+      multi_turn_enabled: !!document.getElementById("toggleMultiTurn")?.checked,
       agent_skill_enabled: !!document.getElementById("toggleAgentSkill")?.checked,
       f5_guardrail_only: !!document.getElementById("toggleF5GuardrailOnly")?.checked,
       debug_guardrail_raw_enabled: !!document.getElementById("toggleGuardrailDebug")?.checked,
@@ -832,21 +1004,49 @@ async function saveSettings(showToast = true){
 
 document.getElementById("btnSaveSettings")?.addEventListener("click", () => saveSettings(true));
 document.getElementById("toggleAgentSkill")?.addEventListener("change", () => {
-  setEnterpriseKBSkillEnabled(!!toggleAgentSkillEl?.checked);
+  sessionBadgeOverrides.agentSkill = null;
+  persistedBadgeSettings.agentSkill = !!toggleAgentSkillEl?.checked;
+  refreshEnterpriseKBSkillBadge();
   saveSettings(false);
 });
 document.getElementById("toggleGuardrailDebug")?.addEventListener("change", () => saveSettings(false));
 document.getElementById("toggleF5GuardrailOnly")?.addEventListener("change", () => {
-  setF5GuardrailOnlyBadge(!!toggleF5GuardrailOnlyEl?.checked);
+  sessionBadgeOverrides.f5GuardrailOnly = null;
+  persistedBadgeSettings.f5GuardrailOnly = !!toggleF5GuardrailOnlyEl?.checked;
+  refreshF5GuardrailOnlyBadge();
   saveSettings(false);
 });
 
-/** 聊天标题栏徽章：点击即切换 Settings 中对应开关（与滑动开关行为一致，含持久化） */
-function wireSettingsBadgeToggle(badgeEl, toggleInputEl){
-  if (!badgeEl || !toggleInputEl) return;
+function wireSessionBadgeToggle(badgeEl, key, onAfterFlip){
+  if (!badgeEl) return;
+  const showSessionHint = () => {
+    const text = "此处修改仅对本次登录有效\nSession-only change";
+    const bubble = document.createElement("div");
+    bubble.className = "badgeSessionHint";
+    bubble.textContent = text;
+    document.body.appendChild(bubble);
+    const rect = badgeEl.getBoundingClientRect();
+    const bubbleRect = bubble.getBoundingClientRect();
+    const x = rect.left + (rect.width / 2) - (bubbleRect.width / 2);
+    const y = rect.top - bubbleRect.height - 10;
+    bubble.style.left = Math.max(8, x) + "px";
+    bubble.style.top = Math.max(8, y) + "px";
+    requestAnimationFrame(() => bubble.classList.add("show"));
+    setTimeout(() => {
+      bubble.classList.remove("show");
+      setTimeout(() => {
+        bubble.remove();
+      }, 180);
+    }, 1600);
+  };
   const flip = () => {
-    toggleInputEl.checked = !toggleInputEl.checked;
-    toggleInputEl.dispatchEvent(new Event("change", { bubbles: true }));
+    const effective = key === "multiTurn"
+      ? getEffectiveMultiTurnEnabled()
+      : (key === "agentSkill" ? getEffectiveAgentSkillEnabled() : getEffectiveF5GuardrailOnlyEnabled());
+    sessionBadgeOverrides[key] = !effective;
+    persistSessionBadgeOverrides();
+    onAfterFlip();
+    showSessionHint();
   };
   badgeEl.addEventListener("click", e => {
     e.preventDefault();
@@ -859,8 +1059,18 @@ function wireSettingsBadgeToggle(badgeEl, toggleInputEl){
     }
   });
 }
-wireSettingsBadgeToggle(kbSkillBadgeEl, toggleAgentSkillEl);
-wireSettingsBadgeToggle(f5GuardrailOnlyBadgeEl, toggleF5GuardrailOnlyEl);
+wireSessionBadgeToggle(modeBadgeEl, "multiTurn", () => {
+  refreshModeBadge();
+  conversationId = uuidv4();
+  messagesEl.innerHTML = "";
+  addBubble("assistant", "Hi there! How can I help?");
+});
+wireSessionBadgeToggle(kbSkillBadgeEl, "agentSkill", () => {
+  refreshEnterpriseKBSkillBadge();
+});
+wireSessionBadgeToggle(f5GuardrailOnlyBadgeEl, "f5GuardrailOnly", () => {
+  refreshF5GuardrailOnlyBadge();
+});
 
 document.getElementById("kbDirInput")?.addEventListener("change", () => saveSettings(false));
 document.getElementById("providerSelect")?.addEventListener("change", () => saveSettings(false));
@@ -2062,7 +2272,7 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
           if (oobNodeProxy) oobNodeProxy.classList.add("state-processing");
         });
         try {
-          var res = await fetch("/api/oob-chat", {
+          var res = await authFetch("/api/oob-chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ message: msg, stream: false })
@@ -2171,7 +2381,7 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
         if (gintNodeGuardrail) gintNodeGuardrail.classList.add("state-processing");
       });
 
-      var fetchPromise = fetch("/api/guardrail-scan", {
+      var fetchPromise = authFetch("/api/guardrail-scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: msg })
