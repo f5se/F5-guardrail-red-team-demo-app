@@ -453,6 +453,7 @@ ACTIVITY_GAP_SECONDS = 30
 ACTIVITY_THRESHOLD_SECONDS = 120
 SESSION_COOKIE_NAME = "aigr_session"
 SESSION_IDLE_TIMEOUT_SECONDS = 20 * 60
+BEIJING_TZ = timezone(timedelta(hours=8))
 AUDIT_TRIGGER_PATHS = {
     "/api/chat",
     "/api/guardrail-scan",
@@ -1775,17 +1776,17 @@ async def get_user_activity(
     if username != "admin":
         raise HTTPException(status_code=403, detail="admin only")
 
-    now_utc = datetime.now(timezone.utc)
+    now_bj = datetime.now(BEIJING_TZ)
     selected_range = str(range_key or "1m").strip().lower()
     start_dt: Optional[datetime] = None
     end_dt: Optional[datetime] = None
 
     if selected_range == "1m":
-        start_dt = now_utc - timedelta(days=30)
-        end_dt = now_utc
+        start_dt = (now_bj - timedelta(days=30)).astimezone(timezone.utc)
+        end_dt = now_bj.astimezone(timezone.utc)
     elif selected_range == "3m":
-        start_dt = now_utc - timedelta(days=90)
-        end_dt = now_utc
+        start_dt = (now_bj - timedelta(days=90)).astimezone(timezone.utc)
+        end_dt = now_bj.astimezone(timezone.utc)
     elif selected_range == "custom":
         start_dt = _parse_utc_iso(start or "")
         end_dt = _parse_utc_iso(end or "")
@@ -1853,17 +1854,19 @@ async def get_user_activity(
 
     for rec in filtered_records:
         uname = rec["username"] or "unknown"
+        login_local = rec["login_dt"].astimezone(BEIJING_TZ)
         user_counts[uname] += 1
         ip_counts[rec["client_ip"] or "unknown"] += 1
-        day_key = rec["login_dt"].strftime("%Y-%m-%d")
+        day_key = login_local.strftime("%Y-%m-%d")
         day_counts[day_key] += 1
         day_counts_by_user[uname][day_key] += 1
-        weekday_by_user[uname][rec["login_dt"].weekday()] += 1
-        hour_login[rec["login_dt"].hour] += 1
+        weekday_by_user[uname][login_local.weekday()] += 1
+        hour_login[login_local.hour] += 1
 
         threshold_dt = rec["threshold_dt"]
         if threshold_dt:
-            hour_threshold[threshold_dt.hour] += 1
+            threshold_local = threshold_dt.astimezone(BEIJING_TZ)
+            hour_threshold[threshold_local.hour] += 1
             latency_sec = (threshold_dt - rec["login_dt"]).total_seconds()
             if latency_sec < 0:
                 negative_latency_records += 1
@@ -1875,8 +1878,8 @@ async def get_user_activity(
                         "username": uname,
                         "session_id": rec["session_id"],
                         "client_ip": rec["client_ip"],
-                        "login_datetime": rec["login_dt"].strftime("%Y-%m-%dT%H:%M:%SZ"),
-                        "threshold_reached_datetime": threshold_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "login_datetime": login_local.strftime("%Y-%m-%dT%H:%M:%S+08:00"),
+                        "threshold_reached_datetime": threshold_local.strftime("%Y-%m-%dT%H:%M:%S+08:00"),
                         "latency_seconds": round(latency_sec, 2),
                     }
                 )
@@ -1944,6 +1947,7 @@ async def get_user_activity(
     slowest_sessions = sorted(slowest_sessions, key=lambda x: -x["latency_seconds"])[:10]
 
     return {
+        "timezone": "Asia/Shanghai",
         "range": selected_range,
         "start": start_dt.isoformat(),
         "end": end_dt.isoformat(),

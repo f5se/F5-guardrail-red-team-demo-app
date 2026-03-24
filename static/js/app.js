@@ -948,8 +948,9 @@ async function loadUserActivity(force){
     renderUserActivityCharts(data);
     userActivityLoaded = true;
     const stats = data?.latency_seconds_stats || {};
+    const tz = String(data?.timezone || "UTC");
     setUserActivityStatus(
-      "Loaded: " + String(data?.total_records || 0) + " records · median " + String(stats.median ?? "-") + "s · p90 " + String(stats.p90 ?? "-") + "s",
+      "Loaded: " + String(data?.total_records || 0) + " records · Timezone " + tz + " · median TTFT " + String(stats.median ?? "-") + "s · p90 TTFT " + String(stats.p90 ?? "-") + "s",
       false
     );
   } catch (e) {

@@ -295,9 +295,9 @@
 
           <div class="userActivityKpis">
             <div class="uaKpiCard"><div class="uaKpiLabel">Records</div><div id="uaTotalRecords" class="uaKpiValue">-</div></div>
-            <div class="uaKpiCard"><div class="uaKpiLabel">Median latency (s)</div><div id="uaMedianLatency" class="uaKpiValue">-</div></div>
-            <div class="uaKpiCard"><div class="uaKpiLabel">P90 latency (s)</div><div id="uaP90Latency" class="uaKpiValue">-</div></div>
-            <div class="uaKpiCard"><div class="uaKpiLabel">Avg latency (s)</div><div id="uaAvgLatency" class="uaKpiValue">-</div></div>
+            <div class="uaKpiCard"><div class="uaKpiLabel">Median Time To First Test since Login (s)</div><div id="uaMedianLatency" class="uaKpiValue">-</div></div>
+            <div class="uaKpiCard"><div class="uaKpiLabel">P90 Time To First Test since Login (s)</div><div id="uaP90Latency" class="uaKpiValue">-</div></div>
+            <div class="uaKpiCard"><div class="uaKpiLabel">Avg Time To First Test since Login (s)</div><div id="uaAvgLatency" class="uaKpiValue">-</div></div>
           </div>
 
           <div class="userActivityGrid">
@@ -308,7 +308,7 @@
             </div>
             <div class="uaCard">
               <div class="uaCardTitle">Login to first test latency distribution</div>
-              <div class="uaCardDesc">Shows how long users typically take from login to first real test action.</div>
+              <div class="uaCardDesc">Latency here means Time To First Test since Login.</div>
               <div id="uaLatencyBuckets" class="uaChart"></div>
             </div>
             <div class="uaCard">
@@ -318,7 +318,7 @@
             </div>
             <div class="uaCard">
               <div class="uaCardTitle">Per-user latency habits</div>
-              <div class="uaCardDesc">Compares each account's avg, median, and P90 login-to-test latency.</div>
+              <div class="uaCardDesc">Compares each account's avg, median, and P90 Time To First Test since Login.</div>
               <div id="uaUserLatencyStats" class="uaChart"></div>
             </div>
             <div class="uaCard">
@@ -328,7 +328,7 @@
             </div>
             <div class="uaCard">
               <div class="uaCardTitle">Slowest sessions (Top 10)</div>
-              <div class="uaCardDesc">Lists sessions with the longest delay between login and first test action.</div>
+              <div class="uaCardDesc">Lists sessions with the largest Time To First Test since Login delay.</div>
               <div id="uaSlowSessions" class="uaChart"></div>
             </div>
             <div class="uaCard">
