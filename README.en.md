@@ -17,27 +17,30 @@ A multi-engine AI guardrail demo Agent application based on F5 AI Guardrail (Cal
 3. Correct the front-end layout and window adaptability issues
    
 4. Added multi-user system, and the Settings of different users do not interfere with each other
+   
+5. Added User Activity Analytics
 
-5. Added the ability to simultaneously display the scanner processing results of F5 Guardrail
+6. Added the ability to simultaneously display the scanner processing results of F5 Guardrail
 
-6. Added Skills capability—new Skills can be added and auto-registered at any time
+7. Added Skills capability—new Skills can be added and auto-registered at any time
 
-7. Added Inline integration for dynamic visualization
-8. Added and OOB integration for dynamic visualization
-9.  Added sample templates for attack scenarios
-10. Add a switch that temporarily bypasses all detections in the chat interface and directly connects to the model
+8. Added Inline integration for dynamic visualization
+9.  Added and OOB integration for dynamic visualization
+10. Added sample templates for attack scenarios
+11. Add a switch that temporarily bypasses all detections in the chat interface and directly connects to the model
+12. Added the function of viewing original LLM messages when Redacted
 
-11. Added Hugging Face proxy download support
+13. Added Hugging Face proxy download support
 
-12. Added whether to use all engine switches 
+14. Added whether to use all engine switches 
 
-13. Added debug swtich for storing raw json that from F5 guardrail
-14. Added the F5 AI/Calypso multi-provider configuration capability, allowing users to switch and select different providers corresponding to the Project on the front end
-15. Load `.env` directly without setting environment variables
+15. Added debug swtich for storing raw json that from F5 guardrail
+16. Added the F5 AI/Calypso multi-provider configuration capability, allowing users to switch and select different providers corresponding to the Project on the front end
+17. Load `.env` directly without setting environment variables
 
-16. Added frontend Markdown response rendering
+18. Added frontend Markdown response rendering
 
-17. Added the integration pipeline demonstration of F5 Red Team and DevSecOps. 
+19. Added the integration pipeline demonstration of F5 Red Team and DevSecOps. 
 
    Note: Considering the actual time consumption of Red Team and the feasibility of the environment, the Red Team API integration here is mock simulation and does not actually create real objects on the SaaS.
 
