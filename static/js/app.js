@@ -6,6 +6,7 @@ const btnLogout = document.getElementById("btnLogout");
 const chatTitleEl = document.getElementById("chatTitle");
 const modeBadgeEl = document.getElementById("modeBadge");
 const kbSkillBadgeEl = document.getElementById("kbSkillBadge");
+const kbSkillGeminiWarningEl = document.getElementById("kbSkillGeminiWarning");
 const f5GuardrailOnlyBadgeEl = document.getElementById("f5GuardrailOnlyBadge");
 const directModeToggleEl = document.getElementById("directModeToggle");
 const directModeHintEl = document.getElementById("directModeHint");
@@ -578,6 +579,43 @@ function getEffectiveF5GuardrailOnlyEnabled(){
   return !!sessionBadgeOverrides.f5GuardrailOnly;
 }
 
+/**
+ * 与主聊天走 Calypso/F5 Guardrail 时后端选用的 Provider 一致：
+ * 下拉框有非空 value → 用户显式 default_provider；否则用 GET /api/settings 的 effective_provider（已含 DEFAULT_PROVIDER）。
+ */
+function getChatEffectiveProviderId(){
+  const sel = document.getElementById("providerSelect");
+  const fromSelect = sel ? String(sel.value || "").trim() : "";
+  if (fromSelect) return fromSelect;
+  return String(currentBackendProviderName || "").trim();
+}
+
+/** 名称中含 google / gemini / gemeni（不区分大小写，子串匹配）则视为 Gemini 系 */
+function isGeminiLikeProviderName(name){
+  const n = String(name || "").toLowerCase();
+  return n.includes("google") || n.includes("gemini") || n.includes("gemeni");
+}
+
+/**
+ * 仅当同时满足：① Enterprise KB Skill（含会话徽章）为 ON；② 当前聊天将使用的 Provider 为 Gemini 系。
+ * 其它任意情况（Skill OFF、非 Gemini、无法解析到 Provider 名等）均不显示。
+ */
+function refreshKbSkillGeminiWarning(){
+  if (!kbSkillGeminiWarningEl) return;
+  const skillOn = !!getEffectiveAgentSkillEnabled();
+  const providerId = getChatEffectiveProviderId();
+  const usingGemini = isGeminiLikeProviderName(providerId);
+  const shouldShow = skillOn && usingGemini;
+  /* 用 class 控制显示：宽屏下曾用 .kbSkillGeminiWarning{display:flex} 会覆盖 [hidden]，导致无法隐藏 */
+  kbSkillGeminiWarningEl.classList.toggle("kbSkillGeminiWarning--visible", shouldShow);
+  if (shouldShow) {
+    kbSkillGeminiWarningEl.removeAttribute("hidden");
+  } else {
+    kbSkillGeminiWarningEl.setAttribute("hidden", "");
+  }
+  kbSkillGeminiWarningEl.setAttribute("aria-hidden", shouldShow ? "false" : "true");
+}
+
 function refreshModeBadge(){
   if (!modeBadgeEl) return;
   const v = getEffectiveMultiTurnEnabled();
@@ -594,6 +632,7 @@ function refreshEnterpriseKBSkillBadge(){
   kbSkillBadgeEl.classList.toggle("kbSkillOn", !!v);
   kbSkillBadgeEl.classList.toggle("kbSkillOff", !v);
   kbSkillBadgeEl.setAttribute("aria-pressed", v ? "true" : "false");
+  refreshKbSkillGeminiWarning();
 }
 
 function refreshF5GuardrailOnlyBadge(){
@@ -775,6 +814,94 @@ function renderRejectedBubble(el, fullText){
     (body ? `<div>${body.replaceAll("\n","<br/>")}</div>` : "");
 }
 
+function safeJsonParse(value){
+  if (typeof value !== "string") return null;
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return null;
+  }
+}
+
+function extractAnswerFromAnyPayload(payload){
+  if (!payload) return "";
+  if (typeof payload === "string") {
+    const parsed = safeJsonParse(payload);
+    if (parsed) return extractAnswerFromAnyPayload(parsed);
+    return "";
+  }
+  if (typeof payload !== "object") return "";
+
+  if (typeof payload.answer === "string" && payload.answer.trim()) {
+    return payload.answer.trim();
+  }
+  if (payload.data && typeof payload.data === "object" && typeof payload.data.answer === "string" && payload.data.answer.trim()) {
+    return payload.data.answer.trim();
+  }
+  if (Array.isArray(payload.choices) && payload.choices.length) {
+    const first = payload.choices[0];
+    const messageContent = first?.message?.content;
+    if (typeof messageContent === "string") {
+      const parsedContent = safeJsonParse(messageContent);
+      if (parsedContent) {
+        const nested = extractAnswerFromAnyPayload(parsedContent);
+        if (nested) return nested;
+      }
+    }
+  }
+
+  return "";
+}
+
+function extractRedactedOriginalAnswer(guardrail){
+  const outcome = (guardrail?.result?.outcome || "").toString().toLowerCase();
+  if (outcome !== "redacted") return "";
+
+  const files = guardrail?.result?.files;
+
+  if (Array.isArray(files)) {
+    for (const fileItem of files) {
+      const answer = extractAnswerFromAnyPayload(fileItem?.data);
+      if (answer) return answer;
+    }
+  } else if (files && typeof files === "object") {
+    const answer = extractAnswerFromAnyPayload(files?.data);
+    if (answer) return answer;
+  }
+
+  return "";
+}
+
+function appendRedactedReveal(bubbleEl, originalAnswer){
+  if (!bubbleEl || !originalAnswer) return;
+
+  const wrap = document.createElement("div");
+  wrap.className = "redactedReveal";
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "redactedRevealBtn";
+  btn.textContent = "查看模型原始回答|Original response";
+  btn.setAttribute("aria-expanded", "false");
+
+  const panel = document.createElement("div");
+  panel.className = "redactedRevealPanel";
+  panel.hidden = true;
+  panel.textContent = originalAnswer;
+
+  btn.addEventListener("click", () => {
+    const shouldOpen = panel.hidden;
+    panel.hidden = !shouldOpen;
+    btn.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+    btn.textContent = shouldOpen ? "收起模型原始回答|Collapse original response" : "查看模型原始回答|Original response";
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  });
+
+  wrap.appendChild(btn);
+  wrap.appendChild(panel);
+  bubbleEl.appendChild(wrap);
+}
+
 async function typeIntoBubble(el, fullText, speedMs = 10){
   el.textContent = "";
   const text = String(fullText || "");
@@ -783,6 +910,32 @@ async function typeIntoBubble(el, fullText, speedMs = 10){
     messagesEl.scrollTop = messagesEl.scrollHeight;
     await new Promise(r => setTimeout(r, speedMs));
   }
+}
+
+/** ReAct / Enterprise KB Skill 等待态：去掉占位样式与无障碍属性 */
+function clearAssistantPendingState(el){
+  if (!el) return;
+  el.classList.remove("bubbleThinking");
+  el.removeAttribute("aria-busy");
+  el.removeAttribute("role");
+}
+
+/** 创建助手侧「等待回复」气泡：Agent 开启时提示多步推理，否则仍为 … */
+function createAssistantPendingBubble(agentSkillOn){
+  const bubble = addBubble("assistant", "");
+  if (agentSkillOn) {
+    bubble.classList.add("bubbleThinking");
+    const dots =
+      '<span class="thinkingDots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span>';
+    bubble.innerHTML =
+      '<span class="thinkingLine">正在多步推理中' + dots + "</span>" +
+      '<span class="thinkingLine thinkingLine--en">ReAct: multi-step reasoning in progress' + dots + "</span>";
+    bubble.setAttribute("role", "status");
+    bubble.setAttribute("aria-busy", "true");
+  } else {
+    bubble.textContent = "…";
+  }
+  return bubble;
 }
 
 async function send(){
@@ -800,7 +953,8 @@ async function send(){
   addBubble("user", msg, useDirectMode ? "direct-mode" : "");
   inputEl.value = "";
 
-  const assistantBubble = addBubble("assistant", "…");
+  const agentSkillOn = getEffectiveAgentSkillEnabled();
+  const assistantBubble = createAssistantPendingBubble(agentSkillOn);
 
   try{
     const endpoint = useDirectMode ? "/api/chat-direct" : "/api/chat";
@@ -827,6 +981,7 @@ async function send(){
     const data = await res.json();
 
     if(!res.ok){
+      clearAssistantPendingState(assistantBubble);
       assistantBubble.textContent = "" + (data.detail || data.error || ("HTTP " + res.status));
       return;
     }
@@ -845,18 +1000,27 @@ async function send(){
         resetGuardrailPanel();
       }
       if (isRejected(reply)){
+        clearAssistantPendingState(assistantBubble);
         renderRejectedBubble(assistantBubble, reply);
         messagesEl.scrollTop = messagesEl.scrollHeight;
         return;
       }
     }
 
+    clearAssistantPendingState(assistantBubble);
     assistantBubble.textContent = "";
     assistantBubble.classList.add("md");
     assistantBubble.innerHTML = renderMarkdown(reply);
+    if (!useDirectMode) {
+      const redactedOriginalAnswer = extractRedactedOriginalAnswer(data.guardrail);
+      if (redactedOriginalAnswer) {
+        appendRedactedReveal(assistantBubble, redactedOriginalAnswer);
+      }
+    }
     messagesEl.scrollTop = messagesEl.scrollHeight;
 
   }catch(e){
+    clearAssistantPendingState(assistantBubble);
     assistantBubble.textContent = "Failed to reach backend: " + e.message;
   } finally {
     isSending = false;
@@ -899,7 +1063,10 @@ inputEl.addEventListener("keydown", (e) => {
 async function loadSettings(){
   try{
     const r = await authFetch("/api/settings", { cache: "no-store" });
-    if(!r.ok) return;
+    if(!r.ok) {
+      refreshKbSkillGeminiWarning();
+      return;
+    }
     const s = await r.json();
     const username = String(s.username || "").trim();
     setLogoutButtonLabel(username);
@@ -967,8 +1134,10 @@ async function loadSettings(){
     if (activeView === "CHAT") setChatSubtitle();
     document.getElementById("agentMaxStepsSlider").value = s.agent_max_steps || 4;
     document.getElementById("agentMaxStepsVal").textContent = s.agent_max_steps || 4;
+    refreshKbSkillGeminiWarning();
   }catch(e){
     console.error("loadSettings failed:", e);
+    refreshKbSkillGeminiWarning();
   }
 }
 
@@ -1074,7 +1243,11 @@ wireSessionBadgeToggle(f5GuardrailOnlyBadgeEl, "f5GuardrailOnly", () => {
 });
 
 document.getElementById("kbDirInput")?.addEventListener("change", () => saveSettings(false));
-document.getElementById("providerSelect")?.addEventListener("change", () => saveSettings(false));
+document.getElementById("providerSelect")?.addEventListener("change", () => {
+  /* 先按当前下拉值刷新，避免仅依赖 save/load 异步链导致气泡不更新 */
+  refreshKbSkillGeminiWarning();
+  saveSettings(false);
+});
 document.getElementById("agentMaxStepsSlider")?.addEventListener("change", () => saveSettings(false));
 loadSettings();
 
