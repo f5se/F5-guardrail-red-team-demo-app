@@ -2621,3 +2621,201 @@ code{
   color: #991b1b;
   white-space: pre-wrap;
 }
+
+/* User Activity Analytics */
+.userActivityPanel{
+  padding:16px;
+  overflow:auto;
+}
+.userActivityHeader{
+  margin-bottom:12px;
+}
+.userActivityTitle{
+  font-size:20px;
+  font-weight:700;
+}
+.userActivitySubtitle{
+  margin-top:4px;
+  color:var(--muted);
+  font-size:13px;
+}
+.userActivityFilters{
+  display:flex;
+  gap:10px;
+  align-items:flex-end;
+  flex-wrap:wrap;
+  padding:12px;
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:#f8fafc;
+}
+.filterGroup{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.filterGroup label{
+  font-size:12px;
+  color:var(--muted);
+}
+.filterGroup select,
+.filterGroup input{
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:8px 10px;
+  font-size:13px;
+}
+.uaInlineCheck{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  font-size:13px;
+  color:#334155;
+}
+.uaInlineCheck input[type="checkbox"]{
+  width:14px;
+  height:14px;
+}
+#btnUserActivityApply{
+  border:1px solid #cbd5e1;
+  border-radius:10px;
+  background:#fff;
+  padding:8px 12px;
+  cursor:pointer;
+}
+.userActivityStatus{
+  margin:10px 0 14px;
+  font-size:13px;
+  color:var(--muted);
+}
+.userActivityStatus.error{
+  color:var(--danger);
+}
+.userActivityKpis{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:10px;
+  margin-bottom:12px;
+}
+.uaKpiCard{
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:#fff;
+  padding:10px 12px;
+}
+.uaKpiLabel{
+  font-size:12px;
+  color:var(--muted);
+}
+.uaKpiValue{
+  margin-top:4px;
+  font-size:20px;
+  font-weight:700;
+}
+.userActivityGrid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+}
+.uaCard{
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:#fff;
+  padding:10px;
+}
+.uaCardTitle{
+  font-size:14px;
+  font-weight:700;
+  margin-bottom:4px;
+}
+.uaCardDesc{
+  font-size:12px;
+  color:var(--muted);
+  line-height:1.45;
+  margin-bottom:8px;
+}
+.uaChart{
+  min-height:120px;
+}
+.uaBarRow{
+  display:grid;
+  grid-template-columns:minmax(120px, 1fr) 2.5fr 64px;
+  gap:8px;
+  align-items:center;
+  margin:6px 0;
+}
+.uaBarLabel,.uaBarValue{
+  font-size:12px;
+  color:#334155;
+}
+.uaBarTrack{
+  height:10px;
+  background:#eef2ff;
+  border-radius:999px;
+  overflow:hidden;
+}
+.uaBarFill{
+  height:100%;
+  background:#4f46e5;
+}
+.uaLineRow{
+  font-size:12px;
+  color:#334155;
+  padding:6px 0;
+  border-bottom:1px dashed #e2e8f0;
+}
+.uaEmpty{
+  font-size:12px;
+  color:var(--muted);
+}
+.uaTrendWrap{
+  width:100%;
+}
+.uaTrendSvg{
+  width:100%;
+  height:auto;
+  display:block;
+  border:1px solid #e2e8f0;
+  border-radius:10px;
+  background:#ffffff;
+}
+.uaTrendAxis{
+  stroke:#94a3b8;
+  stroke-width:1;
+}
+.uaTrendGrid{
+  stroke:#e2e8f0;
+  stroke-width:1;
+}
+.uaTrendAxisText{
+  fill:#64748b;
+  font-size:10px;
+}
+.uaTrendLegend{
+  margin-top:8px;
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px 14px;
+}
+.uaTrendLegendItem{
+  font-size:12px;
+  color:#334155;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+}
+.uaTrendLegendDot{
+  width:9px;
+  height:9px;
+  border-radius:999px;
+  display:inline-block;
+}
+
+@media (max-width: 1080px){
+  .userActivityKpis{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .userActivityGrid{
+    grid-template-columns:1fr;
+  }
+}

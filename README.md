@@ -84,6 +84,7 @@ cp settings_example.json settings.json
 - `auth.users`：登录用户列表（`username`、`password_hash`、`enabled`）
 - `auth.session_ttl_seconds`：登录最大绝对会话有效期（秒），应大于空闲会话超时默认的1200s
 - `user_settings`：每个用户名对应的个性化设置（建议与 `auth.users` 保持一致）
+- 至少保留并配置 `admin` 用户名：该用户名会控制 Settings 页面中的部分全局配置（如 Enterprise KB Directory、Agent Max Steps）
 
 > 提示：请以 `settings_example.json` 为模板，复制后重命名为 `settings.json` 再进行修改。
 

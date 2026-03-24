@@ -95,6 +95,7 @@ cp settings_example.json settings.json
 - `auth.users`: login user list (`username`, `password_hash`, `enabled`)
 - `auth.session_ttl_seconds`: session TTL in seconds
 - `user_settings`: per-user runtime settings (recommended to align usernames with `auth.users`)
+- Keep and configure at least one `admin` username: this username controls some global Settings items in the UI (for example, Enterprise KB Directory and Agent Max Steps).
 
 > Tip: use `settings_example.json` as template, then rename/copy it to `settings.json` before editing.
 

@@ -28,6 +28,7 @@
             <button class="navBtn" data-view="GUARDRAIL_INTEGRATION" id="btnGuardrailIntegration">🛡️ Guardrail Integration</button>
             <button class="navBtn" data-view="TEST_GUIDE" id="btnTestGuide">📖 Test Guide</button>
             <button class="navBtn" data-view="SETTINGS" id="btnSettings">⚙️ Settings</button>
+            <button class="navBtn" data-view="USER_ACTIVITY" id="btnUserActivity" style="display:none;">📊 User Activity Analytics</button>
           </div>
         </aside>
 
@@ -206,6 +207,9 @@
             <input type="range" id="agentMaxStepsSlider" min="1" max="8" step="1">
             <span id="agentMaxStepsVal" class="sliderVal"></span>
           </div>
+          <div id="adminOnlySettingsHint" class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;display:none;">
+            Enterprise KB Directory and Agent Max Steps are read-only for non-admin accounts.
+          </div>
 
           <hr style="margin:16px 0; border:0; border-top:1px solid #e5e7eb;">
 
@@ -252,6 +256,92 @@
         <!-- TEST GUIDE VIEW -->
         <div class="panel" id="testGuideView" style="display:none;">
           <div class="mdDoc" id="testGuideContent"></div>
+        </div>
+
+        <!-- USER ACTIVITY VIEW -->
+        <div class="panel userActivityPanel" id="userActivityView" style="display:none;">
+          <div class="userActivityHeader">
+            <div class="userActivityTitle">User Activity Analytics</div>
+            <div class="userActivitySubtitle">Analyze login-to-first-test behavior and user activity trends.</div>
+          </div>
+          <div class="userActivityFilters">
+            <div class="filterGroup">
+              <label for="userActivityRangeSelect">Time Range</label>
+              <select id="userActivityRangeSelect">
+                <option value="1m">Last 1 month</option>
+                <option value="3m">Last 3 months</option>
+                <option value="custom">Custom range</option>
+              </select>
+            </div>
+            <div class="filterGroup">
+              <label for="userActivityStartInput">Start</label>
+              <input type="datetime-local" id="userActivityStartInput" />
+            </div>
+            <div class="filterGroup">
+              <label for="userActivityEndInput">End</label>
+              <input type="datetime-local" id="userActivityEndInput" />
+            </div>
+            <div class="filterGroup">
+              <label for="userActivityIncludeAdmin">Admin account</label>
+              <label class="uaInlineCheck">
+                <input type="checkbox" id="userActivityIncludeAdmin" checked />
+                Include admin in analytics
+              </label>
+            </div>
+            <button id="btnUserActivityApply" type="button">Apply</button>
+          </div>
+
+          <div id="userActivityStatus" class="userActivityStatus">Ready.</div>
+
+          <div class="userActivityKpis">
+            <div class="uaKpiCard"><div class="uaKpiLabel">Records</div><div id="uaTotalRecords" class="uaKpiValue">-</div></div>
+            <div class="uaKpiCard"><div class="uaKpiLabel">Median latency (s)</div><div id="uaMedianLatency" class="uaKpiValue">-</div></div>
+            <div class="uaKpiCard"><div class="uaKpiLabel">P90 latency (s)</div><div id="uaP90Latency" class="uaKpiValue">-</div></div>
+            <div class="uaKpiCard"><div class="uaKpiLabel">Avg latency (s)</div><div id="uaAvgLatency" class="uaKpiValue">-</div></div>
+          </div>
+
+          <div class="userActivityGrid">
+            <div class="uaCard">
+              <div class="uaCardTitle">Activity ranking by username</div>
+              <div class="uaCardDesc">Ranks accounts by total activity count in the selected time window.</div>
+              <div id="uaUserRank" class="uaChart"></div>
+            </div>
+            <div class="uaCard">
+              <div class="uaCardTitle">Login to first test latency distribution</div>
+              <div class="uaCardDesc">Shows how long users typically take from login to first real test action.</div>
+              <div id="uaLatencyBuckets" class="uaChart"></div>
+            </div>
+            <div class="uaCard">
+              <div class="uaCardTitle">Daily activity trend</div>
+              <div class="uaCardDesc">Displays daily activity volume changes over time.</div>
+              <div id="uaDailyTrend" class="uaChart"></div>
+            </div>
+            <div class="uaCard">
+              <div class="uaCardTitle">Per-user latency habits</div>
+              <div class="uaCardDesc">Compares each account's avg, median, and P90 login-to-test latency.</div>
+              <div id="uaUserLatencyStats" class="uaChart"></div>
+            </div>
+            <div class="uaCard">
+              <div class="uaCardTitle">Hour-of-day distribution</div>
+              <div class="uaCardDesc">Indicates which hours users are most active for login and threshold events.</div>
+              <div id="uaHourDist" class="uaChart"></div>
+            </div>
+            <div class="uaCard">
+              <div class="uaCardTitle">Slowest sessions (Top 10)</div>
+              <div class="uaCardDesc">Lists sessions with the longest delay between login and first test action.</div>
+              <div id="uaSlowSessions" class="uaChart"></div>
+            </div>
+            <div class="uaCard">
+              <div class="uaCardTitle">Weekday preference by account</div>
+              <div class="uaCardDesc">Shows each account's activity counts from Monday to Sunday and favorite weekday.</div>
+              <div id="uaWeekdayByUser" class="uaChart"></div>
+            </div>
+            <div class="uaCard">
+              <div class="uaCardTitle">Activity trend by account</div>
+              <div class="uaCardDesc">Displays daily activity counts split by account to compare account-level trends.</div>
+              <div id="uaTrendByUser" class="uaChart"></div>
+            </div>
+          </div>
         </div>
 
         <!-- RED TEAM PIPELINE VIEW -->

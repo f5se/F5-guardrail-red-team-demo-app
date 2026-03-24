@@ -240,6 +240,14 @@ const toggleAgentSkillEl = document.getElementById("toggleAgentSkill");
 const toggleGuardrailDebugEl = document.getElementById("toggleGuardrailDebug");
 const toggleF5GuardrailOnlyEl = document.getElementById("toggleF5GuardrailOnly");
 const kbDirInputEl = document.getElementById("kbDirInput");
+const btnUserActivityEl = document.getElementById("btnUserActivity");
+const userActivityView = document.getElementById("userActivityView");
+const userActivityRangeSelectEl = document.getElementById("userActivityRangeSelect");
+const userActivityStartInputEl = document.getElementById("userActivityStartInput");
+const userActivityEndInputEl = document.getElementById("userActivityEndInput");
+const userActivityIncludeAdminEl = document.getElementById("userActivityIncludeAdmin");
+const btnUserActivityApplyEl = document.getElementById("btnUserActivityApply");
+const userActivityStatusEl = document.getElementById("userActivityStatus");
 
 function asBool(v){
   if (typeof v === "boolean") return v;
@@ -481,6 +489,33 @@ const sessionBadgeOverrides = {
   f5GuardrailOnly: null
 };
 let activeSettingsUsername = "";
+let isAdminUser = false;
+let userActivityLoaded = false;
+
+function setAdminOnlySettingsAccess(username){
+  isAdminUser = String(username || "").trim().toLowerCase() === "admin";
+  const disabled = !isAdminUser;
+  const reason = "Only admin can change this setting.";
+  if (kbDirInputEl) {
+    kbDirInputEl.disabled = disabled;
+    kbDirInputEl.title = disabled ? reason : "";
+  }
+  const maxStepsSliderEl = document.getElementById("agentMaxStepsSlider");
+  if (maxStepsSliderEl) {
+    maxStepsSliderEl.disabled = disabled;
+    maxStepsSliderEl.title = disabled ? reason : "";
+  }
+  const adminOnlyHintEl = document.getElementById("adminOnlySettingsHint");
+  if (adminOnlyHintEl) {
+    adminOnlyHintEl.style.display = disabled ? "" : "none";
+  }
+  if (btnUserActivityEl) {
+    btnUserActivityEl.style.display = isAdminUser ? "" : "none";
+  }
+  if (!isAdminUser && activeView === "USER_ACTIVITY") {
+    setActiveView("CHAT");
+  }
+}
 
 function getBadgeSessionStorageKey(username){
   const u = String(username || "").trim();
@@ -675,11 +710,252 @@ toggleMultiTurnEl.addEventListener("change", () => {
 const redteamView = document.getElementById("redteamView");
 const guardrailIntegrationView = document.getElementById("guardrailIntegrationView");
 const testGuideView = document.getElementById("testGuideView");
+const userActivityPanelView = document.getElementById("userActivityView");
 const testGuideContentEl = document.getElementById("testGuideContent");
 const engineRow = document.getElementById("engineRow");
 const layoutEl = document.querySelector(".layout");
 
 let testGuideLoaded = false;
+
+function formatNum(v){
+  return typeof v === "number" && Number.isFinite(v) ? String(v) : "-";
+}
+
+function setUserActivityStatus(text, isError){
+  if (!userActivityStatusEl) return;
+  userActivityStatusEl.textContent = text || "";
+  userActivityStatusEl.classList.toggle("error", !!isError);
+}
+
+function buildSimpleBarList(items, nameKey, valueKey, emptyText){
+  if (!Array.isArray(items) || !items.length) {
+    return "<div class=\"uaEmpty\">" + escapeHtml(emptyText || "No data.") + "</div>";
+  }
+  const maxVal = Math.max(...items.map(it => Number(it[valueKey] || 0)), 1);
+  return items.map(it => {
+    const label = escapeHtml(String(it[nameKey] || "N/A"));
+    const value = Number(it[valueKey] || 0);
+    const width = Math.max(2, Math.round((value / maxVal) * 100));
+    return (
+      "<div class=\"uaBarRow\">" +
+        "<div class=\"uaBarLabel\">" + label + "</div>" +
+        "<div class=\"uaBarTrack\"><div class=\"uaBarFill\" style=\"width:" + width + "%\"></div></div>" +
+        "<div class=\"uaBarValue\">" + escapeHtml(String(value)) + "</div>" +
+      "</div>"
+    );
+  }).join("");
+}
+
+function renderUserActivityCharts(data){
+  document.getElementById("uaTotalRecords").textContent = formatNum(data?.total_records);
+  document.getElementById("uaMedianLatency").textContent = formatNum(data?.latency_seconds_stats?.median);
+  document.getElementById("uaP90Latency").textContent = formatNum(data?.latency_seconds_stats?.p90);
+  document.getElementById("uaAvgLatency").textContent = formatNum(data?.latency_seconds_stats?.avg);
+
+  const rankEl = document.getElementById("uaUserRank");
+  if (rankEl) {
+    rankEl.innerHTML = buildSimpleBarList(data?.activity_by_user, "username", "count", "No user activity in selected range.");
+  }
+  const bucketEl = document.getElementById("uaLatencyBuckets");
+  if (bucketEl) {
+    bucketEl.innerHTML = buildSimpleBarList(data?.latency_bucket_histogram, "bucket", "count", "No latency data in selected range.");
+  }
+  const trendEl = document.getElementById("uaDailyTrend");
+  if (trendEl) {
+    trendEl.innerHTML = buildSimpleBarList(data?.daily_activity_trend, "date", "count", "No daily trend data.");
+  }
+  const hourRows = [];
+  const loginHours = Array.isArray(data?.hour_of_day_distribution?.login) ? data.hour_of_day_distribution.login : [];
+  const hitHours = Array.isArray(data?.hour_of_day_distribution?.threshold_reached) ? data.hour_of_day_distribution.threshold_reached : [];
+  for (let h = 0; h < 24; h++) {
+    const login = Number((loginHours[h] || {}).count || 0);
+    const hit = Number((hitHours[h] || {}).count || 0);
+    hourRows.push({ hour: String(h).padStart(2, "0") + ":00", count: login + hit });
+  }
+  const hourEl = document.getElementById("uaHourDist");
+  if (hourEl) {
+    hourEl.innerHTML = buildSimpleBarList(hourRows, "hour", "count", "No hourly distribution data.");
+  }
+
+  const latencyEl = document.getElementById("uaUserLatencyStats");
+  if (latencyEl) {
+    const rows = Array.isArray(data?.user_latency_stats) ? data.user_latency_stats : [];
+    if (!rows.length) {
+      latencyEl.innerHTML = "<div class=\"uaEmpty\">No per-user latency stats.</div>";
+    } else {
+      latencyEl.innerHTML = rows.map(row => {
+        return "<div class=\"uaLineRow\"><strong>" + escapeHtml(String(row.username || "N/A")) + "</strong> · avg "
+          + escapeHtml(String(row.avg ?? "-")) + "s · median "
+          + escapeHtml(String(row.median ?? "-")) + "s · p90 "
+          + escapeHtml(String(row.p90 ?? "-")) + "s</div>";
+      }).join("");
+    }
+  }
+
+  const slowEl = document.getElementById("uaSlowSessions");
+  if (slowEl) {
+    const rows = Array.isArray(data?.slowest_sessions) ? data.slowest_sessions : [];
+    if (!rows.length) {
+      slowEl.innerHTML = "<div class=\"uaEmpty\">No slow sessions found in selected range.</div>";
+    } else {
+      slowEl.innerHTML = rows.map((row, idx) => {
+        return "<div class=\"uaLineRow\">#" + (idx + 1) + " "
+          + escapeHtml(String(row.username || "unknown")) + " · "
+          + escapeHtml(String(row.latency_seconds || 0)) + "s · "
+          + escapeHtml(String(row.login_datetime || "")) + "</div>";
+      }).join("");
+    }
+  }
+
+  const weekdayEl = document.getElementById("uaWeekdayByUser");
+  if (weekdayEl) {
+    const rows = Array.isArray(data?.weekday_activity_by_user) ? data.weekday_activity_by_user : [];
+    if (!rows.length) {
+      weekdayEl.innerHTML = "<div class=\"uaEmpty\">No weekday preference data.</div>";
+    } else {
+      weekdayEl.innerHTML = rows.map(row => {
+        const counts = Array.isArray(row.counts) ? row.counts : [];
+        const parts = counts.map(it => escapeHtml(String(it.weekday || "")) + ":" + escapeHtml(String(it.count || 0))).join(" · ");
+        return "<div class=\"uaLineRow\"><strong>" + escapeHtml(String(row.username || "unknown")) + "</strong> · favorite "
+          + escapeHtml(String(row.favorite_weekday || "N/A")) + " · " + parts + "</div>";
+      }).join("");
+    }
+  }
+
+  const trendByUserEl = document.getElementById("uaTrendByUser");
+  if (trendByUserEl) {
+    const rows = Array.isArray(data?.daily_activity_trend_by_user) ? data.daily_activity_trend_by_user : [];
+    if (!rows.length) {
+      trendByUserEl.innerHTML = "<div class=\"uaEmpty\">No account trend data.</div>";
+    } else {
+      const colorPalette = ["#2563eb", "#16a34a", "#db2777", "#ea580c", "#7c3aed", "#0891b2", "#dc2626", "#65a30d"];
+      const dateSet = new Set();
+      rows.forEach(row => {
+        const series = Array.isArray(row.series) ? row.series : [];
+        series.forEach(it => {
+          const d = String(it.date || "").trim();
+          if (d) dateSet.add(d);
+        });
+      });
+      const dates = Array.from(dateSet).sort();
+      if (!dates.length) {
+        trendByUserEl.innerHTML = "<div class=\"uaEmpty\">No account trend data.</div>";
+      } else {
+        let maxY = 0;
+        rows.forEach(row => {
+          const series = Array.isArray(row.series) ? row.series : [];
+          series.forEach(it => {
+            const c = Number(it.count || 0);
+            if (c > maxY) maxY = c;
+          });
+        });
+        if (maxY < 1) maxY = 1;
+
+        const width = 760;
+        const height = 280;
+        const padLeft = 44;
+        const padRight = 12;
+        const padTop = 12;
+        const padBottom = 40;
+        const plotW = width - padLeft - padRight;
+        const plotH = height - padTop - padBottom;
+        const xDen = dates.length > 1 ? (dates.length - 1) : 1;
+        const xAt = idx => padLeft + (idx * plotW / xDen);
+        const yAt = val => padTop + (plotH - (val / maxY) * plotH);
+
+        const yTicks = [0, Math.ceil(maxY / 3), Math.ceil((maxY * 2) / 3), maxY];
+        const yGrid = yTicks.map(v => {
+          const y = yAt(v);
+          return "<line x1=\"" + padLeft + "\" y1=\"" + y + "\" x2=\"" + (padLeft + plotW) + "\" y2=\"" + y + "\" class=\"uaTrendGrid\"/>"
+            + "<text x=\"" + (padLeft - 6) + "\" y=\"" + (y + 4) + "\" text-anchor=\"end\" class=\"uaTrendAxisText\">" + escapeHtml(String(v)) + "</text>";
+        }).join("");
+
+        const maxXTicks = 6;
+        const step = Math.max(1, Math.ceil(dates.length / maxXTicks));
+        const xTicks = dates.map((d, idx) => ({ d, idx })).filter(item => item.idx % step === 0 || item.idx === dates.length - 1).map(item => {
+          const x = xAt(item.idx);
+          return "<text x=\"" + x + "\" y=\"" + (padTop + plotH + 16) + "\" text-anchor=\"middle\" class=\"uaTrendAxisText\">"
+            + escapeHtml(item.d.slice(5))
+            + "</text>";
+        }).join("");
+
+        const seriesSvg = rows.map((row, rowIdx) => {
+          const color = colorPalette[rowIdx % colorPalette.length];
+          const series = Array.isArray(row.series) ? row.series : [];
+          const map = {};
+          series.forEach(it => {
+            const d = String(it.date || "").trim();
+            if (!d) return;
+            map[d] = Number(it.count || 0);
+          });
+          const pointPairs = dates.map((d, idx) => {
+            const val = Number(map[d] || 0);
+            return { x: xAt(idx), y: yAt(val), val };
+          });
+          const polylinePoints = pointPairs.map(p => p.x + "," + p.y).join(" ");
+          const points = pointPairs.map(p => "<circle cx=\"" + p.x + "\" cy=\"" + p.y + "\" r=\"2.5\" fill=\"" + color + "\" />").join("");
+          return "<polyline fill=\"none\" stroke=\"" + color + "\" stroke-width=\"2\" points=\"" + polylinePoints + "\" />" + points;
+        }).join("");
+
+        const legend = rows.map((row, rowIdx) => {
+          const color = colorPalette[rowIdx % colorPalette.length];
+          return "<span class=\"uaTrendLegendItem\"><span class=\"uaTrendLegendDot\" style=\"background:" + color + "\"></span>"
+            + escapeHtml(String(row.username || "unknown")) + "</span>";
+        }).join("");
+
+        trendByUserEl.innerHTML =
+          "<div class=\"uaTrendWrap\">" +
+            "<svg viewBox=\"0 0 " + width + " " + height + "\" class=\"uaTrendSvg\" role=\"img\" aria-label=\"Activity trend by account\">" +
+              yGrid +
+              "<line x1=\"" + padLeft + "\" y1=\"" + (padTop + plotH) + "\" x2=\"" + (padLeft + plotW) + "\" y2=\"" + (padTop + plotH) + "\" class=\"uaTrendAxis\"/>" +
+              "<line x1=\"" + padLeft + "\" y1=\"" + padTop + "\" x2=\"" + padLeft + "\" y2=\"" + (padTop + plotH) + "\" class=\"uaTrendAxis\"/>" +
+              xTicks +
+              seriesSvg +
+            "</svg>" +
+            "<div class=\"uaTrendLegend\">" + legend + "</div>" +
+          "</div>";
+      }
+    }
+  }
+}
+
+function getUserActivityQuery(){
+  const selected = (userActivityRangeSelectEl?.value || "1m").trim();
+  const params = new URLSearchParams();
+  params.set("range", selected);
+  params.set("include_admin", userActivityIncludeAdminEl?.checked ? "1" : "0");
+  if (selected === "custom") {
+    const startRaw = userActivityStartInputEl?.value || "";
+    const endRaw = userActivityEndInputEl?.value || "";
+    if (startRaw) params.set("start", new Date(startRaw).toISOString());
+    if (endRaw) params.set("end", new Date(endRaw).toISOString());
+  }
+  return params.toString();
+}
+
+async function loadUserActivity(force){
+  if (!isAdminUser) return;
+  if (!force && userActivityLoaded && activeView === "USER_ACTIVITY") return;
+  setUserActivityStatus("Loading analytics...", false);
+  try {
+    const q = getUserActivityQuery();
+    const resp = await authFetch("/api/user-activity?" + q, { cache: "no-store" });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(txt || ("HTTP " + resp.status));
+    }
+    const data = await resp.json();
+    renderUserActivityCharts(data);
+    userActivityLoaded = true;
+    const stats = data?.latency_seconds_stats || {};
+    setUserActivityStatus(
+      "Loaded: " + String(data?.total_records || 0) + " records · median " + String(stats.median ?? "-") + "s · p90 " + String(stats.p90 ?? "-") + "s",
+      false
+    );
+  } catch (e) {
+    setUserActivityStatus("Failed to load analytics: " + (e?.message || String(e)), true);
+  }
+}
 
 async function loadTestGuide(){
   if (!testGuideContentEl) return;
@@ -698,6 +974,9 @@ async function loadTestGuide(){
 }
 
 function setActiveView(view){
+  if (view === "USER_ACTIVITY" && !isAdminUser) {
+    view = "CHAT";
+  }
   activeView = view;
   navButtons.forEach(b => b.classList.toggle("active", b.dataset.view === view));
 
@@ -706,6 +985,7 @@ function setActiveView(view){
   redteamView.style.display = "none";
   if (guardrailIntegrationView) guardrailIntegrationView.style.display = "none";
   if (testGuideView) testGuideView.style.display = "none";
+  if (userActivityPanelView) userActivityPanelView.style.display = "none";
 
   const chatOnlyEls = [engineRow, modeBadgeEl, kbSkillBadgeEl, f5GuardrailOnlyBadgeEl, btnClear];
   chatOnlyEls.forEach(el => { if(el) el.style.display = "none"; });
@@ -743,6 +1023,11 @@ function setActiveView(view){
       if (testGuideView) testGuideView.style.display = "";
       if (subEl) subEl.textContent = "使用说明与测试指引（Markdown 渲染）";
       loadTestGuide();
+    } else if (view === "USER_ACTIVITY"){
+      chatTitleEl.textContent = "User Activity Analytics";
+      if (userActivityPanelView) userActivityPanelView.style.display = "";
+      if (subEl) subEl.textContent = "Admin-only analytics for login activity and behavior latency";
+      loadUserActivity(false);
     }
   }
   if (view === "CHAT" || view === "GUARDRAIL_INTEGRATION") renderAttackPresets();
@@ -1070,6 +1355,7 @@ async function loadSettings(){
     const s = await r.json();
     const username = String(s.username || "").trim();
     setLogoutButtonLabel(username);
+    setAdminOnlySettingsAccess(username);
     if (username && username !== activeSettingsUsername) {
       loadSessionBadgeOverrides(username);
     }
@@ -1142,22 +1428,25 @@ async function loadSettings(){
 }
 
 async function saveSettings(showToast = true){
+  const payload = {
+    patterns: document.getElementById("patternBox").value,
+    heuristic_threshold: document.getElementById("heuristicSlider").value,
+    toxic_threshold: document.getElementById("toxSlider").value,
+    pi_threshold: document.getElementById("piSlider").value,
+    multi_turn_enabled: !!document.getElementById("toggleMultiTurn")?.checked,
+    agent_skill_enabled: !!document.getElementById("toggleAgentSkill")?.checked,
+    f5_guardrail_only: !!document.getElementById("toggleF5GuardrailOnly")?.checked,
+    debug_guardrail_raw_enabled: !!document.getElementById("toggleGuardrailDebug")?.checked,
+    default_provider: (document.getElementById("providerSelect")?.value || "").trim()
+  };
+  if (isAdminUser) {
+    payload.kb_dir = document.getElementById("kbDirInput")?.value || "./enterprise_kb";
+    payload.agent_max_steps = document.getElementById("agentMaxStepsSlider")?.value || 4;
+  }
   const res = await authFetch("/api/settings", {
     method:"POST",
     headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({
-      patterns: document.getElementById("patternBox").value,
-      heuristic_threshold: document.getElementById("heuristicSlider").value,
-      toxic_threshold: document.getElementById("toxSlider").value,
-      pi_threshold: document.getElementById("piSlider").value,
-      multi_turn_enabled: !!document.getElementById("toggleMultiTurn")?.checked,
-      agent_skill_enabled: !!document.getElementById("toggleAgentSkill")?.checked,
-      f5_guardrail_only: !!document.getElementById("toggleF5GuardrailOnly")?.checked,
-      debug_guardrail_raw_enabled: !!document.getElementById("toggleGuardrailDebug")?.checked,
-      kb_dir: document.getElementById("kbDirInput")?.value || "./enterprise_kb",
-      agent_max_steps: document.getElementById("agentMaxStepsSlider")?.value || 4,
-      default_provider: (document.getElementById("providerSelect")?.value || "").trim()
-    })
+    body: JSON.stringify(payload)
   });
   if (!res.ok) {
     const text = await res.text();
@@ -1249,6 +1538,17 @@ document.getElementById("providerSelect")?.addEventListener("change", () => {
   saveSettings(false);
 });
 document.getElementById("agentMaxStepsSlider")?.addEventListener("change", () => saveSettings(false));
+userActivityRangeSelectEl?.addEventListener("change", () => {
+  const isCustom = (userActivityRangeSelectEl.value || "") === "custom";
+  if (userActivityStartInputEl) userActivityStartInputEl.disabled = !isCustom;
+  if (userActivityEndInputEl) userActivityEndInputEl.disabled = !isCustom;
+});
+btnUserActivityApplyEl?.addEventListener("click", () => loadUserActivity(true));
+if (userActivityRangeSelectEl) {
+  const isCustom = (userActivityRangeSelectEl.value || "") === "custom";
+  if (userActivityStartInputEl) userActivityStartInputEl.disabled = !isCustom;
+  if (userActivityEndInputEl) userActivityEndInputEl.disabled = !isCustom;
+}
 loadSettings();
 
 // ======================

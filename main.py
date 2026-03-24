@@ -8,7 +8,7 @@ import hashlib
 import secrets
 import threading
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Deque, Dict, List, Optional, Tuple
 from urllib.request import Request as UrlRequest, urlopen
 from urllib.error import HTTPError, URLError
@@ -25,7 +25,7 @@ load_dotenv()  # 再允许当前工作目录 .env 覆盖
 # -----------------------------
 HF_PROXY = os.getenv("HF_PROXY") or os.getenv("PROXY")
 
-from fastapi import FastAPI, Request, HTTPException, Body
+from fastapi import FastAPI, Request, HTTPException, Body, Query
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -1644,6 +1644,78 @@ def _get_provider_options() -> list:
     return [p.strip() for p in raw.split(",") if p.strip()]
 
 
+def _parse_utc_iso(ts: str) -> Optional[datetime]:
+    raw = str(ts or "").strip()
+    if not raw:
+        return None
+    try:
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _percentile(values: List[float], p: float) -> Optional[float]:
+    if not values:
+        return None
+    if len(values) == 1:
+        return float(values[0])
+    rank = (len(values) - 1) * max(0.0, min(100.0, float(p))) / 100.0
+    lo = int(rank)
+    hi = min(lo + 1, len(values) - 1)
+    frac = rank - lo
+    return float(values[lo] * (1.0 - frac) + values[hi] * frac)
+
+
+def _build_latency_stats(latencies: List[float]) -> dict:
+    if not latencies:
+        return {
+            "count": 0,
+            "avg": None,
+            "median": None,
+            "p90": None,
+            "p95": None,
+            "min": None,
+            "max": None,
+        }
+    ordered = sorted(float(v) for v in latencies)
+    n = len(ordered)
+    return {
+        "count": n,
+        "avg": round(sum(ordered) / n, 2),
+        "median": round(_percentile(ordered, 50) or 0.0, 2),
+        "p90": round(_percentile(ordered, 90) or 0.0, 2),
+        "p95": round(_percentile(ordered, 95) or 0.0, 2),
+        "min": round(ordered[0], 2),
+        "max": round(ordered[-1], 2),
+    }
+
+
+def _empty_user_activity_payload(selected_range: str, start_iso: Optional[str], end_iso: Optional[str]) -> dict:
+    return {
+        "range": selected_range,
+        "start": start_iso,
+        "end": end_iso,
+        "total_records": 0,
+        "invalid_lines": 0,
+        "negative_latency_records": 0,
+        "activity_by_user": [],
+        "latency_seconds_stats": _build_latency_stats([]),
+        "latency_bucket_histogram": [],
+        "daily_activity_trend": [],
+        "daily_activity_trend_by_user": [],
+        "user_latency_stats": [],
+        "hour_of_day_distribution": {"login": [], "threshold_reached": []},
+        "weekday_activity_by_user": [],
+        "ip_activity_distribution": [],
+        "slowest_sessions": [],
+    }
+
+
 @app.get("/api/settings")
 async def get_settings(request: Request):
     username = require_user(request)
@@ -1662,6 +1734,11 @@ async def get_settings(request: Request):
 async def post_settings(request: Request, payload: dict = Body(default=None)):
     username = require_user(request)
     clean_payload = payload if isinstance(payload, dict) else {}
+    admin_only_keys = {"kb_dir", "agent_max_steps"}
+    if username != "admin":
+        forbidden = [k for k in clean_payload.keys() if k in admin_only_keys]
+        if forbidden:
+            raise HTTPException(status_code=403, detail="only admin can modify kb_dir or agent_max_steps")
     structured = load_structured_settings()
     if username not in structured["user_settings"]:
         structured["user_settings"][username] = _new_user_settings_from_template(structured)
@@ -1684,3 +1761,206 @@ async def post_settings(request: Request, payload: dict = Body(default=None)):
         structured["global_settings"][k] = runtime[k]
     save_structured_settings(structured)
     return {"status": "ok", "settings": runtime}
+
+
+@app.get("/api/user-activity")
+async def get_user_activity(
+    request: Request,
+    range_key: str = Query("1m", alias="range"),
+    include_admin: bool = Query(True),
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+):
+    username = require_user(request)
+    if username != "admin":
+        raise HTTPException(status_code=403, detail="admin only")
+
+    now_utc = datetime.now(timezone.utc)
+    selected_range = str(range_key or "1m").strip().lower()
+    start_dt: Optional[datetime] = None
+    end_dt: Optional[datetime] = None
+
+    if selected_range == "1m":
+        start_dt = now_utc - timedelta(days=30)
+        end_dt = now_utc
+    elif selected_range == "3m":
+        start_dt = now_utc - timedelta(days=90)
+        end_dt = now_utc
+    elif selected_range == "custom":
+        start_dt = _parse_utc_iso(start or "")
+        end_dt = _parse_utc_iso(end or "")
+        if not start_dt or not end_dt:
+            raise HTTPException(status_code=400, detail="custom range requires valid start and end datetime")
+        if end_dt < start_dt:
+            raise HTTPException(status_code=400, detail="end datetime must be later than start datetime")
+    else:
+        raise HTTPException(status_code=400, detail="range must be one of: 1m, 3m, custom")
+
+    if not os.path.exists(LOGIN_ACTIVITY_FILE):
+        return _empty_user_activity_payload(selected_range, start_dt.isoformat(), end_dt.isoformat())
+
+    filtered_records = []
+    invalid_lines = 0
+    with open(LOGIN_ACTIVITY_FILE, "r", encoding="utf-8") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except Exception:
+                invalid_lines += 1
+                continue
+            if not isinstance(item, dict):
+                invalid_lines += 1
+                continue
+            login_dt = _parse_utc_iso(str(item.get("login_datetime") or ""))
+            if not login_dt:
+                invalid_lines += 1
+                continue
+            if login_dt < start_dt or login_dt > end_dt:
+                continue
+            uname = str(item.get("username") or "unknown")
+            if (not include_admin) and uname.strip().lower() == "admin":
+                continue
+            threshold_dt = _parse_utc_iso(str(item.get("threshold_reached_datetime") or ""))
+            filtered_records.append(
+                {
+                    "username": uname,
+                    "login_dt": login_dt,
+                    "threshold_dt": threshold_dt,
+                    "session_id": str(item.get("session_id") or ""),
+                    "client_ip": str(item.get("client_ip") or "unknown"),
+                }
+            )
+
+    if not filtered_records:
+        payload = _empty_user_activity_payload(selected_range, start_dt.isoformat(), end_dt.isoformat())
+        payload["invalid_lines"] = invalid_lines
+        return payload
+
+    user_counts: Dict[str, int] = defaultdict(int)
+    user_latencies: Dict[str, List[float]] = defaultdict(list)
+    day_counts: Dict[str, int] = defaultdict(int)
+    day_counts_by_user: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    weekday_by_user: Dict[str, List[int]] = defaultdict(lambda: [0] * 7)
+    hour_login = [0] * 24
+    hour_threshold = [0] * 24
+    ip_counts: Dict[str, int] = defaultdict(int)
+    latency_values: List[float] = []
+    negative_latency_records = 0
+    slowest_sessions: List[dict] = []
+
+    for rec in filtered_records:
+        uname = rec["username"] or "unknown"
+        user_counts[uname] += 1
+        ip_counts[rec["client_ip"] or "unknown"] += 1
+        day_key = rec["login_dt"].strftime("%Y-%m-%d")
+        day_counts[day_key] += 1
+        day_counts_by_user[uname][day_key] += 1
+        weekday_by_user[uname][rec["login_dt"].weekday()] += 1
+        hour_login[rec["login_dt"].hour] += 1
+
+        threshold_dt = rec["threshold_dt"]
+        if threshold_dt:
+            hour_threshold[threshold_dt.hour] += 1
+            latency_sec = (threshold_dt - rec["login_dt"]).total_seconds()
+            if latency_sec < 0:
+                negative_latency_records += 1
+            else:
+                latency_values.append(latency_sec)
+                user_latencies[uname].append(latency_sec)
+                slowest_sessions.append(
+                    {
+                        "username": uname,
+                        "session_id": rec["session_id"],
+                        "client_ip": rec["client_ip"],
+                        "login_datetime": rec["login_dt"].strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "threshold_reached_datetime": threshold_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "latency_seconds": round(latency_sec, 2),
+                    }
+                )
+
+    activity_by_user = [
+        {"username": k, "count": v}
+        for k, v in sorted(user_counts.items(), key=lambda x: (-x[1], x[0].lower()))
+    ]
+    daily_activity_trend = [
+        {"date": d, "count": c}
+        for d, c in sorted(day_counts.items(), key=lambda x: x[0])
+    ]
+    daily_activity_trend_by_user = []
+    for uname, per_day in sorted(day_counts_by_user.items(), key=lambda x: x[0].lower()):
+        series = [{"date": d, "count": c} for d, c in sorted(per_day.items(), key=lambda x: x[0])]
+        daily_activity_trend_by_user.append({"username": uname, "series": series})
+    user_latency_stats = []
+    for uname, vals in sorted(user_latencies.items(), key=lambda x: x[0].lower()):
+        s = _build_latency_stats(vals)
+        user_latency_stats.append(
+            {
+                "username": uname,
+                "count": s["count"],
+                "avg": s["avg"],
+                "median": s["median"],
+                "p90": s["p90"],
+            }
+        )
+
+    latency_bucket_defs = [
+        ("0-10s", 0, 10),
+        ("10-30s", 10, 30),
+        ("30-60s", 30, 60),
+        ("1-3m", 60, 180),
+        ("3-10m", 180, 600),
+        ("10m+", 600, None),
+    ]
+    latency_bucket_histogram = []
+    for label, lo, hi in latency_bucket_defs:
+        if hi is None:
+            count = sum(1 for v in latency_values if v >= lo)
+        else:
+            count = sum(1 for v in latency_values if v >= lo and v < hi)
+        latency_bucket_histogram.append({"bucket": label, "count": count})
+
+    login_hour_dist = [{"hour": h, "count": c} for h, c in enumerate(hour_login)]
+    threshold_hour_dist = [{"hour": h, "count": c} for h, c in enumerate(hour_threshold)]
+    ip_activity_distribution = [
+        {"client_ip": ip, "count": c}
+        for ip, c in sorted(ip_counts.items(), key=lambda x: (-x[1], x[0]))
+    ]
+    weekday_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    weekday_activity_by_user = []
+    for uname, counts in sorted(weekday_by_user.items(), key=lambda x: x[0].lower()):
+        total = sum(counts)
+        favorite_idx = max(range(7), key=lambda i: counts[i]) if total > 0 else None
+        weekday_activity_by_user.append(
+            {
+                "username": uname,
+                "counts": [{"weekday": weekday_labels[i], "count": int(counts[i])} for i in range(7)],
+                "favorite_weekday": (weekday_labels[favorite_idx] if favorite_idx is not None else None),
+                "total": total,
+            }
+        )
+    slowest_sessions = sorted(slowest_sessions, key=lambda x: -x["latency_seconds"])[:10]
+
+    return {
+        "range": selected_range,
+        "start": start_dt.isoformat(),
+        "end": end_dt.isoformat(),
+        "total_records": len(filtered_records),
+        "invalid_lines": invalid_lines,
+        "negative_latency_records": negative_latency_records,
+        "activity_by_user": activity_by_user,
+        "latency_seconds_stats": _build_latency_stats(latency_values),
+        "latency_bucket_histogram": latency_bucket_histogram,
+        "daily_activity_trend": daily_activity_trend,
+        "daily_activity_trend_by_user": daily_activity_trend_by_user,
+        "user_latency_stats": user_latency_stats,
+        "hour_of_day_distribution": {
+            "login": login_hour_dist,
+            "threshold_reached": threshold_hour_dist,
+        },
+        "weekday_activity_by_user": weekday_activity_by_user,
+        "ip_activity_distribution": ip_activity_distribution,
+        "slowest_sessions": slowest_sessions,
+    }
