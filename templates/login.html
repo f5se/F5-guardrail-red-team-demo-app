@@ -20,6 +20,7 @@
       border-radius: 10px;
       background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
       border: 1px solid #e5e7eb;
+      position: relative;
       display: flex;
       justify-content: space-around;
       align-items: flex-end;
@@ -92,6 +93,43 @@
     .mascot.peek:nth-child(2) .head { transform: rotate(6deg) translateY(4px) scaleY(.97); }
     .mascot.peek:nth-child(3) .head { transform: rotate(10deg) translateY(3px) scaleY(.96); }
     .mascot.peek:nth-child(4) .head { transform: rotate(7deg) translateY(4px) scaleY(.97); }
+    .mascot.bow {
+      animation: none;
+      transform: translateY(1px);
+    }
+    .mascot.bow .head,
+    .mascot.bow .body {
+      animation-duration: 980ms;
+      animation-timing-function: cubic-bezier(.26, .72, .24, 1);
+      animation-fill-mode: forwards;
+    }
+    .mascot.bow .head { animation-name: bowHead1; }
+    .mascot.bow .body { animation-name: bowBody1; }
+    .mascot.bow:nth-child(2) .head { animation-name: bowHead2; }
+    .mascot.bow:nth-child(3) .head { animation-name: bowHead3; }
+    .mascot.bow:nth-child(4) .head { animation-name: bowHead4; }
+    .confetti-layer {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      overflow: visible;
+      z-index: 9999;
+    }
+    .confetti {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 12px;
+      height: 16px;
+      border-radius: 2px;
+      opacity: 1;
+      transform: translate(var(--x), var(--y));
+      animation: confettiBurst 1900ms cubic-bezier(.18, .72, .22, 1) forwards;
+      box-shadow: 0 0 0 1px rgba(255,255,255,.25) inset;
+    }
     .row-password { position: relative; }
     .row-password input { padding-right: 44px; }
     .toggle-password {
@@ -119,6 +157,46 @@
       0% { transform: translateY(0); }
       50% { transform: translateY(-3px); }
       100% { transform: translateY(0); }
+    }
+    @keyframes bowBody1 {
+      0% { transform: rotate(0deg) translateY(0); }
+      30% { transform: rotate(-8deg) translateX(-2px) translateY(1px) scaleY(.98); }
+      64% { transform: rotate(-12deg) translateX(-3px) translateY(2px) scaleY(.96); }
+      100% { transform: rotate(0deg) translateY(0); }
+    }
+    @keyframes bowHead1 {
+      0% { transform: rotate(0deg) translateY(0) scaleY(1); }
+      30% { transform: rotate(-10deg) translateX(-2px) translateY(3px) scaleY(.98); }
+      64% { transform: rotate(-17deg) translateX(-3px) translateY(8px) scaleY(.93); }
+      100% { transform: rotate(0deg) translateY(0) scaleY(1); }
+    }
+    @keyframes bowHead2 {
+      0% { transform: rotate(0deg) translateY(0) scaleY(1); }
+      30% { transform: rotate(-8deg) translateX(-1px) translateY(3px) scaleY(.98); }
+      64% { transform: rotate(-15deg) translateX(-2px) translateY(8px) scaleY(.93); }
+      100% { transform: rotate(0deg) translateY(0) scaleY(1); }
+    }
+    @keyframes bowHead3 {
+      0% { transform: rotate(0deg) translateY(0) scaleY(1); }
+      30% { transform: rotate(-11deg) translateX(-2px) translateY(4px) scaleY(.97); }
+      64% { transform: rotate(-18deg) translateX(-3px) translateY(8px) scaleY(.92); }
+      100% { transform: rotate(0deg) translateY(0) scaleY(1); }
+    }
+    @keyframes bowHead4 {
+      0% { transform: rotate(0deg) translateY(0) scaleY(1); }
+      30% { transform: rotate(-9deg) translateX(-2px) translateY(3px) scaleY(.98); }
+      64% { transform: rotate(-16deg) translateX(-3px) translateY(8px) scaleY(.93); }
+      100% { transform: rotate(0deg) translateY(0) scaleY(1); }
+    }
+    @keyframes confettiBurst {
+      0% {
+        transform: translate(var(--x), var(--y)) scale(.9) rotate(0deg);
+        opacity: 1;
+      }
+      100% {
+        transform: translate(calc(var(--x) + var(--dx)), calc(var(--y) + var(--dy))) scale(1.1) rotate(var(--r));
+        opacity: 0;
+      }
     }
   </style>
 </head>
@@ -155,6 +233,7 @@
           </div>
           <div class="body"></div>
         </div>
+        <div class="confetti-layer" id="confettiLayer"></div>
       </div>
       <div class="row">
         <label for="username">用户名 | User Name</label>
@@ -182,6 +261,8 @@
   <script>
     const btn = document.getElementById("btnLogin");
     const err = document.getElementById("err");
+    const mascotStage = document.getElementById("mascotStage");
+    const confettiLayer = document.getElementById("confettiLayer");
     const usernameInput = document.getElementById("username");
     const passwordInput = document.getElementById("password");
     const togglePassword = document.getElementById("togglePassword");
@@ -189,8 +270,13 @@
     const pupils = Array.from(document.querySelectorAll(".pupil"));
     let mousePos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     let isPasswordShown = false;
+    let isBowing = false;
     let activePeekTarget = null;
     let typingTimer = 0;
+    let stageClickCount = 0;
+    let stageClickTimer = 0;
+    let pendingBowTimer = 0;
+    let stageClickTimestamps = [];
 
     function pointEyesAt(targetX, targetY, spread = 2.3) {
       pupils.forEach((pupil, idx) => {
@@ -233,13 +319,23 @@
     }
 
     function updateGaze() {
+      if (isBowing) {
+        mascots.forEach(m => {
+          m.classList.remove("away");
+          m.classList.remove("peek");
+          m.classList.add("bow");
+        });
+        return;
+      }
       if (isPasswordShown) {
         mascots.forEach(m => m.classList.add("away"));
         mascots.forEach(m => m.classList.remove("peek"));
+        mascots.forEach(m => m.classList.remove("bow"));
         pointEyesToOwnHeadTop(2.7);
         return;
       }
       mascots.forEach(m => m.classList.remove("away"));
+      mascots.forEach(m => m.classList.remove("bow"));
       if (activePeekTarget) {
         mascots.forEach(m => m.classList.add("peek"));
         const c = getInputCenter(activePeekTarget);
@@ -248,6 +344,80 @@
       }
       mascots.forEach(m => m.classList.remove("peek"));
       pointEyesAt(mousePos.x, mousePos.y, 2.3);
+    }
+
+    function resetEasterEggClickState() {
+      clearTimeout(stageClickTimer);
+      clearTimeout(pendingBowTimer);
+      stageClickTimestamps = [];
+      stageClickCount = 0;
+    }
+
+    function triggerBowEasterEgg() {
+      if (isBowing) return;
+      isBowing = true;
+      updateGaze();
+      window.setTimeout(() => {
+        isBowing = false;
+        mascots.forEach(m => m.classList.remove("bow"));
+        resetEasterEggClickState();
+        updateGaze();
+      }, 1180);
+    }
+
+    function triggerConfetti() {
+      const colors = ["#f43f5e", "#f59e0b", "#22c55e", "#3b82f6", "#a855f7", "#14b8a6"];
+      confettiLayer.innerHTML = "";
+      const mascotRects = mascots.map(m => m.getBoundingClientRect());
+      const piecesPerMascot = 18;
+      mascotRects.forEach((rect, mascotIndex) => {
+        const originX = rect.left + rect.width / 2;
+        const originY = rect.top + rect.height * 0.35;
+        for (let i = 0; i < piecesPerMascot; i += 1) {
+          const piece = document.createElement("span");
+          piece.className = "confetti";
+          piece.style.backgroundColor = colors[(mascotIndex * piecesPerMascot + i) % colors.length];
+          const outwardSign = mascotIndex < 2 ? -1 : 1;
+          const dx = outwardSign * (120 + Math.random() * 220) + (Math.random() * 36 - 18);
+          const dy = -(140 + Math.random() * 220);
+          piece.style.setProperty("--x", `${originX}px`);
+          piece.style.setProperty("--y", `${originY}px`);
+          piece.style.setProperty("--dx", `${dx}px`);
+          piece.style.setProperty("--dy", `${dy}px`);
+          piece.style.setProperty("--r", `${-240 + Math.random() * 480}deg`);
+          confettiLayer.appendChild(piece);
+          window.setTimeout(() => piece.remove(), 2050);
+        }
+      });
+      window.setTimeout(() => {
+        confettiLayer.innerHTML = "";
+      }, 2100);
+    }
+
+    function handleStageClicksAndEasterEgg() {
+      const now = Date.now();
+      stageClickTimestamps.push(now);
+      stageClickTimestamps = stageClickTimestamps.filter(ts => now - ts <= 2200);
+      stageClickCount = stageClickTimestamps.length;
+      clearTimeout(stageClickTimer);
+      clearTimeout(pendingBowTimer);
+      if (stageClickCount >= 5) {
+        triggerBowEasterEgg();
+        triggerConfetti();
+        resetEasterEggClickState();
+        return;
+      }
+      if (stageClickCount === 4) {
+        // Give the 5th click enough chance before firing 4-click bow.
+        pendingBowTimer = window.setTimeout(() => {
+          triggerBowEasterEgg();
+          resetEasterEggClickState();
+        }, 760);
+        return;
+      }
+      stageClickTimer = window.setTimeout(() => {
+        resetEasterEggClickState();
+      }, 2300);
     }
 
     function startPeek(inputEl) {
@@ -307,6 +477,10 @@
 
     btn.addEventListener("click", doLogin);
     togglePassword.addEventListener("click", togglePasswordVisibility);
+    mascotStage.addEventListener("click", () => {
+      if (isBowing) return;
+      handleStageClicksAndEasterEgg();
+    });
     [usernameInput, passwordInput].forEach(inputEl => {
       inputEl.addEventListener("input", () => startPeek(inputEl));
       inputEl.addEventListener("focus", syncPeekByFocus);
