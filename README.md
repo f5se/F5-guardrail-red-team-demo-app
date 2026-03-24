@@ -14,19 +14,21 @@
 2. 修正了对Redacted消息的处理问题
 3. 修正界面布局与窗口适应性问题
 4. 增加了多用户体系，不同用户间设定互不干扰
-5. 增加同时显示F5 Guardrail的scanner处理结果能力
-6. 增加了Skills能力，可随时增加新的Skills并自动注册Skill
-7. 增加了Inline集成动画展现
-8. 增加了OOB集成动画展现
-9. 增加攻击场景示例模板
-10. 增加在聊天界面临时绕过所有检测，直通模型开关
-11. 增加了HF的代理下载能力
-12. 增加了是否使用所有引擎开关
-13. 增加了后端原始响应json调试开关
-14. 增加了F5 AI/Calypso多Provider配置能力，容许用户前端切换选择Project对应的多个Providers
-15. 将env文件直接加载，无需设置环境变量
-16. 增加了前端Markdown响应的渲染
-17. 增加了F5 Red Team与DevSecOps的集成流水线演示。
+5. 增加了用户活动统计功能
+6. 增加同时显示F5 Guardrail的scanner处理结果能力
+7. 增加了Skills能力，可随时增加新的Skills并自动注册Skill
+8. 增加了Inline集成动画展现
+9. 增加了OOB集成动画展现
+10. 增加攻击场景示例模板
+11. 增加在聊天界面临时绕过所有检测，直通模型开关
+12. 增加了Redacted时，查看原始LLM消息功能
+13. 增加了HF的代理下载能力
+14. 增加了是否使用所有引擎开关
+15. 增加了后端原始响应json调试开关
+16. 增加了F5 AI/Calypso多Provider配置能力，容许用户前端切换选择Project对应的多个Providers
+17. 将env文件直接加载，无需设置环境变量
+18. 增加了前端Markdown响应的渲染
+19. 增加了F5 Red Team与DevSecOps的集成流水线演示。
 
    注意：考虑到实际Red Team耗时及环境可行性，这里的Red Team API集成是mock模拟的，并不实际在SaaS端创建真实对象。
 
@@ -50,12 +52,15 @@ cp .env_example .env
 | `CALYPSOAI_URL` | F5 AI Security 平台地址 | `https://www.us1.calypsoai.app/` |
 | `CALYPSOAI_TOKEN` | API 令牌（必填） | `Your-calypsoai-token` |
 | `CALYPSOAI_PROJECT_ID` | 项目 ID（Project 模式） | `Your-calypsoai-project-id` |
+| `PROMPT_INJECTION_SCANNER_ID` | 与 Enterprise KB Skill 联动的 SaaS 端 Prompt Injection scanner 的 UUID（用于顶部漂移告警与手动同步） | `Your-prompt-injection-scanner-uuid` |
+| `PROMPT_INJECTION_DEFAULT_VERSION` | 上述 scanner 在 SaaS 上的版本标签（PATCH 配置时携带，与控制台一致） | `2026-02` |
 | `DEFAULT_PROVIDER` | Calypso 中配置的 Provider 名称，作为服务器默认值；主 Chat/Agent/Inline 模式下可被前端选择覆盖 | `Your-calypsoai-provider` |
 | `PROVIDER_OPTIONS` | 前端设置页「LLM Provider」下拉的可选列表，逗号分隔；配置后用户可在界面选择使用的 Provider | `jinglin-google-gemini-133540,deepseek-JingLin-real-charge` |
 | `SLIDING_WINDOW_MAX_TURNS` | 多轮对话滑动窗口轮数 | `8` |
 | `SLIDING_WINDOW_MAX_CHARS` | 滑动窗口最大字符数 | `8000` |
 | `CONVERSATION_TTL_SECONDS` | 会话轮次过期时间（秒） | `120` |
 | `GUARDRAIL_DEBUG` | 设为 `1`/`true`/`yes` 时在终端打印 F5 Guardrail 请求打点，用于排查超时或 502（可选） | `1` |
+| `GUARDRAIL_TIMEOUT_SECONDS` | Guardrail 请求超时时间（秒）；超时返回 504，默认 `5`（可选） | `5` |
 | `HF_HOME` | Hugging Face 模型缓存目录（可选） | `Your-hugging-face-home-directory` |
 | `HF_PROXY` | 仅用于 HF 模型下载的代理，不用于连接 CalypsoAI（可选） | `http://127.0.0.1:8010` |
 | `HF_TOKEN` | Hugging Face 令牌（可选，建议设置以加速下载、避免限流） | `Your-hugging-face-token` |
@@ -69,6 +74,8 @@ cp .env_example .env
 注意：你需要首先在 Calypso（F5 Guardrail）系统上设定相关 Project、Connection/Provider 及 Project API token。测试企业敏感信息防护等能力时，需在 F5 Guardrail 中提前配置 Custom scanner 等。
 提示：README 与 `.env_example` 中的 Key 都是示例占位符。
 直连聊天模式下，**Enterprise KB Skill** 开关与主 Chat 一致：开启时由直连 LLM 执行与 Guardrail Agent 路径相同的 ReAct 工具推理（调用企业 KB 等）；关闭时为单次直连对话。
+
+**Enterprise KB Skill 与 SaaS scanner 一致性：** 界面以 **SaaS 端** 当前 Project 中配置的 Prompt Injection scanner 状态为「显示真相」。约定：Skill **ON** 时应在 SaaS **关闭**该 scanner（减轻 ReAct 误报）；Skill **OFF** 时应在 SaaS **开启**该 scanner。切换 Skill **不会**自动改写 SaaS；若检测到与 SaaS 不一致，顶部会出现告警条，说明可能原因（人工改 SaaS、其他用户点击「将 SaaS 同步为本地」、多用户共享同一 `CALYPSOAI_PROJECT_ID` 等），并可「按 SaaS 对齐本地」或经确认后「将 SaaS 同步为本地」。系统在 `loadSettings` 后及每 **120 秒** 只读轮询对比。需在 `.env` 配置 `PROMPT_INJECTION_SCANNER_ID`（及建议配置 `PROMPT_INJECTION_DEFAULT_VERSION`）。
 
 ### 用户验证配置（首次启用前）
 

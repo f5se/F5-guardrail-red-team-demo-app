@@ -39,6 +39,59 @@ async function authFetch(url, options) {
   return resp;
 }
 
+function showSyncNotice(message, type = "info", ttlMs = 2400) {
+  const el = document.createElement("div");
+  const bg = type === "error" ? "#b42318" : (type === "success" ? "#027a48" : "#155eef");
+  el.textContent = message;
+  el.style.cssText = [
+    "position:fixed",
+    "right:16px",
+    "top:16px",
+    "z-index:9999",
+    "max-width:420px",
+    "padding:10px 12px",
+    "border-radius:10px",
+    "background:" + bg,
+    "color:#fff",
+    "font-size:13px",
+    "line-height:1.45",
+    "box-shadow:0 8px 24px rgba(0,0,0,.2)",
+    "opacity:0",
+    "transform:translateY(-6px)",
+    "transition:opacity .16s ease, transform .16s ease"
+  ].join(";");
+  document.body.appendChild(el);
+  requestAnimationFrame(() => {
+    el.style.opacity = "1";
+    el.style.transform = "translateY(0)";
+  });
+  setTimeout(() => {
+    el.style.opacity = "0";
+    el.style.transform = "translateY(-6px)";
+    setTimeout(() => el.remove(), 180);
+  }, ttlMs);
+}
+
+async function syncEnterpriseKbSkillScanner(agentSkillEnabled, source) {
+  const sourceLabel = source === "manual" ? "手动" : (source === "badge" ? "徽章" : "设置");
+  const targetText = agentSkillEnabled ? "关闭 Prompt Injection scanner" : "开启 Prompt Injection scanner";
+  showSyncNotice(`正在同步 SaaS Guardrail（${sourceLabel}）：${targetText} ...`, "info", 1800);
+  const res = await authFetch("/api/agent-skill-sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: !!agentSkillEnabled })
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "scanner sync failed");
+  }
+  const data = await res.json();
+  const verified = data?.scanner_sync?.scanner_enabled_verified;
+  const statusText = verified === true ? "已启用" : (verified === false ? "已禁用" : "已提交");
+  showSyncNotice(`SaaS scanner 同步成功（${sourceLabel}）：${statusText}`, "success", 2200);
+  return data;
+}
+
 function setLogoutButtonLabel(username) {
   if (!btnLogout) return;
   const name = (username || "").trim();
@@ -614,6 +667,102 @@ function getEffectiveF5GuardrailOnlyEnabled(){
   return !!sessionBadgeOverrides.f5GuardrailOnly;
 }
 
+const scannerDriftBannerEl = document.getElementById("scannerDriftBanner");
+const scannerDriftBannerTitleEl = document.getElementById("scannerDriftBannerTitle");
+const scannerDriftBannerBodyEl = document.getElementById("scannerDriftBannerBody");
+const scannerDriftActionsDriftEl = document.getElementById("scannerDriftBannerActionsDrift");
+const scannerDriftActionsErrorEl = document.getElementById("scannerDriftBannerActionsError");
+const SCANNER_DRIFT_SNOOZE_KEY = "scannerDriftSnoozeUntil";
+const SCANNER_DRIFT_POLL_MS = 120000;
+/** 从其它菜单切回 AI Chat 时触发一致性检测：防抖 + 节流，避免疯狂点菜单刷 API */
+const CHAT_VIEW_DRIFT_DEBOUNCE_MS = 400;
+const CHAT_VIEW_DRIFT_THROTTLE_MS = 45000;
+let lastPromptInjectionSyncPayload = null;
+let chatViewDriftDebounceTimer = null;
+let lastEnterChatDriftCheckAt = 0;
+
+function isScannerDriftSnoozed(){
+  const t = parseInt(sessionStorage.getItem(SCANNER_DRIFT_SNOOZE_KEY) || "0", 10);
+  return Date.now() < t;
+}
+
+function hideScannerDriftBanner(){
+  if (scannerDriftBannerEl) scannerDriftBannerEl.hidden = true;
+}
+
+async function refreshScannerDriftBanner(){
+  if (!scannerDriftBannerEl || !scannerDriftBannerTitleEl || !scannerDriftBannerBodyEl) return;
+  if (!scannerDriftActionsDriftEl || !scannerDriftActionsErrorEl) return;
+  let data;
+  try {
+    const r = await authFetch("/api/prompt-injection-sync-status", { cache: "no-store" });
+    data = await r.json();
+  } catch (e) {
+    console.error("prompt-injection-sync-status failed:", e);
+    hideScannerDriftBanner();
+    return;
+  }
+  lastPromptInjectionSyncPayload = data;
+
+  const saasOn = data.saas_scanner_enabled;
+  const suggested = data.suggested_local_agent_skill;
+  const localOn = getEffectiveAgentSkillEnabled();
+
+  if (!data.ok || saasOn === null || suggested === null) {
+    scannerDriftBannerTitleEl.textContent = "无法读取 SaaS 端 Prompt Injection scanner 状态";
+    scannerDriftBannerBodyEl.textContent =
+      "请检查 CALYPSOAI_TOKEN、CALYPSOAI_PROJECT_ID、PROMPT_INJECTION_SCANNER_ID 与网络；也可能是该 scanner 未出现在当前 Project 的 configs 中。"
+      + (data.detail ? "（" + data.detail + "）" : "");
+    scannerDriftActionsDriftEl.hidden = true;
+    scannerDriftActionsErrorEl.hidden = false;
+    scannerDriftBannerEl.hidden = false;
+    return;
+  }
+
+  const aligned = !!localOn === !!suggested;
+  if (aligned) {
+    hideScannerDriftBanner();
+    return;
+  }
+
+  if (isScannerDriftSnoozed()) {
+    hideScannerDriftBanner();
+    return;
+  }
+
+  const saasWord = saasOn ? "开启（enabled）" : "关闭（disabled）";
+  const localWord = localOn ? "开启（ON）" : "关闭（OFF）";
+  const suggestWord = suggested ? "开启（ON）" : "关闭（OFF）";
+  scannerDriftBannerTitleEl.textContent = "Enterprise KB Skill 与 SaaS 端 scanner 不一致";
+  scannerDriftBannerBodyEl.textContent = [
+    "以 SaaS 配置为准：当前 Project 下 Prompt Injection scanner 为 " + saasWord + "；您本地的 Enterprise KB Skill（含徽章会话开关）为 " + localWord + "。",
+    "约定：Enterprise KB Skill ON 时应在 SaaS 关闭该 scanner（减少 ReAct 误报）；Skill OFF 时应在 SaaS 开启该 scanner。",
+    "因此建议将 Enterprise KB Skill 设为 " + suggestWord + "。",
+    "可能原因：在 Calypso 控制台人工修改、其他用户点击「将 SaaS 同步为本地」、或多名用户共享同一 CALYPSOAI_PROJECT_ID（最后一次写入 SaaS 者生效）。",
+    "您可「按 SaaS 对齐本地」仅改本应用；或「将 SaaS 同步为本地」在确认后把 SaaS 改成与当前本地一致（影响所有使用该 Project 的会话）。"
+  ].join("\n");
+
+  scannerDriftActionsDriftEl.hidden = false;
+  scannerDriftActionsErrorEl.hidden = true;
+  scannerDriftBannerEl.hidden = false;
+}
+
+function scheduleScannerDriftCheckOnEnterChat(){
+  if (chatViewDriftDebounceTimer) {
+    clearTimeout(chatViewDriftDebounceTimer);
+    chatViewDriftDebounceTimer = null;
+  }
+  chatViewDriftDebounceTimer = setTimeout(() => {
+    chatViewDriftDebounceTimer = null;
+    const now = Date.now();
+    if (lastEnterChatDriftCheckAt > 0 && (now - lastEnterChatDriftCheckAt) < CHAT_VIEW_DRIFT_THROTTLE_MS) {
+      return;
+    }
+    lastEnterChatDriftCheckAt = now;
+    void refreshScannerDriftBanner();
+  }, CHAT_VIEW_DRIFT_DEBOUNCE_MS);
+}
+
 /**
  * 与主聊天走 Calypso/F5 Guardrail 时后端选用的 Provider 一致：
  * 下拉框有非空 value → 用户显式 default_provider；否则用 GET /api/settings 的 effective_provider（已含 DEFAULT_PROVIDER）。
@@ -1002,6 +1151,7 @@ function setActiveView(view){
     if (guardrailCardEl) guardrailCardEl.style.display = "";
     if (layoutEl) layoutEl.classList.add("layout--with-guardrail");
     inputEl.focus();
+    scheduleScannerDriftCheckOnEnterChat();
   } else {
     if (attackCardEl) attackCardEl.style.display = "none";
     if (guardrailCardEl) guardrailCardEl.style.display = "none";
@@ -1422,6 +1572,7 @@ async function loadSettings(){
     document.getElementById("agentMaxStepsSlider").value = s.agent_max_steps || 4;
     document.getElementById("agentMaxStepsVal").textContent = s.agent_max_steps || 4;
     refreshKbSkillGeminiWarning();
+    await refreshScannerDriftBanner();
   }catch(e){
     console.error("loadSettings failed:", e);
     refreshKbSkillGeminiWarning();
@@ -1467,7 +1618,7 @@ document.getElementById("toggleAgentSkill")?.addEventListener("change", () => {
   sessionBadgeOverrides.agentSkill = null;
   persistedBadgeSettings.agentSkill = !!toggleAgentSkillEl?.checked;
   refreshEnterpriseKBSkillBadge();
-  saveSettings(false);
+  void saveSettings(false).then(() => refreshScannerDriftBanner());
 });
 document.getElementById("toggleGuardrailDebug")?.addEventListener("change", () => saveSettings(false));
 document.getElementById("toggleF5GuardrailOnly")?.addEventListener("change", () => {
@@ -1499,23 +1650,23 @@ function wireSessionBadgeToggle(badgeEl, key, onAfterFlip){
       }, 180);
     }, 1600);
   };
-  const flip = () => {
+  const flip = async () => {
     const effective = key === "multiTurn"
       ? getEffectiveMultiTurnEnabled()
       : (key === "agentSkill" ? getEffectiveAgentSkillEnabled() : getEffectiveF5GuardrailOnlyEnabled());
     sessionBadgeOverrides[key] = !effective;
     persistSessionBadgeOverrides();
-    onAfterFlip();
+    await onAfterFlip();
     showSessionHint();
   };
   badgeEl.addEventListener("click", e => {
     e.preventDefault();
-    flip();
+    void flip();
   });
   badgeEl.addEventListener("keydown", e => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      flip();
+      void flip();
     }
   });
 }
@@ -1525,8 +1676,9 @@ wireSessionBadgeToggle(modeBadgeEl, "multiTurn", () => {
   messagesEl.innerHTML = "";
   addBubble("assistant", "Hi there! How can I help?");
 });
-wireSessionBadgeToggle(kbSkillBadgeEl, "agentSkill", () => {
+wireSessionBadgeToggle(kbSkillBadgeEl, "agentSkill", async () => {
   refreshEnterpriseKBSkillBadge();
+  await refreshScannerDriftBanner();
 });
 wireSessionBadgeToggle(f5GuardrailOnlyBadgeEl, "f5GuardrailOnly", () => {
   refreshF5GuardrailOnlyBadge();
@@ -1550,6 +1702,60 @@ if (userActivityRangeSelectEl) {
   if (userActivityStartInputEl) userActivityStartInputEl.disabled = !isCustom;
   if (userActivityEndInputEl) userActivityEndInputEl.disabled = !isCustom;
 }
+
+document.getElementById("btnAlignLocalToSaas")?.addEventListener("click", async () => {
+  const sug = lastPromptInjectionSyncPayload?.suggested_local_agent_skill;
+  if (sug === null || sug === undefined) return;
+  sessionBadgeOverrides.agentSkill = null;
+  persistSessionBadgeOverrides();
+  setEnterpriseKBSkillEnabled(!!sug);
+  persistedBadgeSettings.agentSkill = !!sug;
+  try {
+    await saveSettings(false);
+    await refreshScannerDriftBanner();
+    showSyncNotice("已按 SaaS 对齐本地 Enterprise KB Skill", "success", 2400);
+  } catch (e) {
+    showSyncNotice("对齐本地失败", "error", 2600);
+    console.error(e);
+  }
+});
+
+document.getElementById("btnPushSaasToLocal")?.addEventListener("click", async () => {
+  const localOn = getEffectiveAgentSkillEnabled();
+  const msg =
+    "确定将 SaaS 端 Prompt Injection scanner 调整为与当前本地 Enterprise KB Skill 一致吗？\n\n" +
+    "当前本地为 " + (localOn ? "ON（将请求 SaaS 关闭该 scanner）" : "OFF（将请求 SaaS 开启该 scanner）") + "。\n" +
+    "同一 CALYPSOAI_PROJECT_ID 下所有会话共享该配置，最后一次写入 SaaS 者生效。\n\n" +
+    "是否继续？";
+  if (!confirm(msg)) return;
+  try {
+    await syncEnterpriseKbSkillScanner(localOn, "manual");
+    await refreshScannerDriftBanner();
+  } catch (e) {
+    showSyncNotice("SaaS 同步失败，请重试", "error", 2800);
+    console.error(e);
+  }
+});
+
+document.getElementById("btnScannerDriftSnooze")?.addEventListener("click", () => {
+  sessionStorage.setItem(SCANNER_DRIFT_SNOOZE_KEY, String(Date.now() + 10 * 60 * 1000));
+  hideScannerDriftBanner();
+});
+
+document.getElementById("btnScannerDriftRetry")?.addEventListener("click", () => {
+  void refreshScannerDriftBanner();
+});
+
+setInterval(() => {
+  void refreshScannerDriftBanner();
+}, SCANNER_DRIFT_POLL_MS);
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    void refreshScannerDriftBanner();
+  }
+});
+
 loadSettings();
 
 // ======================

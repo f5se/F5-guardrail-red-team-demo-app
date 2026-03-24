@@ -25,6 +25,26 @@
 
 在页面左侧快捷测试面板里，**有些测试需要依赖打开Enterprise KB Skill**，在点击此类测试前，需确认设置界面中`Agent Skill Orchestration (F5 Guardrail Only)`为打开模式，即界面顶部应显示**Enterprise KB Skill ON** 而不是OFF。
 
+#### 1.2.1 Enterprise KB Skill 与 SaaS 端 Prompt Injection scanner 冲突告警状态条提示
+
+>此问题的核心背景是，当打开本地Agent的企业知识Skill能力后，当前CalypsoAI的 Prompt Injection scanner会产生误报行为，因此当打开Skill后希望SaaS侧该Scanner被disable，反之被enable。 由于当前Demo系统可能会存在多用户同时使用，不同用户对SKill都有独立设定，而SaaS端却只能复用一个Project，因此潜在的会存在冲突。所以设计了此功能。
+
+- **告警显示以 SaaS 为准来检测**：应用会读取当前 `CALYPSOAI_PROJECT_ID` 下、`.env` 中 `PROMPT_INJECTION_SCANNER_ID` 所指向的 scanner 是否在 Project 配置里为 enabled。
+- **约定**：Enterprise KB Skill **ON** 时，建议在 SaaS **关闭**该 Prompt Injection scanner（减少 ReAct/JSON 误报）；Skill **OFF** 时，建议在 SaaS **开启**该 scanner。
+- **切换 Skill 自动检查**；若本地（含顶部徽章的会话开关）与 SaaS 不一致，页面**顶部橙色告警条**会说明可能原因（Calypso 控制台人工修改、其他用户点击「将 SaaS 同步为本地」、多账号共享同一 Project 等），并给出**建议的本地 Skill 开关状态**。
+- **操作**：可点「**按 SaaS 对齐本地**」更新本地Skill设置；或点「**将 SaaS 同步为本地**」并在**二次确认**后把 SaaS 改成与当前本地一致（**同一 Project 下所有用户共享，最后写入 SaaS 者生效**）。也可「暂不提示 10 分钟」仅隐藏漂移条（读状态失败时仍可点「重试检测」）。
+- **告警检查轮询**：程序启动完成后与之后每 **120 秒**，以及从其他界面切换回Chat界面时，会进行一致性对比。不一致会出现告警信息。
+  
+  ```
+  简单的理解就是：
+  1.如果你确定是因要带企业知识Skill或不带Skill进行测试，那么就点”将 SaaS 同步为本地（需确认）“按钮，将SaaS侧强行按你的要求来设置。
+  2.如果你并不准备实际的测试，而是只是点着玩玩，那么就点 ”按SaaS对齐本地“ 来设定本地的Skill开关，这样可以避免真的影响别人的测试。
+  3.如果你没有频繁修改SKill开关，但突然出现告警提示，说明有可能是同时有其他用户在使用并修改了SaaS侧的设置，此时可根据自己实际需要：
+  如果真的需要测试，就点”将 SaaS 同步为本地（需确认）“。
+  4.如果你强行将SaaS同步为本地后，过一会又出现不一致提示，说明此时一定有人和你同时在做演示，双方都想让SaaS侧按照各自本地的要求来进行设置。
+  此时建议先采用按SaaS侧来同步本地Skill设置并进行测试，过一会后再根据自己需要调整本地Skill开关并同步到SaaS来做其他测试。
+  ```
+
 #### 1.3 本地测试引擎与F5 Guardrail
 
 聊天系统支持多种检测引擎进行测试，包括4种本地引擎和1个F5的在线引擎。通过setting页面（或顶部徽章按钮）可以控制是否开启这些本地引擎进行测试，还是仅使用F5 Guardrail进行测试。一般来说，当需要对比测试时可以打开，如果仅是为了测试F5 Guardrail效果，则可以关闭。
@@ -40,9 +60,16 @@
 
 攻击面板中已经预置了多种不同的攻击示例，点击可以快速测试。
 
+```
+特别注意：攻击面板中除了明确提示需要打开企业知识Skill的测试项外，其它测试项都建议关闭企业知识SKill开关。
+实际测试证明当前Calypso系统对Agent的消息处理存在一定的误报（Agent系统会自带大量的指示性prompt，导致CAI系统检测效果下降）。
+如果你发现攻击总是通过，请记得检查是否关闭了企业知识Skill！
+```
+
 #### 1.5 F5 Guardrail Result
 
 界面右侧会显示每次提交请求的扫描结果情况，可以通过此处了解到阻断是发生在请求还是响应阶段，是被哪些以及哪种类型的Scanner阻断的。Direction表示该Scanner对Request的扫描还是Response或两者都进行的扫描，例如**China-phone-number** 这个Scanner就是双向都扫描，**Sensitive-information-of-raw-materials**是仅对Response的扫描。Failed表示内容经过扫描后内容不合法 , Passed表示请求内容合法。Custom标记表示该Scanner是自定义Scanner，System表示是系统内置Scanner。
+
 
 #### 1.6 直连模型
 
@@ -50,7 +77,7 @@
 
 #### >注意问题
 
-1. 当前F5 Guardrail的SaaS侧，禁用了Prompt injection检测（保留了system prompt injection检测）的scanner，这是因为在ReAct Agent下模式下（即`Enterprise KB Skill ON`），Agent会在Prompt里插入大量json内容以及合法的指示性提示词。导致SaaS系统会误报。该问题已经提交给CalypsoAI Team。因此如果你输入一些非系统类prompt injection时候，可能会被放过，请注意鉴别。
+1. 在 **Enterprise KB Skill ON** 场景下，若已在 SaaS **关闭** Prompt Injection scanner（与本应用约定一致），则部分非系统类 prompt injection 测试可能被放过；若 Skill OFF 且 SaaS 上该 scanner 为开启，行为会不同。请以顶部漂移告警与 SaaS 控制台实际配置为准。ReAct 模式下 Agent 会在 Prompt 中插入 JSON 与指令性文本，易触发误报，故约定 Skill ON 时关闭该 scanner。相关问题已反馈 CalypsoAI Team。
    
 2. 在启用`Enterprise KB Skill ON`时，Agent指令里插入的JSON格式与指示性信息有时会干扰模型对核心用户输入语义的理解，进而导致一些自定义Scanner处理效果不佳，此时可考虑在这类自定义Scanner中增加`让忽略相关JSON格式与其内部指令`的说明。
 

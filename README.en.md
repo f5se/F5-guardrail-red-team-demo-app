@@ -64,12 +64,15 @@ Variables in `.env_example`:
 | `CALYPSOAI_URL` | F5 AI Security platform URL | `https://www.us1.calypsoai.app/` |
 | `CALYPSOAI_TOKEN` | API token (required) | `Your-calypsoai-token` |
 | `CALYPSOAI_PROJECT_ID` | Project ID (Project mode) | `Your-calypsoai-project-id` |
+| `PROMPT_INJECTION_SCANNER_ID` | UUID of the SaaS Prompt Injection scanner tied to Enterprise KB Skill (drift banner + manual sync) | `Your-prompt-injection-scanner-uuid` |
+| `PROMPT_INJECTION_DEFAULT_VERSION` | Scanner version label on SaaS (sent with PATCH; must match console) | `2026-02` |
 | `DEFAULT_PROVIDER` | Provider name configured in Calypso; server default for main Chat/Agent/Inline mode; can be overridden by frontend selection | `Your-calypsoai-provider` |
 | `PROVIDER_OPTIONS` | Comma-separated list of providers shown in the Settings “LLM Provider” dropdown; when set, users can choose which provider to use in the UI | `jinglin-google-gemini-133540,deepseek-JingLin-real-charge` |
 | `SLIDING_WINDOW_MAX_TURNS` | Sliding window turn count for multi-turn chat | `8` |
 | `SLIDING_WINDOW_MAX_CHARS` | Max characters in sliding window | `8000` |
 | `CONVERSATION_TTL_SECONDS` | Conversation turn TTL in seconds | `120` |
 | `GUARDRAIL_DEBUG` | When set to `1`/`true`/`yes`, prints F5 Guardrail request checkpoints to the terminal for debugging timeouts or 502 (optional) | `1` |
+| `GUARDRAIL_TIMEOUT_SECONDS` | Guardrail request timeout in seconds; returns 504 on timeout, default `5` (optional) | `5` |
 | `HF_HOME` | Hugging Face model cache directory (optional) | `Your-hugging-face-home-directory` |
 | `HF_PROXY` | Proxy for HF model download only; not used for CalypsoAI (optional) | `http://127.0.0.1:8010` |
 | `HF_TOKEN` | Hugging Face token (optional; recommended for faster downloads and to avoid rate limits) | `Your-hugging-face-token` |
@@ -83,6 +86,8 @@ Variables in `.env_example`:
 **Note:** Configure the corresponding Project, Connection/Provider, and Project API token in Calypso (F5 Guardrail) first. For features like enterprise-sensitive data protection, configure Custom scanners in the F5 Guardrail system in advance.
 Security note: Keys shown in README and `.env_example` are placeholders only.
 In **direct chat** mode, the **Enterprise KB Skill** toggle matches the main Chat: when ON, the direct LLM runs the same ReAct-style tool loop as the Guardrail Agent path (e.g. enterprise KB); when OFF, a single direct completion is used.
+
+**Enterprise KB Skill vs SaaS scanner:** The UI treats the **SaaS** Prompt Injection scanner flag on the current Project as the source of truth for *display*. Convention: Skill **ON** → scanner should be **disabled** on SaaS (fewer ReAct false positives); Skill **OFF** → scanner should be **enabled**. Toggling Skill **does not** auto-write SaaS. On drift, a top banner explains likely causes (manual SaaS change, another user clicked “sync SaaS to local”, multiple users sharing one `CALYPSOAI_PROJECT_ID`, etc.) and offers **Align local to SaaS** or **Sync SaaS to local (confirm)**. Read-only checks run after `loadSettings` and every **120s**. Set `PROMPT_INJECTION_SCANNER_ID` (and recommended `PROMPT_INJECTION_DEFAULT_VERSION`) in `.env`.
 
 ### User Authentication Setup (Before First Run)
 

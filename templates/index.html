@@ -12,6 +12,23 @@
     <span class="topbarTitle">F5 AI Guardrail and Red Team Lab</span>
   </div>
 
+  <div id="scannerDriftBanner" class="scannerDriftBanner" role="alert" hidden>
+    <div class="scannerDriftBanner__inner">
+      <div class="scannerDriftBanner__main">
+        <strong id="scannerDriftBannerTitle" class="scannerDriftBanner__title"></strong>
+        <p id="scannerDriftBannerBody" class="scannerDriftBanner__body"></p>
+      </div>
+      <div id="scannerDriftBannerActionsDrift" class="scannerDriftBanner__actions" hidden>
+        <button type="button" id="btnAlignLocalToSaas" class="scannerDriftBanner__btn scannerDriftBanner__btn--primary">按 SaaS 对齐本地</button>
+        <button type="button" id="btnPushSaasToLocal" class="scannerDriftBanner__btn">将 SaaS 同步为本地（需确认）</button>
+        <button type="button" id="btnScannerDriftSnooze" class="scannerDriftBanner__btn scannerDriftBanner__btn--link">暂不提示 10 分钟</button>
+      </div>
+      <div id="scannerDriftBannerActionsError" class="scannerDriftBanner__actions" hidden>
+        <button type="button" id="btnScannerDriftRetry" class="scannerDriftBanner__btn scannerDriftBanner__btn--primary">重试检测</button>
+      </div>
+    </div>
+  </div>
+
   <div class="wrap">
     <div class="crumbRow">
       <div class="crumb">Home &nbsp;›&nbsp; Assistant</div>

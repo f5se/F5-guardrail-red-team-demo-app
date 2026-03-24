@@ -1,3 +1,4 @@
+import asyncio
 import os
 import time
 import json
@@ -51,6 +52,8 @@ CALYPSOAI_URL = os.getenv("CALYPSOAI_URL")
 CALYPSOAI_TOKEN = os.getenv("CALYPSOAI_TOKEN")
 CALYPSOAI_PROJECT_ID = os.getenv("CALYPSOAI_PROJECT_ID")  # your requirement
 DEFAULT_PROVIDER = os.getenv("DEFAULT_PROVIDER")
+PROMPT_INJECTION_SCANNER_ID = (os.getenv("PROMPT_INJECTION_SCANNER_ID") or "").strip()
+PROMPT_INJECTION_DEFAULT_VERSION = (os.getenv("PROMPT_INJECTION_DEFAULT_VERSION") or "").strip()
 # Hugging Face：用于模型下载，可提升速率并避免匿名 API 限制。在 .env 中设置 HF_TOKEN=hf_xxx
 HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE_HUB_TOKEN")
 
@@ -58,6 +61,7 @@ SLIDING_WINDOW_MAX_TURNS = int(os.getenv("SLIDING_WINDOW_MAX_TURNS", "8"))
 SLIDING_WINDOW_MAX_CHARS = int(os.getenv("SLIDING_WINDOW_MAX_CHARS", "2000"))
 
 CONVERSATION_TTL_SECONDS = int(os.getenv("CONVERSATION_TTL_SECONDS", "120"))  # 2 minutes
+GUARDRAIL_TIMEOUT_SECONDS = float(os.getenv("GUARDRAIL_TIMEOUT_SECONDS", "5"))
 
 # OOB 旁路模式：Proxy(NGINX) 地址与 LLM Provider API Key
 OOB_PROXY_URL = (os.getenv("OOB_PROXY_URL") or "").rstrip("/")
@@ -422,6 +426,7 @@ DEFAULT_SETTINGS = {
     "f5_guardrail_only": False,
     "debug_guardrail_raw_enabled": False,
     "guardrail_verbose": False,
+    "guardrail_timeout_seconds": GUARDRAIL_TIMEOUT_SECONDS,
     "kb_dir": "./enterprise_kb",
     "agent_max_steps": 4,
     "agent_debug_enabled": False,
@@ -794,6 +799,7 @@ def get_runtime_settings(raw: dict) -> dict:
         "f5_guardrail_only": to_bool(raw.get("f5_guardrail_only", False)),
         "debug_guardrail_raw_enabled": to_bool(raw.get("debug_guardrail_raw_enabled", False)),
         "guardrail_verbose": to_bool(raw.get("guardrail_verbose", False)),
+        "guardrail_timeout_seconds": to_float(raw.get("guardrail_timeout_seconds", GUARDRAIL_TIMEOUT_SECONDS), GUARDRAIL_TIMEOUT_SECONDS, 1.0, 120.0),
         "kb_dir": str(raw.get("kb_dir") or "./enterprise_kb"),
         "agent_max_steps": to_int(raw.get("agent_max_steps", 4), 4, 1, 8),
         "agent_debug_enabled": to_bool(raw.get("agent_debug_enabled", False)),
@@ -854,14 +860,23 @@ def _call_f5_guardrail_sync(prompt_to_send: str, send_kwargs: dict):
     return out
 
 
-async def call_f5_guardrail(prompt_to_send: str, send_kwargs: dict) -> Tuple[str, dict]:
+async def call_f5_guardrail(prompt_to_send: str, send_kwargs: dict, *, timeout_seconds: float) -> Tuple[str, dict]:
     _guardrail_debug("call_f5_guardrail: 即将发起请求（进入线程池前）")
     try:
         # send_kwargs 会被 _call_f5_guardrail_sync  pop 掉 verbose，复制一份避免影响调用方
         kwargs = dict(send_kwargs)
-        result = await run_in_threadpool(_call_f5_guardrail_sync, prompt_to_send, kwargs)
+        result = await asyncio.wait_for(
+            run_in_threadpool(_call_f5_guardrail_sync, prompt_to_send, kwargs),
+            timeout=timeout_seconds,
+        )
         _guardrail_debug("call_f5_guardrail: 已收到服务端完整响应")
         data = result if isinstance(result, dict) else result.model_dump()
+    except TimeoutError:
+        _guardrail_debug(f"call_f5_guardrail: 请求超时 timeout_seconds={timeout_seconds}")
+        raise HTTPException(
+            status_code=504,
+            detail=f"Guardrail request timed out after {timeout_seconds:.1f}s",
+        )
     except Exception as e:
         _guardrail_debug(
             f"call_f5_guardrail: 请求失败（已发出则说明未收到响应或连接被关闭） "
@@ -931,7 +946,9 @@ async def run_agent_skill_loop(user_input: str, send_kwargs: dict, settings: dic
             step=step,
             max_steps=max_steps,
         )
-        reply, data = await call_f5_guardrail(prompt, send_kwargs)
+        reply, data = await call_f5_guardrail(
+            prompt, send_kwargs, timeout_seconds=settings["guardrail_timeout_seconds"]
+        )
         last_guardrail_data = data
         outcome = ((data.get("result") or {}).get("outcome") or "").lower()
         agent_debug_log(settings, f"skill_loop step={step} outcome={outcome or 'unknown'}")
@@ -1182,7 +1199,9 @@ async def api_chat(request: Request, payload: ChatIn):
         guardrail_raw = loop_result.get("guardrail")
     else:
         agent_debug_log(settings, "api_chat mode=plain_guardrail")
-        reply, guardrail_raw = await call_f5_guardrail(prompt_to_send, send_kwargs)
+        reply, guardrail_raw = await call_f5_guardrail(
+            prompt_to_send, send_kwargs, timeout_seconds=settings["guardrail_timeout_seconds"]
+        )
 
     # Convert outcome to reply text
     if payload.multi_turn:
@@ -1364,6 +1383,10 @@ class DirectChatIn(BaseModel):
     agent_skill_enabled: Optional[bool] = None  # 与主 Chat 一致：会话临时覆盖 Enterprise KB Skill
 
 
+class AgentSkillSyncIn(BaseModel):
+    enabled: bool
+
+
 def _extract_last_user_text_from_messages(messages: List[dict]) -> str:
     """取 messages 中最后一条 user 的文本，供直连 Agent 模式使用。"""
     for m in reversed(messages or []):
@@ -1408,6 +1431,86 @@ def _get_direct_provider_config() -> Tuple[str, str, str]:
         except Exception:
             pass
     return base_url, api_key, model
+
+
+def _sync_prompt_injection_scanner_for_agent_skill(agent_skill_enabled: bool) -> dict:
+    """Sync SaaS scanner state with Enterprise KB Skill toggle.
+
+    Rule:
+    - Enterprise KB Skill ON  -> disable scanner
+    - Enterprise KB Skill OFF -> enable scanner
+    """
+    if not CALYPSOAI_PROJECT_ID:
+        raise HTTPException(status_code=500, detail="CALYPSOAI_PROJECT_ID is not set")
+    if not PROMPT_INJECTION_SCANNER_ID:
+        raise HTTPException(status_code=500, detail="PROMPT_INJECTION_SCANNER_ID is not set")
+
+    scanner_enabled = not bool(agent_skill_enabled)
+    scanner_cfg = {"id": PROMPT_INJECTION_SCANNER_ID, "enabled": scanner_enabled}
+    if PROMPT_INJECTION_DEFAULT_VERSION:
+        scanner_cfg["version"] = PROMPT_INJECTION_DEFAULT_VERSION
+
+    body = {"config": {"scanners": [scanner_cfg]}}
+    try:
+        cai.client.projects.patchProject(project=CALYPSOAI_PROJECT_ID, body=body)
+        cfg_map = cai.projects.getScanners(CALYPSOAI_PROJECT_ID).configs or {}
+        cfg = cfg_map.get(PROMPT_INJECTION_SCANNER_ID)
+        verified_enabled = None if cfg is None else getattr(cfg, "enabled", None)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to sync SaaS scanner: {e}")
+
+    return {
+        "project_id": CALYPSOAI_PROJECT_ID,
+        "scanner_id": PROMPT_INJECTION_SCANNER_ID,
+        "scanner_enabled_target": scanner_enabled,
+        "scanner_enabled_verified": verified_enabled,
+        "version": PROMPT_INJECTION_DEFAULT_VERSION or None,
+    }
+
+
+def _scanner_id_in_mapping(sid: str, mapping: Optional[dict]) -> bool:
+    if not isinstance(mapping, dict) or not sid:
+        return False
+    if sid in mapping:
+        return True
+    return any(str(k) == sid for k in mapping)
+
+
+def _read_prompt_injection_scanner_saas_state() -> Tuple[Optional[bool], Optional[str]]:
+    """Read current Prompt Injection scanner enabled flag from SaaS project (read-only).
+
+    Calypso often **omits** a scanner from `configs` (and from `scanners`) when it is disabled
+    for the project — absence means *not active*, not a read error.
+    """
+    if not CALYPSOAI_PROJECT_ID or not PROMPT_INJECTION_SCANNER_ID:
+        return None, "missing_project_or_scanner_env"
+    try:
+        ps = cai.projects.getScanners(CALYPSOAI_PROJECT_ID)
+        cfg_map = ps.configs or {}
+        sid = PROMPT_INJECTION_SCANNER_ID
+        cfg = cfg_map.get(sid)
+        if cfg is None:
+            for k, v in cfg_map.items():
+                if str(k) == sid:
+                    cfg = v
+                    break
+        if cfg is not None:
+            enabled = getattr(cfg, "enabled", None)
+            if enabled is None:
+                return None, "scanner_enabled_unknown"
+            return bool(enabled), None
+
+        # Disabled scanners are often dropped from configs; `scanners` lists project-active guardrails.
+        if _scanner_id_in_mapping(sid, ps.scanners):
+            return True, None
+        if _scanner_id_in_mapping(sid, ps.forcedScanners):
+            return True, None
+
+        return False, None
+    except Exception as e:
+        return None, f"read_failed: {e}"
 
 
 def _extract_openai_reply(data: dict) -> str:
@@ -1559,7 +1662,9 @@ async def api_guardrail_scan(request: Request, payload: GuardrailScanIn):
     settings = get_runtime_settings(raw_settings)
     effective_provider = (payload.provider or "").strip() or (raw_settings.get("default_provider") or "").strip() or DEFAULT_PROVIDER
     send_kwargs = build_send_kwargs(verbose=settings.get("guardrail_verbose", False), provider_override=effective_provider or None)
-    reply, guardrail_raw = await call_f5_guardrail(prompt, send_kwargs)
+    reply, guardrail_raw = await call_f5_guardrail(
+        prompt, send_kwargs, timeout_seconds=settings["guardrail_timeout_seconds"]
+    )
     guardrail_payload = _build_guardrail_payload(guardrail_raw)
     return JSONResponse({
         "reply": reply,
@@ -1734,7 +1839,7 @@ async def get_settings(request: Request):
 @app.post("/api/settings")
 async def post_settings(request: Request, payload: dict = Body(default=None)):
     username = require_user(request)
-    clean_payload = payload if isinstance(payload, dict) else {}
+    clean_payload = dict(payload) if isinstance(payload, dict) else {}
     admin_only_keys = {"kb_dir", "agent_max_steps"}
     if username != "admin":
         forbidden = [k for k in clean_payload.keys() if k in admin_only_keys]
@@ -1762,6 +1867,41 @@ async def post_settings(request: Request, payload: dict = Body(default=None)):
         structured["global_settings"][k] = runtime[k]
     save_structured_settings(structured)
     return {"status": "ok", "settings": runtime}
+
+
+@app.get("/api/prompt-injection-sync-status")
+async def get_prompt_injection_sync_status(request: Request):
+    """Read-only: SaaS project scanner state for drift detection (SaaS is source of truth for display)."""
+    require_user(request)
+    if not CALYPSOAI_PROJECT_ID or not PROMPT_INJECTION_SCANNER_ID:
+        return {
+            "ok": False,
+            "error_code": "missing_env",
+            "detail": "Set CALYPSOAI_PROJECT_ID and PROMPT_INJECTION_SCANNER_ID in .env",
+            "project_id": CALYPSOAI_PROJECT_ID,
+            "scanner_id": PROMPT_INJECTION_SCANNER_ID or None,
+            "saas_scanner_enabled": None,
+            "suggested_local_agent_skill": None,
+        }
+    enabled, err = _read_prompt_injection_scanner_saas_state()
+    suggested = None if enabled is None else (not enabled)
+    return {
+        "ok": err is None and enabled is not None,
+        "error_code": err,
+        "detail": None if err is None else str(err),
+        "project_id": CALYPSOAI_PROJECT_ID,
+        "scanner_id": PROMPT_INJECTION_SCANNER_ID,
+        "saas_scanner_enabled": enabled,
+        "suggested_local_agent_skill": suggested,
+        "version": PROMPT_INJECTION_DEFAULT_VERSION or None,
+    }
+
+
+@app.post("/api/agent-skill-sync")
+async def post_agent_skill_sync(request: Request, payload: AgentSkillSyncIn):
+    require_user(request)
+    sync_result = _sync_prompt_injection_scanner_for_agent_skill(payload.enabled)
+    return {"status": "ok", "scanner_sync": sync_result}
 
 
 @app.get("/api/user-activity")
