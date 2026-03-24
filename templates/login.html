@@ -87,6 +87,11 @@
     .mascot.away:nth-child(2) .head { transform: rotate(30deg) translateX(5px) translateY(2px); }
     .mascot.away:nth-child(3) .head { transform: rotate(-33deg) translateX(-6px) translateY(1px); }
     .mascot.away:nth-child(4) .head { transform: rotate(27deg) translateX(5px) translateY(3px); }
+    .mascot.peek .head { transform: rotate(8deg) translateY(3px) scaleY(.97); }
+    .mascot.peek .body { transform: translateY(1px); }
+    .mascot.peek:nth-child(2) .head { transform: rotate(6deg) translateY(4px) scaleY(.97); }
+    .mascot.peek:nth-child(3) .head { transform: rotate(10deg) translateY(3px) scaleY(.96); }
+    .mascot.peek:nth-child(4) .head { transform: rotate(7deg) translateY(4px) scaleY(.97); }
     .row-password { position: relative; }
     .row-password input { padding-right: 44px; }
     .toggle-password {
@@ -230,15 +235,18 @@
     function updateGaze() {
       if (isPasswordShown) {
         mascots.forEach(m => m.classList.add("away"));
+        mascots.forEach(m => m.classList.remove("peek"));
         pointEyesToOwnHeadTop(2.7);
         return;
       }
       mascots.forEach(m => m.classList.remove("away"));
       if (activePeekTarget) {
+        mascots.forEach(m => m.classList.add("peek"));
         const c = getInputCenter(activePeekTarget);
         pointEyesAt(c.x, c.y, 2.8);
         return;
       }
+      mascots.forEach(m => m.classList.remove("peek"));
       pointEyesAt(mousePos.x, mousePos.y, 2.3);
     }
 
