@@ -202,6 +202,23 @@
       });
     }
 
+    function pointEyesToOwnHeadTop(spread = 2.7) {
+      pupils.forEach((pupil, idx) => {
+        const eyeRect = pupil.parentElement.getBoundingClientRect();
+        const eyeCenterX = eyeRect.left + eyeRect.width / 2;
+        const eyeCenterY = eyeRect.top + eyeRect.height / 2;
+        const targetX = eyeCenterX;
+        const targetY = eyeCenterY - 24;
+        const dx = targetX - eyeCenterX;
+        const dy = targetY - eyeCenterY;
+        const mag = Math.hypot(dx, dy) || 1;
+        const normalizedX = (dx / mag) * spread;
+        const normalizedY = (dy / mag) * spread;
+        const wobble = (idx % 2 === 0 ? -0.2 : 0.2);
+        pupil.style.transform = `translate(calc(-50% + ${normalizedX + wobble}px), calc(-50% + ${normalizedY}px))`;
+      });
+    }
+
     function getInputCenter(inputEl) {
       const rect = inputEl.getBoundingClientRect();
       return {
@@ -213,7 +230,7 @@
     function updateGaze() {
       if (isPasswordShown) {
         mascots.forEach(m => m.classList.add("away"));
-        pointEyesAt(window.innerWidth + 160, -120, 2.7);
+        pointEyesToOwnHeadTop(2.7);
         return;
       }
       mascots.forEach(m => m.classList.remove("away"));
