@@ -673,7 +673,8 @@ const scannerDriftBannerBodyEl = document.getElementById("scannerDriftBannerBody
 const scannerDriftActionsDriftEl = document.getElementById("scannerDriftBannerActionsDrift");
 const scannerDriftActionsErrorEl = document.getElementById("scannerDriftBannerActionsError");
 const SCANNER_DRIFT_SNOOZE_KEY = "scannerDriftSnoozeUntil";
-const SCANNER_DRIFT_POLL_MS = 120000;
+/** 由 /api/settings 的 scanner_drift_poll_seconds 驱动；默认 300s 直至首次加载设置 */
+let scannerDriftPollTimerId = null;
 /** 从其它菜单切回 AI Chat 时触发一致性检测：防抖 + 节流，避免疯狂点菜单刷 API */
 const CHAT_VIEW_DRIFT_DEBOUNCE_MS = 400;
 const CHAT_VIEW_DRIFT_THROTTLE_MS = 45000;
@@ -745,6 +746,19 @@ async function refreshScannerDriftBanner(){
   scannerDriftActionsDriftEl.hidden = false;
   scannerDriftActionsErrorEl.hidden = true;
   scannerDriftBannerEl.hidden = false;
+}
+
+function applyScannerDriftPollInterval(seconds){
+  const sec = Number(seconds);
+  const s = Number.isFinite(sec) && sec > 0 ? sec : 300;
+  const ms = Math.max(30000, Math.min(s * 1000, 3600000));
+  if (scannerDriftPollTimerId) {
+    clearInterval(scannerDriftPollTimerId);
+    scannerDriftPollTimerId = null;
+  }
+  scannerDriftPollTimerId = setInterval(() => {
+    void refreshScannerDriftBanner();
+  }, ms);
 }
 
 function scheduleScannerDriftCheckOnEnterChat(){
@@ -1568,6 +1582,11 @@ async function loadSettings(){
       }
     }
     currentBackendProviderName = (s.effective_provider || s.default_provider || "").trim();
+    if (typeof s.scanner_drift_poll_seconds === "number") {
+      applyScannerDriftPollInterval(s.scanner_drift_poll_seconds);
+    } else {
+      applyScannerDriftPollInterval(300);
+    }
     if (activeView === "CHAT") setChatSubtitle();
     document.getElementById("agentMaxStepsSlider").value = s.agent_max_steps || 4;
     document.getElementById("agentMaxStepsVal").textContent = s.agent_max_steps || 4;
@@ -1746,16 +1765,13 @@ document.getElementById("btnScannerDriftRetry")?.addEventListener("click", () =>
   void refreshScannerDriftBanner();
 });
 
-setInterval(() => {
-  void refreshScannerDriftBanner();
-}, SCANNER_DRIFT_POLL_MS);
-
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     void refreshScannerDriftBanner();
   }
 });
 
+applyScannerDriftPollInterval(300);
 loadSettings();
 
 // ======================

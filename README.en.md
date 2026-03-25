@@ -66,6 +66,7 @@ Variables in `.env_example`:
 | `CALYPSOAI_PROJECT_ID` | Project ID (Project mode) | `Your-calypsoai-project-id` |
 | `PROMPT_INJECTION_SCANNER_ID` | UUID of the SaaS Prompt Injection scanner tied to Enterprise KB Skill (drift banner + manual sync) | `Your-prompt-injection-scanner-uuid` |
 | `PROMPT_INJECTION_DEFAULT_VERSION` | Scanner version label on SaaS (sent with PATCH; must match console) | `2026-02` |
+| `SCANNER_DRIFT_POLL_SECONDS` | Interval in seconds for read-only drift checks in the UI (default `300`, clamped 30–3600) | `300` |
 | `DEFAULT_PROVIDER` | Provider name configured in Calypso; server default for main Chat/Agent/Inline mode; can be overridden by frontend selection | `Your-calypsoai-provider` |
 | `PROVIDER_OPTIONS` | Comma-separated list of providers shown in the Settings “LLM Provider” dropdown; when set, users can choose which provider to use in the UI | `jinglin-google-gemini-133540,deepseek-JingLin-real-charge` |
 | `SLIDING_WINDOW_MAX_TURNS` | Sliding window turn count for multi-turn chat | `8` |
@@ -87,7 +88,7 @@ Variables in `.env_example`:
 Security note: Keys shown in README and `.env_example` are placeholders only.
 In **direct chat** mode, the **Enterprise KB Skill** toggle matches the main Chat: when ON, the direct LLM runs the same ReAct-style tool loop as the Guardrail Agent path (e.g. enterprise KB); when OFF, a single direct completion is used.
 
-**Enterprise KB Skill vs SaaS scanner:** The UI treats the **SaaS** Prompt Injection scanner flag on the current Project as the source of truth for *display*. Convention: Skill **ON** → scanner should be **disabled** on SaaS (fewer ReAct false positives); Skill **OFF** → scanner should be **enabled**. Toggling Skill **does not** auto-write SaaS. On drift, a top banner explains likely causes (manual SaaS change, another user clicked “sync SaaS to local”, multiple users sharing one `CALYPSOAI_PROJECT_ID`, etc.) and offers **Align local to SaaS** or **Sync SaaS to local (confirm)**. Read-only checks run after `loadSettings` and every **120s**. Set `PROMPT_INJECTION_SCANNER_ID` (and recommended `PROMPT_INJECTION_DEFAULT_VERSION`) in `.env`.
+**Enterprise KB Skill vs SaaS scanner:** The UI treats the **SaaS** Prompt Injection scanner flag on the current Project as the source of truth for *display*. Convention: Skill **ON** → scanner should be **disabled** on SaaS (fewer ReAct false positives); Skill **OFF** → scanner should be **enabled**. Toggling Skill **does not** auto-write SaaS. On drift, a top banner explains likely causes (manual SaaS change, another user clicked “sync SaaS to local”, multiple users sharing one `CALYPSOAI_PROJECT_ID`, etc.) and offers **Align local to SaaS** or **Sync SaaS to local (confirm)**. Read-only checks run after `loadSettings` and on an interval from `SCANNER_DRIFT_POLL_SECONDS` in `.env` (default **300**s, clamped 30–3600). Set `PROMPT_INJECTION_SCANNER_ID` (and recommended `PROMPT_INJECTION_DEFAULT_VERSION`) in `.env`.
 
 ### User Authentication Setup (Before First Run)
 

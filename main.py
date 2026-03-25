@@ -63,6 +63,18 @@ SLIDING_WINDOW_MAX_CHARS = int(os.getenv("SLIDING_WINDOW_MAX_CHARS", "2000"))
 CONVERSATION_TTL_SECONDS = int(os.getenv("CONVERSATION_TTL_SECONDS", "120"))  # 2 minutes
 GUARDRAIL_TIMEOUT_SECONDS = float(os.getenv("GUARDRAIL_TIMEOUT_SECONDS", "5"))
 
+
+def _env_int_bounded(name: str, default: int, lo: int, hi: int) -> int:
+    try:
+        v = int(str(os.getenv(name, str(default))).strip())
+    except ValueError:
+        v = default
+    return max(lo, min(v, hi))
+
+
+# Enterprise KB / SaaS scanner 漂移告警：前端轮询间隔（秒），默认 5 分钟
+SCANNER_DRIFT_POLL_SECONDS = _env_int_bounded("SCANNER_DRIFT_POLL_SECONDS", 300, 30, 3600)
+
 # OOB 旁路模式：Proxy(NGINX) 地址与 LLM Provider API Key
 OOB_PROXY_URL = (os.getenv("OOB_PROXY_URL") or "").rstrip("/")
 LLM_PROVIDER_KEY = os.getenv("LLM_PROVIDER_KEY") or ""
@@ -1834,6 +1846,7 @@ async def get_settings(request: Request):
     out["direct_available"] = direct_ready
     if not direct_ready:
         out["direct_unavailable_reason"] = "未配置 LLM_PROVIDER_URL / LLM_PROVIDER_KEY_Direct / LLM_PROVIDER_MODEL"
+    out["scanner_drift_poll_seconds"] = SCANNER_DRIFT_POLL_SECONDS
     return out
 
 @app.post("/api/settings")

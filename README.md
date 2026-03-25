@@ -54,6 +54,7 @@ cp .env_example .env
 | `CALYPSOAI_PROJECT_ID` | 项目 ID（Project 模式） | `Your-calypsoai-project-id` |
 | `PROMPT_INJECTION_SCANNER_ID` | 与 Enterprise KB Skill 联动的 SaaS 端 Prompt Injection scanner 的 UUID（用于顶部漂移告警与手动同步） | `Your-prompt-injection-scanner-uuid` |
 | `PROMPT_INJECTION_DEFAULT_VERSION` | 上述 scanner 在 SaaS 上的版本标签（PATCH 配置时携带，与控制台一致） | `2026-02` |
+| `SCANNER_DRIFT_POLL_SECONDS` | 前端只读漂移检测轮询间隔（秒），默认 `300`，有效范围 30～3600 | `300` |
 | `DEFAULT_PROVIDER` | Calypso 中配置的 Provider 名称，作为服务器默认值；主 Chat/Agent/Inline 模式下可被前端选择覆盖 | `Your-calypsoai-provider` |
 | `PROVIDER_OPTIONS` | 前端设置页「LLM Provider」下拉的可选列表，逗号分隔；配置后用户可在界面选择使用的 Provider | `jinglin-google-gemini-133540,deepseek-JingLin-real-charge` |
 | `SLIDING_WINDOW_MAX_TURNS` | 多轮对话滑动窗口轮数 | `8` |
@@ -75,7 +76,7 @@ cp .env_example .env
 提示：README 与 `.env_example` 中的 Key 都是示例占位符。
 直连聊天模式下，**Enterprise KB Skill** 开关与主 Chat 一致：开启时由直连 LLM 执行与 Guardrail Agent 路径相同的 ReAct 工具推理（调用企业 KB 等）；关闭时为单次直连对话。
 
-**Enterprise KB Skill 与 SaaS scanner 一致性：** 界面以 **SaaS 端** 当前 Project 中配置的 Prompt Injection scanner 状态为「显示真相」。约定：Skill **ON** 时应在 SaaS **关闭**该 scanner（减轻 ReAct 误报）；Skill **OFF** 时应在 SaaS **开启**该 scanner。切换 Skill **不会**自动改写 SaaS；若检测到与 SaaS 不一致，顶部会出现告警条，说明可能原因（人工改 SaaS、其他用户点击「将 SaaS 同步为本地」、多用户共享同一 `CALYPSOAI_PROJECT_ID` 等），并可「按 SaaS 对齐本地」或经确认后「将 SaaS 同步为本地」。系统在 `loadSettings` 后及每 **120 秒** 只读轮询对比。需在 `.env` 配置 `PROMPT_INJECTION_SCANNER_ID`（及建议配置 `PROMPT_INJECTION_DEFAULT_VERSION`）。
+**Enterprise KB Skill 与 SaaS scanner 一致性：** 界面以 **SaaS 端** 当前 Project 中配置的 Prompt Injection scanner 状态为「显示真相」。约定：Skill **ON** 时应在 SaaS **关闭**该 scanner（减轻 ReAct 误报）；Skill **OFF** 时应在 SaaS **开启**该 scanner。切换 Skill **不会**自动改写 SaaS；若检测到与 SaaS 不一致，顶部会出现告警条，说明可能原因（人工改 SaaS、其他用户点击「将 SaaS 同步为本地」、多用户共享同一 `CALYPSOAI_PROJECT_ID` 等），并可「按 SaaS 对齐本地」或经确认后「将 SaaS 同步为本地」。系统在 `loadSettings` 后及按 `.env` 中 `SCANNER_DRIFT_POLL_SECONDS`（默认 **300** 秒，范围 30～3600）只读轮询对比。需在 `.env` 配置 `PROMPT_INJECTION_SCANNER_ID`（及建议配置 `PROMPT_INJECTION_DEFAULT_VERSION`）。
 
 ### 用户验证配置（首次启用前）
 
