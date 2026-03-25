@@ -164,11 +164,12 @@ function renderAttackPresets() {
     headerEl.type = "button";
     headerEl.className = "attackCategoryHeader";
     headerEl.setAttribute("data-category", category);
-    headerEl.setAttribute("aria-expanded", "true");
-    headerEl.innerHTML = `<span class="attackCategoryName">${escapeHtml(category)}</span><span class="attackCategoryIcon">▼</span>`;
+    headerEl.setAttribute("aria-expanded", "false");
+    headerEl.innerHTML = `<span class="attackCategoryName">${escapeHtml(category)}</span><span class="attackCategoryIcon">▶</span>`;
 
     const listEl = document.createElement("div");
     listEl.className = "attackList";
+    listEl.style.display = "none";
 
     items.forEach(preset => {
       const itemEl = document.createElement("button");
