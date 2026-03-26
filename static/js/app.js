@@ -4,6 +4,7 @@ const btnSend = document.getElementById("btnSend");
 const btnClear = document.getElementById("btnClear");
 const btnLogout = document.getElementById("btnLogout");
 const chatTitleEl = document.getElementById("chatTitle");
+const breadcrumbEl = document.getElementById("breadcrumb");
 const modeBadgeEl = document.getElementById("modeBadge");
 const kbSkillBadgeEl = document.getElementById("kbSkillBadge");
 const kbSkillGeminiWarningEl = document.getElementById("kbSkillGeminiWarning");
@@ -28,6 +29,21 @@ let attackTooltipEl = null;
 let activeView = "CHAT";
 let currentBackendProviderName = "";
 let directModeAvailable = false;
+
+function getViewBreadcrumbLabel(view) {
+  if (view === "SETTINGS") return "Settings";
+  if (view === "REDTEAM") return "Red Team";
+  if (view === "GUARDRAIL_INTEGRATION") return "Guardrail Integration";
+  if (view === "TEST_GUIDE") return "Test Guide";
+  if (view === "COMPLIANCE_REPORT") return "Compliance Report";
+  if (view === "USER_ACTIVITY") return "User Activity Analytics";
+  return "Assistant";
+}
+
+function updateBreadcrumb(view) {
+  if (!breadcrumbEl) return;
+  breadcrumbEl.innerHTML = `Home &nbsp;›&nbsp; ${getViewBreadcrumbLabel(view)}`;
+}
 
 async function authFetch(url, options) {
   const resp = await fetch(url, options);
@@ -1171,6 +1187,7 @@ function setActiveView(view){
     view = "CHAT";
   }
   activeView = view;
+  updateBreadcrumb(view);
   navButtons.forEach(b => b.classList.toggle("active", b.dataset.view === view));
 
   chatView.style.display = "none";
