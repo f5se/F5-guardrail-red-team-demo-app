@@ -737,11 +737,12 @@ async function refreshScannerDriftBanner(){
   const suggestWord = suggested ? "开启（ON）" : "关闭（OFF）";
   scannerDriftBannerTitleEl.textContent = "Enterprise KB Skill 与 SaaS 端 scanner 不一致";
   scannerDriftBannerBodyEl.textContent = [
-    "以 SaaS 配置为准：当前 Project 下 Prompt Injection scanner 为 " + saasWord + "；您本地的 Enterprise KB Skill（含徽章会话开关）为 " + localWord + "。",
-    "约定：Enterprise KB Skill ON 时应在 SaaS 关闭该 scanner（减少 ReAct 误报）；Skill OFF 时应在 SaaS 开启该 scanner。",
-    "因此建议将 Enterprise KB Skill 设为 " + suggestWord + "。",
-    "可能原因：在 Calypso 控制台人工修改、其他用户点击「将 SaaS 同步为本地」、或多名用户共享同一 CALYPSOAI_PROJECT_ID（最后一次写入 SaaS 者生效）。",
-    "您可「按 SaaS 对齐本地」仅改本应用；或「将 SaaS 同步为本地」在确认后把 SaaS 改成与当前本地一致（影响所有使用该 Project 的会话）。"
+    "注意：当前SaaS端Prompt Injection scanner 为 " + saasWord + "状态；而本地的 Enterprise KB Skill为 " + localWord + "。",
+    "期望的是：（1）Enterprise KB Skill ON 时应在 SaaS 关闭该 scanner（以减少在ReAct Agent模式下的误报）；（2）Skill OFF 时应在 SaaS 开启该 scanner（以更好的测试更多Injection类问题）。",
+    "根据以SaaS端设定为优先原则，建议将 Enterprise KB Skill 设为 " + suggestWord + "。",
+    "但你完全可以根据自己的实际需求来决定是否按照SaaS端设定来调整本地的Enterprise KB Skill状态：",
+    "A:如果你暂时不准备实际测试，可忽略此提示 或 点「按 SaaS 对齐本地」来对齐本地SKill状态；",
+    "B:如果你准备实际测试，可点「将 SaaS 同步为本地」把 SaaS 改成与当前本地匹配（此时潜在影响同时在线的其它用户）。"
   ].join("\n");
 
   scannerDriftActionsDriftEl.hidden = false;
