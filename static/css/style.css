@@ -2795,6 +2795,9 @@ code{
   background:#fff;
   padding:10px;
 }
+.uaCard--wide{
+  grid-column:1 / -1;
+}
 .uaCardTitle{
   font-size:14px;
   font-weight:700;
@@ -2889,5 +2892,8 @@ code{
   }
   .userActivityGrid{
     grid-template-columns:1fr;
+  }
+  .uaCard--wide{
+    grid-column:auto;
   }
 }

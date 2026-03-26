@@ -193,7 +193,7 @@ source .venv/bin/activate   # Linux/macOS
 2. **其他依赖**
 
 ```bash
-pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf httpx
+pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf httpx geoip2
 ```
 
 ---

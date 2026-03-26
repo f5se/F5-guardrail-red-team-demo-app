@@ -941,6 +941,10 @@ function renderUserActivityCharts(data){
   if (hourEl) {
     hourEl.innerHTML = buildSimpleBarList(hourRows, "hour", "count", "No hourly distribution data.");
   }
+  const cityEl = document.getElementById("uaCityDist");
+  if (cityEl) {
+    cityEl.innerHTML = buildSimpleBarList(data?.city_activity_distribution, "city", "count", "No city distribution data.");
+  }
 
   const latencyEl = document.getElementById("uaUserLatencyStats");
   if (latencyEl) {

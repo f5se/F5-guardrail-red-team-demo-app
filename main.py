@@ -3,6 +3,7 @@ import os
 import time
 import json
 import re
+import ipaddress
 import hmac
 import base64
 import hashlib
@@ -38,6 +39,10 @@ import httpx
 from calypsoai import CalypsoAI
 import calypsoai.datatypes as cai_dt
 from transformers import pipeline
+try:
+    import geoip2.database
+except Exception:
+    geoip2 = None
 
 from skills import get_all_tool_definitions, dispatch_tool
 from skills.utils import to_bool, to_int, to_float, normalize_extensions, agent_debug_log
@@ -426,6 +431,7 @@ def classify_rejection(reply: str) -> tuple[str, Optional[str]]:
 
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
 LOGIN_ACTIVITY_FILE = os.path.join(BASE_DIR, "login_activity.log")
+GEOIP_DB_FILE = os.path.join(BASE_DIR, "static", "ip", "GeoLite2-City.mmdb")
 print(f"[CONFIG] SETTINGS_FILE={SETTINGS_FILE}")
 
 DEFAULT_SETTINGS = {
@@ -480,6 +486,45 @@ AUDIT_TRIGGER_PATHS = {
 LOGIN_FAIL_LIMIT = 5
 LOGIN_LOCK_SECONDS = 300
 LOGIN_ATTEMPTS: Dict[str, dict] = {}
+GEOIP_LOOKUP_CACHE: Dict[str, str] = {}
+
+
+def _resolve_city_by_ip(ip_raw: str) -> str:
+    ip_text = str(ip_raw or "").strip()
+    if not ip_text:
+        return "Unknown"
+    if ip_text in GEOIP_LOOKUP_CACHE:
+        return GEOIP_LOOKUP_CACHE[ip_text]
+    try:
+        ip_obj = ipaddress.ip_address(ip_text)
+        if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+            city_name = "Local Network"
+            GEOIP_LOOKUP_CACHE[ip_text] = city_name
+            return city_name
+    except Exception:
+        GEOIP_LOOKUP_CACHE[ip_text] = "Unknown"
+        return "Unknown"
+    if geoip2 is None:
+        GEOIP_LOOKUP_CACHE[ip_text] = "Unknown"
+        return "Unknown"
+    if not os.path.exists(GEOIP_DB_FILE):
+        GEOIP_LOOKUP_CACHE[ip_text] = "Unknown"
+        return "Unknown"
+    try:
+        with geoip2.database.Reader(GEOIP_DB_FILE) as reader:
+            city_resp = reader.city(ip_text)
+        city_name = (
+            (city_resp.city.names or {}).get("zh-CN")
+            or city_resp.city.name
+            or (city_resp.country.names or {}).get("zh-CN")
+            or city_resp.country.name
+            or "Unknown"
+        )
+        city_name = str(city_name).strip() or "Unknown"
+    except Exception:
+        city_name = "Unknown"
+    GEOIP_LOOKUP_CACHE[ip_text] = city_name
+    return city_name
 
 
 def _utc_now_iso() -> str:
@@ -1830,6 +1875,7 @@ def _empty_user_activity_payload(selected_range: str, start_iso: Optional[str], 
         "hour_of_day_distribution": {"login": [], "threshold_reached": []},
         "weekday_activity_by_user": [],
         "ip_activity_distribution": [],
+        "city_activity_distribution": [],
         "slowest_sessions": [],
     }
 
@@ -2001,6 +2047,7 @@ async def get_user_activity(
     hour_login = [0] * 24
     hour_threshold = [0] * 24
     ip_counts: Dict[str, int] = defaultdict(int)
+    city_counts: Dict[str, int] = defaultdict(int)
     latency_values: List[float] = []
     negative_latency_records = 0
     slowest_sessions: List[dict] = []
@@ -2009,7 +2056,9 @@ async def get_user_activity(
         uname = rec["username"] or "unknown"
         login_local = rec["login_dt"].astimezone(BEIJING_TZ)
         user_counts[uname] += 1
-        ip_counts[rec["client_ip"] or "unknown"] += 1
+        client_ip = rec["client_ip"] or "unknown"
+        ip_counts[client_ip] += 1
+        city_counts[_resolve_city_by_ip(client_ip)] += 1
         day_key = login_local.strftime("%Y-%m-%d")
         day_counts[day_key] += 1
         day_counts_by_user[uname][day_key] += 1
@@ -2084,6 +2133,10 @@ async def get_user_activity(
         {"client_ip": ip, "count": c}
         for ip, c in sorted(ip_counts.items(), key=lambda x: (-x[1], x[0]))
     ]
+    city_activity_distribution = [
+        {"city": city, "count": c}
+        for city, c in sorted(city_counts.items(), key=lambda x: (-x[1], x[0]))
+    ]
     weekday_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     weekday_activity_by_user = []
     for uname, counts in sorted(weekday_by_user.items(), key=lambda x: x[0].lower()):
@@ -2119,5 +2172,6 @@ async def get_user_activity(
         },
         "weekday_activity_by_user": weekday_activity_by_user,
         "ip_activity_distribution": ip_activity_distribution,
+        "city_activity_distribution": city_activity_distribution,
         "slowest_sessions": slowest_sessions,
     }
