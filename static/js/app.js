@@ -875,12 +875,35 @@ toggleMultiTurnEl.addEventListener("change", () => {
 const redteamView = document.getElementById("redteamView");
 const guardrailIntegrationView = document.getElementById("guardrailIntegrationView");
 const testGuideView = document.getElementById("testGuideView");
+const complianceReportView = document.getElementById("complianceReportView");
+const complianceReportFrame = document.getElementById("complianceReportFrame");
 const userActivityPanelView = document.getElementById("userActivityView");
 const testGuideContentEl = document.getElementById("testGuideContent");
 const engineRow = document.getElementById("engineRow");
 const layoutEl = document.querySelector(".layout");
 
 let testGuideLoaded = false;
+
+function resizeComplianceReportFrame() {
+  if (!complianceReportFrame) return;
+  try {
+    const doc = complianceReportFrame.contentDocument || complianceReportFrame.contentWindow?.document;
+    if (!doc) return;
+    const bodyH = doc.body ? doc.body.scrollHeight : 0;
+    const htmlH = doc.documentElement ? doc.documentElement.scrollHeight : 0;
+    const target = Math.max(bodyH, htmlH, 900);
+    complianceReportFrame.style.height = target + "px";
+  } catch (_) {
+    // 同源静态页按预期可读取；异常时保持默认高度
+  }
+}
+
+if (complianceReportFrame) {
+  complianceReportFrame.addEventListener("load", resizeComplianceReportFrame);
+  window.addEventListener("resize", () => {
+    if (activeView === "COMPLIANCE_REPORT") resizeComplianceReportFrame();
+  });
+}
 
 function formatNum(v){
   return typeof v === "number" && Number.isFinite(v) ? String(v) : "-";
@@ -1155,6 +1178,7 @@ function setActiveView(view){
   redteamView.style.display = "none";
   if (guardrailIntegrationView) guardrailIntegrationView.style.display = "none";
   if (testGuideView) testGuideView.style.display = "none";
+  if (complianceReportView) complianceReportView.style.display = "none";
   if (userActivityPanelView) userActivityPanelView.style.display = "none";
 
   const chatOnlyEls = [engineRow, modeBadgeEl, kbSkillBadgeEl, f5GuardrailOnlyBadgeEl, btnClear];
@@ -1194,6 +1218,11 @@ function setActiveView(view){
       if (testGuideView) testGuideView.style.display = "";
       if (subEl) subEl.textContent = "使用说明与测试指引（Markdown 渲染）";
       loadTestGuide();
+    } else if (view === "COMPLIANCE_REPORT"){
+      chatTitleEl.textContent = "合规报告";
+      if (complianceReportView) complianceReportView.style.display = "";
+      if (subEl) subEl.textContent = "F5 LLM 安全保护能力与中国 AI 合规性要求映射报告";
+      setTimeout(resizeComplianceReportFrame, 0);
     } else if (view === "USER_ACTIVITY"){
       chatTitleEl.textContent = "User Activity Analytics";
       if (userActivityPanelView) userActivityPanelView.style.display = "";

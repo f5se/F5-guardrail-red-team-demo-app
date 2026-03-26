@@ -143,6 +143,13 @@ app.mount(
     name="redteam-report",
 )
 
+# 合规报告静态页面挂载
+app.mount(
+    "/compliance",
+    StaticFiles(directory=os.path.join(BASE_DIR, "compliance"), html=True),
+    name="compliance",
+)
+
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 
@@ -778,6 +785,10 @@ def append_login_activity(username: str, login_iso: str, session_id: str, client
 
 def touch_session_activity(session_id: str, request_path: str = ""):
     now = time.time()
+    should_append = False
+    username = ""
+    login_iso = ""
+    client_ip = "unknown"
     with SESSIONS_LOCK:
         sess = SESSIONS.get(session_id)
         if not sess:
@@ -794,12 +805,14 @@ def touch_session_activity(session_id: str, request_path: str = ""):
         # 新规则：会话存活期间（未超时/未退出），命中指定API任意一次即记录一次。
         if (not sess["logged_120s"]) and request_path in AUDIT_TRIGGER_PATHS:
             sess["logged_120s"] = True
-            append_login_activity(
-                sess["username"],
-                sess["login_iso"],
-                session_id,
-                str(sess.get("client_ip") or "unknown"),
-            )
+            should_append = True
+            username = str(sess.get("username") or "")
+            login_iso = str(sess.get("login_iso") or "")
+            client_ip = str(sess.get("client_ip") or "unknown")
+
+    # 避免在会话全局锁内执行文件写入，降低请求堆积导致“整站卡住”的风险。
+    if should_append:
+        append_login_activity(username, login_iso, session_id, client_ip)
 
 
 def get_current_session(request: Request) -> Optional[dict]:

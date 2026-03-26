@@ -28,3 +28,4 @@ settings.json
 login_activity.log
 static/ip/GeoLite2-City.mmdb
 ip_city_lookup.py
+compliance/index.html

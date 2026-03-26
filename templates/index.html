@@ -44,6 +44,7 @@
             <button class="navBtn" data-view="REDTEAM" id="btnRedTeam">🎯 Red Team</button>
             <button class="navBtn" data-view="GUARDRAIL_INTEGRATION" id="btnGuardrailIntegration">🛡️ Guardrail Integration</button>
             <button class="navBtn" data-view="TEST_GUIDE" id="btnTestGuide">📖 Test Guide</button>
+            <button class="navBtn" data-view="COMPLIANCE_REPORT" id="btnComplianceReport">📑 China Compliance Report</button>
             <button class="navBtn" data-view="SETTINGS" id="btnSettings">⚙️ Settings</button>
             <button class="navBtn" data-view="USER_ACTIVITY" id="btnUserActivity" style="display:none;">📊 User Activity Analytics</button>
           </div>
@@ -273,6 +274,16 @@
         <!-- TEST GUIDE VIEW -->
         <div class="panel" id="testGuideView" style="display:none;">
           <div class="mdDoc" id="testGuideContent"></div>
+        </div>
+
+        <!-- COMPLIANCE REPORT VIEW -->
+        <div class="panel" id="complianceReportView" style="display:none;padding:0;">
+          <iframe
+            id="complianceReportFrame"
+            src="/compliance/index.html"
+            title="合规报告"
+            style="width:100%;height:900px;border:0;border-radius:0;background:#fff;display:block;"
+          ></iframe>
         </div>
 
         <!-- USER ACTIVITY VIEW -->
