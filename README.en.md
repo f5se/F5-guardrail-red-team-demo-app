@@ -203,8 +203,20 @@ source .venv/bin/activate   # Linux/macOS
 2. **Other dependencies**
 
 ```bash
-pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf httpx
+pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf httpx geoip2
 ```
+
+#### City Display in User Activity Analytics (GeoIP)
+
+To show city distribution of login IPs in **User Activity Analytics**, prepare the following:
+
+1. Download the MaxMind GeoLite2 City database (`GeoLite2-City.mmdb`).
+2. Place the file at: `static/ip/GeoLite2-City.mmdb` (project root based).
+3. Ensure dependency is installed: `pip install geoip2` (skip if already installed via the command above).
+
+Notes:
+- If the database file is missing or `geoip2` is not installed, city stats gracefully fall back to `Unknown` without breaking other features.
+- Private/local IP addresses are shown as `Local Network`.
 
 ---
 

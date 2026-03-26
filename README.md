@@ -196,6 +196,18 @@ source .venv/bin/activate   # Linux/macOS
 pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf httpx geoip2
 ```
 
+#### 用户活动统计中的城市显示（GeoIP）
+
+如果你希望在 **User Activity Analytics** 中显示登录 IP 的城市分布，请额外完成以下准备：
+
+1. 下载 MaxMind GeoLite2 City 数据库（文件名 `GeoLite2-City.mmdb`）。
+2. 将数据库文件放到项目目录：`static/ip/GeoLite2-City.mmdb`。
+3. 确认已安装依赖：`pip install geoip2`（如果你已按上面的依赖安装，这一步可跳过）。
+
+说明：
+- 数据库文件缺失或 `geoip2` 未安装时，城市统计会降级显示为 `Unknown`，不影响其他功能。
+- 私网/本地地址会显示为 `Local Network`。
+
 ---
 
 ## 3. 启动应用
