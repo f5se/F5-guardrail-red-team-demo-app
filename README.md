@@ -52,9 +52,8 @@ cp .env_example .env
 | `CALYPSOAI_URL` | F5 AI Security 平台地址 | `https://www.us1.calypsoai.app/` |
 | `CALYPSOAI_TOKEN` | API 令牌（必填） | `Your-calypsoai-token` |
 | `CALYPSOAI_PROJECT_ID` | 项目 ID（Project 模式） | `Your-calypsoai-project-id` |
-| `PROMPT_INJECTION_SCANNER_ID` | 与 Enterprise KB Skill 联动的 SaaS 端 Prompt Injection scanner 的 UUID（用于顶部漂移告警与手动同步） | `Your-prompt-injection-scanner-uuid` |
-| `PROMPT_INJECTION_DEFAULT_VERSION` | 上述 scanner 在 SaaS 上的版本标签（PATCH 配置时携带，与控制台一致） | `2026-02` |
-| `SCANNER_DRIFT_POLL_SECONDS` | 前端只读漂移检测轮询间隔（秒），默认 `300`，有效范围 30～3600 | `300` |
+| `CALYPSOAI_TOKEN_SECOND_PROJECT` | Enterprise KB Skill 开启时用于 Chat/Agent Guardrail 的第二套 API 令牌 | `Your-calypsoai-token-second-project` |
+| `CALYPSOAI_PROJECT_ID_SECOND` | Enterprise KB Skill 开启时用于 Chat/Agent Guardrail 的第二个项目 ID | `Your-calypsoai-project-id-second` |
 | `DEFAULT_PROVIDER` | Calypso 中配置的 Provider 名称，作为服务器默认值；主 Chat/Agent/Inline 模式下可被前端选择覆盖 | `Your-calypsoai-provider` |
 | `PROVIDER_OPTIONS` | 前端设置页「LLM Provider」下拉的可选列表，逗号分隔；配置后用户可在界面选择使用的 Provider | `jinglin-google-gemini-133540,deepseek-JingLin-real-charge` |
 | `SLIDING_WINDOW_MAX_TURNS` | 多轮对话滑动窗口轮数 | `8` |
@@ -76,7 +75,7 @@ cp .env_example .env
 提示：README 与 `.env_example` 中的 Key 都是示例占位符。
 直连聊天模式下，**Enterprise KB Skill** 开关与主 Chat 一致：开启时由直连 LLM 执行与 Guardrail Agent 路径相同的 ReAct 工具推理（调用企业 KB 等）；关闭时为单次直连对话。
 
-**Enterprise KB Skill 与 SaaS scanner 一致性：** 界面以 **SaaS 端** 当前 Project 中配置的 Prompt Injection scanner 状态为「显示真相」。约定：Skill **ON** 时应在 SaaS **关闭**该 scanner（减轻 ReAct 误报）；Skill **OFF** 时应在 SaaS **开启**该 scanner。切换 Skill **不会**自动改写 SaaS；若检测到与 SaaS 不一致，顶部会出现告警条，说明可能原因（人工改 SaaS、其他用户点击「将 SaaS 同步为本地」、多用户共享同一 `CALYPSOAI_PROJECT_ID` 等），并可「按 SaaS 对齐本地」或经确认后「将 SaaS 同步为本地」。系统在 `loadSettings` 后及按 `.env` 中 `SCANNER_DRIFT_POLL_SECONDS`（默认 **300** 秒，范围 30～3600）只读轮询对比。需在 `.env` 配置 `PROMPT_INJECTION_SCANNER_ID`（及建议配置 `PROMPT_INJECTION_DEFAULT_VERSION`）。
+**Enterprise KB Skill 双项目切换（可选，由 admin 控制）：** 全局开关保存在 `settings.json` 的 `global_settings.dual_project_routing_enabled`（默认 `false`），Settings 页面中 **Enable Dual Project Routing By Enterprise Skill** 与之对应，**仅 `admin` 可改**。关闭时，主 Chat/Agent 的 Guardrail **始终**使用 `CALYPSOAI_PROJECT_ID` + `CALYPSOAI_TOKEN`。开启时，才按 Enterprise KB Skill：Skill **ON** 使用 `CALYPSOAI_PROJECT_ID_SECOND` + `CALYPSOAI_TOKEN_SECOND_PROJECT`，Skill **OFF** 使用主项目。在界面或 API 中尝试开启该开关时，若 `.env` 未同时配置 `CALYPSOAI_PROJECT_ID_SECOND` 与 `CALYPSOAI_TOKEN_SECOND_PROJECT`，则会拒绝并提示未配置。不再提供 SaaS scanner 漂移告警与双向同步按钮。
 
 ### 用户验证配置（首次启用前）
 
@@ -92,7 +91,7 @@ cp settings_example.json settings.json
 - `auth.users`：登录用户列表（`username`、`password_hash`、`enabled`）
 - `auth.session_ttl_seconds`：登录最大绝对会话有效期（秒），应大于空闲会话超时默认的1200s
 - `user_settings`：每个用户名对应的个性化设置（建议与 `auth.users` 保持一致）
-- 至少保留并配置 `admin` 用户名：该用户名会控制 Settings 页面中的部分全局配置（如 Enterprise KB Directory、Agent Max Steps）
+- 至少保留并配置 `admin` 用户名：该用户名会控制 Settings 页面中的部分全局配置（如 Enterprise KB Directory、Agent Max Steps、Enterprise Skill 是否启用双项目路由 `dual_project_routing_enabled`）
 
 > 提示：请以 `settings_example.json` 为模板，复制后重命名为 `settings.json` 再进行修改。
 

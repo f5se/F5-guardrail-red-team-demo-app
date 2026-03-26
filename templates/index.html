@@ -12,23 +12,6 @@
     <span class="topbarTitle">F5 AI Guardrail and Red Team Lab</span>
   </div>
 
-  <div id="scannerDriftBanner" class="scannerDriftBanner" role="alert" hidden>
-    <div class="scannerDriftBanner__inner">
-      <div class="scannerDriftBanner__main">
-        <strong id="scannerDriftBannerTitle" class="scannerDriftBanner__title"></strong>
-        <p id="scannerDriftBannerBody" class="scannerDriftBanner__body"></p>
-      </div>
-      <div id="scannerDriftBannerActionsDrift" class="scannerDriftBanner__actions" hidden>
-        <button type="button" id="btnAlignLocalToSaas" class="scannerDriftBanner__btn scannerDriftBanner__btn--primary">按 SaaS 对齐本地</button>
-        <button type="button" id="btnPushSaasToLocal" class="scannerDriftBanner__btn">将 SaaS 同步为本地（需确认）</button>
-        <button type="button" id="btnScannerDriftSnooze" class="scannerDriftBanner__btn scannerDriftBanner__btn--link">暂不提示 10 分钟</button>
-      </div>
-      <div id="scannerDriftBannerActionsError" class="scannerDriftBanner__actions" hidden>
-        <button type="button" id="btnScannerDriftRetry" class="scannerDriftBanner__btn scannerDriftBanner__btn--primary">重试检测</button>
-      </div>
-    </div>
-  </div>
-
   <div class="wrap">
     <div class="crumbRow">
       <div class="crumb" id="breadcrumb">Home &nbsp;›&nbsp; Assistant</div>
@@ -225,8 +208,23 @@
             <input type="range" id="agentMaxStepsSlider" min="1" max="8" step="1">
             <span id="agentMaxStepsVal" class="sliderVal"></span>
           </div>
+          <div class="settingRow" style="margin-top:12px;">
+            <div class="settingText">
+              <div class="settingTitle">Enable Dual Project Routing By Enterprise Skill</div>
+              <div class="settingDesc">
+                Admin only. ON: Enterprise KB Skill ON uses SECOND project/token; OFF: always use primary project.
+              </div>
+              <div id="dualProjectRoutingStatus" class="settingDesc" style="margin-top:4px;font-size:12px;color:#6b7280;">
+                Checking second project env...
+              </div>
+            </div>
+            <label class="switch" title="Admin only: toggle dual project routing">
+              <input type="checkbox" id="toggleDualProjectRouting" />
+              <span class="slider"></span>
+            </label>
+          </div>
           <div id="adminOnlySettingsHint" class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;display:none;">
-            Enterprise KB Directory and Agent Max Steps are read-only for non-admin accounts.
+            Enterprise KB Directory, Agent Max Steps and Dual Project Routing are read-only for non-admin accounts.
           </div>
 
           <hr style="margin:16px 0; border:0; border-top:1px solid #e5e7eb;">
@@ -842,10 +840,19 @@
 
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <script id="attackPresetsData" type="application/json">{{ attack_presets_json | safe }}</script>
+  <script id="guardrailIntegrationPresetsData" type="application/json">{{ guardrail_integration_presets_json | safe }}</script>
   <script>
     // 从后端注入攻击示例列表，供前端 JS 使用
-    window.ATTACK_PRESETS = {{ attack_presets_json | safe }};
-    window.GUARDRAIL_INTEGRATION_PRESETS = {{ guardrail_integration_presets_json | safe }};
+    try {
+      const attackData = document.getElementById("attackPresetsData")?.textContent || "[]";
+      const guardrailData = document.getElementById("guardrailIntegrationPresetsData")?.textContent || "[]";
+      window.ATTACK_PRESETS = JSON.parse(attackData);
+      window.GUARDRAIL_INTEGRATION_PRESETS = JSON.parse(guardrailData);
+    } catch (_e) {
+      window.ATTACK_PRESETS = [];
+      window.GUARDRAIL_INTEGRATION_PRESETS = [];
+    }
   </script>
   <script src="/static/js/app.js?v=20260308-7"></script>
 </body>

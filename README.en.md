@@ -64,9 +64,8 @@ Variables in `.env_example`:
 | `CALYPSOAI_URL` | F5 AI Security platform URL | `https://www.us1.calypsoai.app/` |
 | `CALYPSOAI_TOKEN` | API token (required) | `Your-calypsoai-token` |
 | `CALYPSOAI_PROJECT_ID` | Project ID (Project mode) | `Your-calypsoai-project-id` |
-| `PROMPT_INJECTION_SCANNER_ID` | UUID of the SaaS Prompt Injection scanner tied to Enterprise KB Skill (drift banner + manual sync) | `Your-prompt-injection-scanner-uuid` |
-| `PROMPT_INJECTION_DEFAULT_VERSION` | Scanner version label on SaaS (sent with PATCH; must match console) | `2026-02` |
-| `SCANNER_DRIFT_POLL_SECONDS` | Interval in seconds for read-only drift checks in the UI (default `300`, clamped 30–3600) | `300` |
+| `CALYPSOAI_TOKEN_SECOND_PROJECT` | Secondary API token used by Chat/Agent Guardrail when Enterprise KB Skill is ON | `Your-calypsoai-token-second-project` |
+| `CALYPSOAI_PROJECT_ID_SECOND` | Secondary project ID used by Chat/Agent Guardrail when Enterprise KB Skill is ON | `Your-calypsoai-project-id-second` |
 | `DEFAULT_PROVIDER` | Provider name configured in Calypso; server default for main Chat/Agent/Inline mode; can be overridden by frontend selection | `Your-calypsoai-provider` |
 | `PROVIDER_OPTIONS` | Comma-separated list of providers shown in the Settings “LLM Provider” dropdown; when set, users can choose which provider to use in the UI | `jinglin-google-gemini-133540,deepseek-JingLin-real-charge` |
 | `SLIDING_WINDOW_MAX_TURNS` | Sliding window turn count for multi-turn chat | `8` |
@@ -88,7 +87,7 @@ Variables in `.env_example`:
 Security note: Keys shown in README and `.env_example` are placeholders only.
 In **direct chat** mode, the **Enterprise KB Skill** toggle matches the main Chat: when ON, the direct LLM runs the same ReAct-style tool loop as the Guardrail Agent path (e.g. enterprise KB); when OFF, a single direct completion is used.
 
-**Enterprise KB Skill vs SaaS scanner:** The UI treats the **SaaS** Prompt Injection scanner flag on the current Project as the source of truth for *display*. Convention: Skill **ON** → scanner should be **disabled** on SaaS (fewer ReAct false positives); Skill **OFF** → scanner should be **enabled**. Toggling Skill **does not** auto-write SaaS. On drift, a top banner explains likely causes (manual SaaS change, another user clicked “sync SaaS to local”, multiple users sharing one `CALYPSOAI_PROJECT_ID`, etc.) and offers **Align local to SaaS** or **Sync SaaS to local (confirm)**. Read-only checks run after `loadSettings` and on an interval from `SCANNER_DRIFT_POLL_SECONDS` in `.env` (default **300**s, clamped 30–3600). Set `PROMPT_INJECTION_SCANNER_ID` (and recommended `PROMPT_INJECTION_DEFAULT_VERSION`) in `.env`.
+**Enterprise KB Skill dual-project routing (optional, admin-controlled):** The feature is gated by `global_settings.dual_project_routing_enabled` in `settings.json` (default `false`), mirrored in Settings as **Enable Dual Project Routing By Enterprise Skill** and **editable by `admin` only**. When **off**, main Chat/Agent Guardrail always uses `CALYPSOAI_PROJECT_ID` + `CALYPSOAI_TOKEN`. When **on**, routing follows Enterprise KB Skill: **ON** → `CALYPSOAI_PROJECT_ID_SECOND` + `CALYPSOAI_TOKEN_SECOND_PROJECT`; **OFF** → primary project. Turning the switch **on** requires both `CALYPSOAI_PROJECT_ID_SECOND` and `CALYPSOAI_TOKEN_SECOND_PROJECT` in `.env`; otherwise the UI/API rejects it with a “not configured” style error. SaaS scanner drift banner and bidirectional sync are removed.
 
 ### User Authentication Setup (Before First Run)
 
@@ -104,7 +103,7 @@ cp settings_example.json settings.json
 - `auth.users`: login user list (`username`, `password_hash`, `enabled`)
 - `auth.session_ttl_seconds`: session TTL in seconds
 - `user_settings`: per-user runtime settings (recommended to align usernames with `auth.users`)
-- Keep and configure at least one `admin` username: this username controls some global Settings items in the UI (for example, Enterprise KB Directory and Agent Max Steps).
+- Keep and configure at least one `admin` username: this username controls some global Settings items in the UI (for example, Enterprise KB Directory, Agent Max Steps, and `dual_project_routing_enabled` for dual Calypso projects).
 
 > Tip: use `settings_example.json` as template, then rename/copy it to `settings.json` before editing.
 

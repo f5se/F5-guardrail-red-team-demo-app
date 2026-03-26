@@ -88,26 +88,6 @@ function showSyncNotice(message, type = "info", ttlMs = 2400) {
   }, ttlMs);
 }
 
-async function syncEnterpriseKbSkillScanner(agentSkillEnabled, source) {
-  const sourceLabel = source === "manual" ? "手动" : (source === "badge" ? "徽章" : "设置");
-  const targetText = agentSkillEnabled ? "关闭 Prompt Injection scanner" : "开启 Prompt Injection scanner";
-  showSyncNotice(`正在同步 SaaS Guardrail（${sourceLabel}）：${targetText} ...`, "info", 1800);
-  const res = await authFetch("/api/agent-skill-sync", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled: !!agentSkillEnabled })
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || "scanner sync failed");
-  }
-  const data = await res.json();
-  const verified = data?.scanner_sync?.scanner_enabled_verified;
-  const statusText = verified === true ? "已启用" : (verified === false ? "已禁用" : "已提交");
-  showSyncNotice(`SaaS scanner 同步成功（${sourceLabel}）：${statusText}`, "success", 2200);
-  return data;
-}
-
 function setLogoutButtonLabel(username) {
   if (!btnLogout) return;
   const name = (username || "").trim();
@@ -309,6 +289,8 @@ const toggleMultiTurnEl = document.getElementById("toggleMultiTurn");
 const toggleAgentSkillEl = document.getElementById("toggleAgentSkill");
 const toggleGuardrailDebugEl = document.getElementById("toggleGuardrailDebug");
 const toggleF5GuardrailOnlyEl = document.getElementById("toggleF5GuardrailOnly");
+const toggleDualProjectRoutingEl = document.getElementById("toggleDualProjectRouting");
+const dualProjectRoutingStatusEl = document.getElementById("dualProjectRoutingStatus");
 const kbDirInputEl = document.getElementById("kbDirInput");
 const btnUserActivityEl = document.getElementById("btnUserActivity");
 const userActivityView = document.getElementById("userActivityView");
@@ -561,6 +543,8 @@ const sessionBadgeOverrides = {
 let activeSettingsUsername = "";
 let isAdminUser = false;
 let userActivityLoaded = false;
+let secondProjectEnvReady = false;
+let persistedDualProjectRoutingEnabled = false;
 
 function setAdminOnlySettingsAccess(username){
   isAdminUser = String(username || "").trim().toLowerCase() === "admin";
@@ -574,6 +558,10 @@ function setAdminOnlySettingsAccess(username){
   if (maxStepsSliderEl) {
     maxStepsSliderEl.disabled = disabled;
     maxStepsSliderEl.title = disabled ? reason : "";
+  }
+  if (toggleDualProjectRoutingEl) {
+    toggleDualProjectRoutingEl.disabled = disabled;
+    toggleDualProjectRoutingEl.title = disabled ? reason : "";
   }
   const adminOnlyHintEl = document.getElementById("adminOnlySettingsHint");
   if (adminOnlyHintEl) {
@@ -682,117 +670,6 @@ function getEffectiveAgentSkillEnabled(){
 function getEffectiveF5GuardrailOnlyEnabled(){
   if (sessionBadgeOverrides.f5GuardrailOnly === null) return !!persistedBadgeSettings.f5GuardrailOnly;
   return !!sessionBadgeOverrides.f5GuardrailOnly;
-}
-
-const scannerDriftBannerEl = document.getElementById("scannerDriftBanner");
-const scannerDriftBannerTitleEl = document.getElementById("scannerDriftBannerTitle");
-const scannerDriftBannerBodyEl = document.getElementById("scannerDriftBannerBody");
-const scannerDriftActionsDriftEl = document.getElementById("scannerDriftBannerActionsDrift");
-const scannerDriftActionsErrorEl = document.getElementById("scannerDriftBannerActionsError");
-const SCANNER_DRIFT_SNOOZE_KEY = "scannerDriftSnoozeUntil";
-/** 由 /api/settings 的 scanner_drift_poll_seconds 驱动；默认 300s 直至首次加载设置 */
-let scannerDriftPollTimerId = null;
-/** 从其它菜单切回 AI Chat 时触发一致性检测：防抖 + 节流，避免疯狂点菜单刷 API */
-const CHAT_VIEW_DRIFT_DEBOUNCE_MS = 400;
-const CHAT_VIEW_DRIFT_THROTTLE_MS = 45000;
-let lastPromptInjectionSyncPayload = null;
-let chatViewDriftDebounceTimer = null;
-let lastEnterChatDriftCheckAt = 0;
-
-function isScannerDriftSnoozed(){
-  const t = parseInt(sessionStorage.getItem(SCANNER_DRIFT_SNOOZE_KEY) || "0", 10);
-  return Date.now() < t;
-}
-
-function hideScannerDriftBanner(){
-  if (scannerDriftBannerEl) scannerDriftBannerEl.hidden = true;
-}
-
-async function refreshScannerDriftBanner(){
-  if (!scannerDriftBannerEl || !scannerDriftBannerTitleEl || !scannerDriftBannerBodyEl) return;
-  if (!scannerDriftActionsDriftEl || !scannerDriftActionsErrorEl) return;
-  let data;
-  try {
-    const r = await authFetch("/api/prompt-injection-sync-status", { cache: "no-store" });
-    data = await r.json();
-  } catch (e) {
-    console.error("prompt-injection-sync-status failed:", e);
-    hideScannerDriftBanner();
-    return;
-  }
-  lastPromptInjectionSyncPayload = data;
-
-  const saasOn = data.saas_scanner_enabled;
-  const suggested = data.suggested_local_agent_skill;
-  const localOn = getEffectiveAgentSkillEnabled();
-
-  if (!data.ok || saasOn === null || suggested === null) {
-    scannerDriftBannerTitleEl.textContent = "无法读取 SaaS 端 Prompt Injection scanner 状态";
-    scannerDriftBannerBodyEl.textContent =
-      "请检查 CALYPSOAI_TOKEN、CALYPSOAI_PROJECT_ID、PROMPT_INJECTION_SCANNER_ID 与网络；也可能是该 scanner 未出现在当前 Project 的 configs 中。"
-      + (data.detail ? "（" + data.detail + "）" : "");
-    scannerDriftActionsDriftEl.hidden = true;
-    scannerDriftActionsErrorEl.hidden = false;
-    scannerDriftBannerEl.hidden = false;
-    return;
-  }
-
-  const aligned = !!localOn === !!suggested;
-  if (aligned) {
-    hideScannerDriftBanner();
-    return;
-  }
-
-  if (isScannerDriftSnoozed()) {
-    hideScannerDriftBanner();
-    return;
-  }
-
-  const saasWord = saasOn ? "开启（enabled）" : "关闭（disabled）";
-  const localWord = localOn ? "开启（ON）" : "关闭（OFF）";
-  const suggestWord = suggested ? "开启（ON）" : "关闭（OFF）";
-  scannerDriftBannerTitleEl.textContent = "Enterprise KB Skill 与 SaaS 端 scanner 不一致";
-  scannerDriftBannerBodyEl.textContent = [
-    "注意：当前SaaS端Prompt Injection scanner 为 " + saasWord + "状态；而本地的 Enterprise KB Skill为 " + localWord + "。",
-    "期望的是：（1）Enterprise KB Skill ON 时应在 SaaS 关闭该 scanner（以减少在ReAct Agent模式下的误报）；（2）Skill OFF 时应在 SaaS 开启该 scanner（以更好的测试更多Injection类问题）。",
-    "根据以SaaS端设定为优先原则，建议将 Enterprise KB Skill 设为 " + suggestWord + "。",
-    "但你完全可以根据自己的实际需求来决定是否按照SaaS端设定来调整本地的Enterprise KB Skill状态：",
-    "A:如果你暂时不准备实际测试，可忽略此提示 或 点「按 SaaS 对齐本地」来对齐本地SKill状态；",
-    "B:如果你准备实际测试，可点「将 SaaS 同步为本地」把 SaaS 改成与当前本地匹配（此时潜在影响同时在线的其它用户）。"
-  ].join("\n");
-
-  scannerDriftActionsDriftEl.hidden = false;
-  scannerDriftActionsErrorEl.hidden = true;
-  scannerDriftBannerEl.hidden = false;
-}
-
-function applyScannerDriftPollInterval(seconds){
-  const sec = Number(seconds);
-  const s = Number.isFinite(sec) && sec > 0 ? sec : 300;
-  const ms = Math.max(30000, Math.min(s * 1000, 3600000));
-  if (scannerDriftPollTimerId) {
-    clearInterval(scannerDriftPollTimerId);
-    scannerDriftPollTimerId = null;
-  }
-  scannerDriftPollTimerId = setInterval(() => {
-    void refreshScannerDriftBanner();
-  }, ms);
-}
-
-function scheduleScannerDriftCheckOnEnterChat(){
-  if (chatViewDriftDebounceTimer) {
-    clearTimeout(chatViewDriftDebounceTimer);
-    chatViewDriftDebounceTimer = null;
-  }
-  chatViewDriftDebounceTimer = setTimeout(() => {
-    chatViewDriftDebounceTimer = null;
-    const now = Date.now();
-    if (lastEnterChatDriftCheckAt > 0 && (now - lastEnterChatDriftCheckAt) < CHAT_VIEW_DRIFT_THROTTLE_MS) {
-      return;
-    }
-    lastEnterChatDriftCheckAt = now;
-    void refreshScannerDriftBanner();
-  }, CHAT_VIEW_DRIFT_DEBOUNCE_MS);
 }
 
 /**
@@ -1212,7 +1089,6 @@ function setActiveView(view){
     if (guardrailCardEl) guardrailCardEl.style.display = "";
     if (layoutEl) layoutEl.classList.add("layout--with-guardrail");
     inputEl.focus();
-    scheduleScannerDriftCheckOnEnterChat();
   } else {
     if (attackCardEl) attackCardEl.style.display = "none";
     if (guardrailCardEl) guardrailCardEl.style.display = "none";
@@ -1599,6 +1475,17 @@ async function loadSettings(){
       persistedBadgeSettings.f5GuardrailOnly = asBool(s.f5_guardrail_only);
       setF5GuardrailOnlyBadge(persistedBadgeSettings.f5GuardrailOnly);
     }
+    secondProjectEnvReady = asBool(s.second_project_env_ready);
+    persistedDualProjectRoutingEnabled = asBool(s.dual_project_routing_enabled);
+    if (toggleDualProjectRoutingEl) {
+      toggleDualProjectRoutingEl.checked = persistedDualProjectRoutingEnabled;
+    }
+    if (dualProjectRoutingStatusEl) {
+      dualProjectRoutingStatusEl.textContent = secondProjectEnvReady
+        ? "Second project env is configured."
+        : "Second project env is NOT configured (need CALYPSOAI_PROJECT_ID_SECOND + CALYPSOAI_TOKEN_SECOND_PROJECT).";
+      dualProjectRoutingStatusEl.style.color = secondProjectEnvReady ? "#16a34a" : "#b45309";
+    }
     setDirectModeAvailability(asBool(s.direct_available), s.direct_unavailable_reason || "");
     if (kbDirInputEl) {
       kbDirInputEl.value = s.kb_dir || "./enterprise_kb";
@@ -1634,16 +1521,10 @@ async function loadSettings(){
       }
     }
     currentBackendProviderName = (s.effective_provider || s.default_provider || "").trim();
-    if (typeof s.scanner_drift_poll_seconds === "number") {
-      applyScannerDriftPollInterval(s.scanner_drift_poll_seconds);
-    } else {
-      applyScannerDriftPollInterval(300);
-    }
     if (activeView === "CHAT") setChatSubtitle();
     document.getElementById("agentMaxStepsSlider").value = s.agent_max_steps || 4;
     document.getElementById("agentMaxStepsVal").textContent = s.agent_max_steps || 4;
     refreshKbSkillGeminiWarning();
-    await refreshScannerDriftBanner();
   }catch(e){
     console.error("loadSettings failed:", e);
     refreshKbSkillGeminiWarning();
@@ -1665,6 +1546,7 @@ async function saveSettings(showToast = true){
   if (isAdminUser) {
     payload.kb_dir = document.getElementById("kbDirInput")?.value || "./enterprise_kb";
     payload.agent_max_steps = document.getElementById("agentMaxStepsSlider")?.value || 4;
+    payload.dual_project_routing_enabled = !!toggleDualProjectRoutingEl?.checked;
   }
   const res = await authFetch("/api/settings", {
     method:"POST",
@@ -1689,7 +1571,7 @@ document.getElementById("toggleAgentSkill")?.addEventListener("change", () => {
   sessionBadgeOverrides.agentSkill = null;
   persistedBadgeSettings.agentSkill = !!toggleAgentSkillEl?.checked;
   refreshEnterpriseKBSkillBadge();
-  void saveSettings(false).then(() => refreshScannerDriftBanner());
+  void saveSettings(false);
 });
 document.getElementById("toggleGuardrailDebug")?.addEventListener("change", () => saveSettings(false));
 document.getElementById("toggleF5GuardrailOnly")?.addEventListener("change", () => {
@@ -1697,6 +1579,16 @@ document.getElementById("toggleF5GuardrailOnly")?.addEventListener("change", () 
   persistedBadgeSettings.f5GuardrailOnly = !!toggleF5GuardrailOnlyEl?.checked;
   refreshF5GuardrailOnlyBadge();
   saveSettings(false);
+});
+document.getElementById("toggleDualProjectRouting")?.addEventListener("change", () => {
+  if (!isAdminUser) return;
+  const turnOn = !!toggleDualProjectRoutingEl?.checked;
+  if (turnOn && !secondProjectEnvReady) {
+    alert("Cannot enable: second project is not configured in .env.");
+    if (toggleDualProjectRoutingEl) toggleDualProjectRoutingEl.checked = persistedDualProjectRoutingEnabled;
+    return;
+  }
+  void saveSettings(false);
 });
 
 function wireSessionBadgeToggle(badgeEl, key, onAfterFlip){
@@ -1747,9 +1639,8 @@ wireSessionBadgeToggle(modeBadgeEl, "multiTurn", () => {
   messagesEl.innerHTML = "";
   addBubble("assistant", "Hi there! How can I help?");
 });
-wireSessionBadgeToggle(kbSkillBadgeEl, "agentSkill", async () => {
+wireSessionBadgeToggle(kbSkillBadgeEl, "agentSkill", () => {
   refreshEnterpriseKBSkillBadge();
-  await refreshScannerDriftBanner();
 });
 wireSessionBadgeToggle(f5GuardrailOnlyBadgeEl, "f5GuardrailOnly", () => {
   refreshF5GuardrailOnlyBadge();
@@ -1774,56 +1665,6 @@ if (userActivityRangeSelectEl) {
   if (userActivityEndInputEl) userActivityEndInputEl.disabled = !isCustom;
 }
 
-document.getElementById("btnAlignLocalToSaas")?.addEventListener("click", async () => {
-  const sug = lastPromptInjectionSyncPayload?.suggested_local_agent_skill;
-  if (sug === null || sug === undefined) return;
-  sessionBadgeOverrides.agentSkill = null;
-  persistSessionBadgeOverrides();
-  setEnterpriseKBSkillEnabled(!!sug);
-  persistedBadgeSettings.agentSkill = !!sug;
-  try {
-    await saveSettings(false);
-    await refreshScannerDriftBanner();
-    showSyncNotice("已按 SaaS 对齐本地 Enterprise KB Skill", "success", 2400);
-  } catch (e) {
-    showSyncNotice("对齐本地失败", "error", 2600);
-    console.error(e);
-  }
-});
-
-document.getElementById("btnPushSaasToLocal")?.addEventListener("click", async () => {
-  const localOn = getEffectiveAgentSkillEnabled();
-  const msg =
-    "确定将 SaaS 端 Prompt Injection scanner 调整为与当前本地 Enterprise KB Skill 一致吗？\n\n" +
-    "当前本地为 " + (localOn ? "ON（将请求 SaaS 关闭该 scanner）" : "OFF（将请求 SaaS 开启该 scanner）") + "。\n" +
-    "同一 CALYPSOAI_PROJECT_ID 下所有会话共享该配置，最后一次写入 SaaS 者生效。\n\n" +
-    "是否继续？";
-  if (!confirm(msg)) return;
-  try {
-    await syncEnterpriseKbSkillScanner(localOn, "manual");
-    await refreshScannerDriftBanner();
-  } catch (e) {
-    showSyncNotice("SaaS 同步失败，请重试", "error", 2800);
-    console.error(e);
-  }
-});
-
-document.getElementById("btnScannerDriftSnooze")?.addEventListener("click", () => {
-  sessionStorage.setItem(SCANNER_DRIFT_SNOOZE_KEY, String(Date.now() + 10 * 60 * 1000));
-  hideScannerDriftBanner();
-});
-
-document.getElementById("btnScannerDriftRetry")?.addEventListener("click", () => {
-  void refreshScannerDriftBanner();
-});
-
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") {
-    void refreshScannerDriftBanner();
-  }
-});
-
-applyScannerDriftPollInterval(300);
 loadSettings();
 
 // ======================
@@ -3096,7 +2937,11 @@ bindSliderValue("agentMaxStepsSlider", "agentMaxStepsVal");
               runTrace();
             }
           } else {
-            setResponseContent("Unsupported response type", false);
+            var rawText = "";
+            try { rawText = await res.text(); } catch (e) { rawText = ""; }
+            var unknownDetail = "Unsupported response type: " + (contentType || "(empty)");
+            if (rawText) unknownDetail += "\n" + rawText.slice(0, 500);
+            setResponseContent(unknownDetail, false);
             if (oobEdgeC2P) { oobEdgeC2P.classList.remove("success"); oobEdgeC2P.classList.add("network-error"); }
           }
         } catch (e) {

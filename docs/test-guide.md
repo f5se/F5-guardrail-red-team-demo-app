@@ -25,25 +25,13 @@
 
 在页面左侧快捷测试面板里，**有些测试需要依赖打开Enterprise KB Skill**，在点击此类测试前，需确认设置界面中`Agent Skill Orchestration (F5 Guardrail Only)`为打开模式，即界面顶部应显示**Enterprise KB Skill ON** 而不是OFF。
 
-#### 1.2.1 Enterprise KB Skill 与 SaaS 端 Prompt Injection scanner 冲突告警状态条提示
+#### 1.2.1 Enterprise KB Skill 双项目切换
 
->此问题的核心背景是，当打开本地Agent的企业知识Skill能力后，当前CalypsoAI的 Prompt Injection scanner会产生误报行为，因此当打开Skill后希望SaaS侧该Scanner被disable，反之被enable。 由于当前Demo系统可能会存在多用户同时使用，不同用户对SKill都有独立设定，而SaaS端却只能复用一个Project，因此潜在的会存在冲突。所以设计了此功能。
+当启用 Enterprise KB Skill 时，Chat/Agent 的 Guardrail 请求会自动切换到 `.env` 中的第二套项目配置：
 
-- **告警显示以 SaaS 为准来检测**：应用会读取当前 `CALYPSOAI_PROJECT_ID` 下、`.env` 中 `PROMPT_INJECTION_SCANNER_ID` 所指向的 scanner 是否在 Project 配置里为 enabled。
-- **约定**：Enterprise KB Skill **ON** 时，建议在 SaaS **关闭**该 Prompt Injection scanner（减少 ReAct/JSON 误报）；Skill **OFF** 时，建议在 SaaS **开启**该 scanner。
-- **切换 Skill 自动检查**；若本地（含顶部徽章的会话开关）与 SaaS 不一致，页面**顶部橙色告警条**会说明可能原因（Calypso 控制台人工修改、其他用户点击「将 SaaS 同步为本地」、多账号共享同一 Project 等），并给出**建议的本地 Skill 开关状态**。
-- **操作**：可点「**按 SaaS 对齐本地**」更新本地Skill设置；或点「**将 SaaS 同步为本地**」并在**二次确认**后把 SaaS 改成与当前本地一致（**同一 Project 下所有用户共享，最后写入 SaaS 者生效**）。也可「暂不提示 10 分钟」仅隐藏漂移条（读状态失败时仍可点「重试检测」）。
-- **告警检查轮询**：程序启动完成后与之后按服务器配置的间隔（`.env` 中 `SCANNER_DRIFT_POLL_SECONDS`，默认 **300** 秒），以及从其他界面切换回 Chat 界面时，会进行一致性对比。不一致会出现告警信息。
-  
-  ```
-  简单的理解就是：
-  1.如果你确定是因要带企业知识Skill或不带Skill进行测试，那么就点”将 SaaS 同步为本地（需确认）“按钮，将SaaS侧强行按你的要求来设置。
-  2.如果你并不准备实际的测试，而是只是点着玩玩，那么就点 ”按SaaS对齐本地“ 来设定本地的Skill开关，这样可以避免真的影响别人的测试。
-  3.如果你没有频繁修改SKill开关，但突然出现告警提示，说明有可能是同时有其他用户在使用并修改了SaaS侧的设置，此时可根据自己实际需要：
-  如果真的需要测试，就点”将 SaaS 同步为本地（需确认）“。
-  4.如果你强行将SaaS同步为本地后，过一会又出现不一致提示，说明此时一定有人和你同时在做演示，双方都想让SaaS侧按照各自本地的要求来进行设置。
-  此时建议先采用按SaaS侧来同步本地Skill设置并进行测试，过一会后再根据自己需要调整本地Skill开关并同步到SaaS来做其他测试。
-  ```
+- Skill **ON**：`CALYPSOAI_PROJECT_ID_SECOND` + `CALYPSOAI_TOKEN_SECOND_PROJECT`
+- Skill **OFF**：`CALYPSOAI_PROJECT_ID` + `CALYPSOAI_TOKEN`
+
 
 #### 1.3 本地测试引擎与F5 Guardrail
 
@@ -76,9 +64,7 @@
 
 #### >注意问题
 
-1. 在 **Enterprise KB Skill ON** 场景下，若已在 SaaS **关闭** Prompt Injection scanner（与本应用约定一致），则部分非系统类 prompt injection 测试可能被放过；若 Skill OFF 且 SaaS 上该 scanner 为开启，行为会不同。请以顶部漂移告警与 SaaS 控制台实际配置为准。ReAct 模式下 Agent 会在 Prompt 中插入 JSON 与指令性文本，易触发误报，故约定 Skill ON 时关闭该 scanner。相关问题已反馈 CalypsoAI Team。
-   
-2. 在启用`Enterprise KB Skill ON`时，Agent指令里插入的JSON格式与指示性信息有时会干扰模型对核心用户输入语义的理解，进而导致一些自定义Scanner处理效果不佳，此时可考虑在这类自定义Scanner中增加`让忽略相关JSON格式与其内部指令`的说明。
+1. 在启用`Enterprise KB Skill ON`时，Agent 指令里插入的 JSON 格式与指示性信息有时会干扰模型对核心用户输入语义的理解，进而导致一些自定义 Scanner 处理效果不佳，此时可考虑在这类自定义 Scanner 中增加“忽略相关 JSON 格式与其内部指令”的说明。
 
    
 ----------------------
