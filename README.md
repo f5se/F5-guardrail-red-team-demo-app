@@ -193,20 +193,18 @@ source .venv/bin/activate   # Linux/macOS
 
 ### 依赖安装
 
-1. **F5 AI Security SDK**（必选）  
+1. **F5 AI Security SDK** 
    安装方式见官方文档：[First steps - Install the SDK](https://docs.aisecurity.f5.com/api-docs/first-steps.html#install-the-sdk)
 
-2. **其他依赖（含 Agentic Security / LangGraph）**
-
-**Agentic Security** 视图依赖 **LangGraph**（`langgraph` 包）。安装时会自动安装其传递依赖（如 `langchain-core` 等）。若未安装，`POST /api/agentic/run` 启动阶段会报错并提示先安装 LangGraph。
+2. **其他依赖**
 
 可任选其一：
 
 ```bash
-# 方式 A：下列单行安装（与历史文档中的 pip 列表一致，并增加 langgraph）
+# 方式 A：）
 pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf httpx geoip2 langgraph
 
-# 方式 B：使用项目根目录 requirements.txt（同样不含 Calypso SDK，需仍按上文单独安装）
+# 方式 B：）
 pip install -r requirements.txt
 ```
 

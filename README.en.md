@@ -206,17 +206,15 @@ source .venv/bin/activate   # Linux/macOS
 1. **F5 AI Security SDK** (required)  
    See official docs: [First steps - Install the SDK](https://docs.aisecurity.f5.com/api-docs/first-steps.html#install-the-sdk)
 
-2. **Other dependencies (including Agentic Security / LangGraph)**
-
-The **Agentic Security** view uses **LangGraph** (`langgraph` on PyPI). Installing it pulls transitive dependencies (e.g. `langchain-core`). If it is missing, building the LangGraph runner at `POST /api/agentic/run` fails with an error asking you to install LangGraph first.
+2. **Other dependencies**
 
 Use either:
 
 ```bash
-# Option A: one-line install (same package set as before, plus langgraph)
+# Option A:)
 pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf httpx geoip2 langgraph
 
-# Option B: project requirements.txt (still excludes the Calypso SDK—install that separately)
+# Option B:)
 pip install -r requirements.txt
 ```
 
