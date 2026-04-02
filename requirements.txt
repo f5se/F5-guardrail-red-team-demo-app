@@ -1,0 +1,12 @@
+# Third-party dependencies (see README: F5 Calypso SDK is installed separately).
+python-dotenv
+fastapi
+uvicorn
+pydantic
+jinja2
+transformers
+torch
+protobuf
+httpx
+geoip2
+langgraph

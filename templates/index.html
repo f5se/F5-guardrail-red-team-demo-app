@@ -26,6 +26,7 @@
             <button class="navBtn active" data-view="CHAT" id="btnChat">💬 AI Chatbot/Agent</button>
             <button class="navBtn" data-view="REDTEAM" id="btnRedTeam">🎯 Red Team</button>
             <button class="navBtn" data-view="GUARDRAIL_INTEGRATION" id="btnGuardrailIntegration">🛡️ Guardrail Integration</button>
+            <button class="navBtn" data-view="AGENTIC_SECURITY" id="btnAgenticSecurity">🤖 Agentic Security</button>
             <button class="navBtn" data-view="TEST_GUIDE" id="btnTestGuide">📖 Test Guide</button>
             <button class="navBtn" data-view="COMPLIANCE_REPORT" id="btnComplianceReport">📑 China Compliance Report</button>
             <button class="navBtn" data-view="SETTINGS" id="btnSettings">⚙️ Settings</button>
@@ -42,6 +43,16 @@
             </div>
             <div class="attackPanelBody" id="attackPanelBody">
               <!-- JS 动态渲染攻击分类和示例列表 -->
+            </div>
+          </div>
+        </aside>
+
+        <aside class="card agenticToolConfigCard" id="agenticToolConfigCard" style="display:none;">
+          <div class="agenticToolConfigHeader">Agentic Tool Config</div>
+          <div class="agenticToolConfigBody">
+            <div class="agenticToolConfigLeft">
+              <div class="agenticToolConfigLabel">Tools</div>
+              <div id="agenticToolConfigList" class="agenticToolConfigList"></div>
             </div>
           </div>
         </aside>
@@ -371,6 +382,119 @@
               <div class="uaCardTitle">Slowest sessions (Top 10)</div>
               <div class="uaCardDesc">Lists sessions with the largest Time To First Test since Login delay.</div>
               <div id="uaSlowSessions" class="uaChart"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AGENTIC SECURITY VIEW -->
+        <div class="panel agenticSecurityPanel" id="agenticSecurityView" style="display:none;">
+          <div class="agenticHeader">
+            <div class="agenticTitle">Agentic Security</div>
+            <div class="agenticSubtitle">一个围绕采购流程的Agentic AI，用于帮助自主分析采购流程中的风险并给出建议。</div>
+            <div class="agenticSubtitle">A Agentic AI centered around the procurement process, used to assist in independently analyzing risks in the procurement process and providing suggestions.</div>    
+          </div>
+          <div class="agenticControls">
+            <div class="agenticControlGroup agenticControlGroup--grow agenticPromptStack">
+              <label for="agenticRiskTemplate">Risk Prompt Template</label>
+              <select id="agenticRiskTemplate">
+                <option value="">Custom input (manual)</option>
+                <option value="__loading__">Loading templates...</option>
+              </select>
+              <label for="agenticPrompt">Prompt</label>
+              <textarea id="agenticPrompt" rows="3" placeholder="Describe the task for the multi-agent workflow..."></textarea>
+            </div>
+            <div class="agenticControlGroup agenticRunControl">
+              <button id="btnRunAgentic" type="button">Run Agentic Test</button>
+              <label class="agenticBypassLabel" for="agenticBypassGuardrail">
+                <input type="checkbox" id="agenticBypassGuardrail">
+                Bypass F5 Guardrail (Direct OpenAI-compatible)
+              </label>
+            </div>
+          </div>
+          <div class="agenticSessionRow">
+            <span>Session ID:</span>
+            <code id="agenticSessionId">-</code>
+            <span>Runtime:</span>
+            <code id="agenticRuntime">LangGraph</code>
+            <span>Provider:</span>
+            <code id="agenticProvider">deepseek-JingLin-real-charge</code>
+          </div>
+          <div class="agenticFlowViz" id="agenticFlowViz" aria-label="Agent execution flow">
+            <div class="agenticFlowTop">
+              <div class="agenticFlowNode" data-node="supervisor" title="SupervisorAgent">
+                <span class="agenticFlowNodeTitle">Supervisor</span>
+                <span class="agenticFlowNodeSub">plan / finalize</span>
+              </div>
+              <div class="agenticFlowEdge agenticFlowEdge--h" data-edge="supervisor-hub" aria-hidden="true">
+                <span class="agenticFlowEdgeLine"></span>
+                <span class="agenticFlowEdgeDots"></span>
+              </div>
+              <div class="agenticFlowHub" data-node="hub" title="Model endpoint">
+                <span class="agenticFlowHubIcon">◇</span>
+                <span class="agenticFlowHubTitle" id="agenticFlowHubTitle">F5 CalypsoAI · Guardrail</span>
+                <span class="agenticFlowHubSub" id="agenticFlowHubSub">OpenAI-compatible · Calypso session</span>
+              </div>
+              <div class="agenticFlowEdge agenticFlowEdge--h" data-edge="hub-research" aria-hidden="true">
+                <span class="agenticFlowEdgeLine"></span>
+                <span class="agenticFlowEdgeDots"></span>
+              </div>
+              <div class="agenticFlowNode" data-node="research" title="ResearchAgent">
+                <span class="agenticFlowNodeTitle">Research</span>
+                <span class="agenticFlowNodeSub">gather evidence</span>
+              </div>
+            </div>
+            <div class="agenticFlowBottom agenticFlowBottom--split">
+              <div class="agenticFlowBranch">
+                <div class="agenticFlowEdge agenticFlowEdge--v" data-edge="hub-action" aria-hidden="true">
+                  <span class="agenticFlowEdgeLine"></span>
+                  <span class="agenticFlowEdgeDots"></span>
+                </div>
+                <div class="agenticFlowNode" data-node="action" title="ActionAgent">
+                  <span class="agenticFlowNodeTitle">Action</span>
+                  <span class="agenticFlowNodeSub">tools / execute</span>
+                </div>
+              </div>
+              <div class="agenticFlowBranch">
+                <div class="agenticFlowEdge agenticFlowEdge--v" data-edge="hub-legal" aria-hidden="true">
+                  <span class="agenticFlowEdgeLine"></span>
+                  <span class="agenticFlowEdgeDots"></span>
+                </div>
+                <div class="agenticFlowNode" data-node="legal" title="LegalCounselAgent">
+                  <span class="agenticFlowNodeTitle">Legal counsel</span>
+                  <span class="agenticFlowNodeSub">brief legal review</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="agenticStatus" id="agenticStatus">Ready.</div>
+          <div class="agenticFinalCard">
+            <div class="agenticCardTitle">Final Result (Markdown)</div>
+            <div id="agenticFinalReply" class="agenticFinalReply">No final result yet.</div>
+          </div>
+          <div class="agenticToolEditorOverlay" id="agenticToolEditorOverlay" style="display:none;">
+            <div class="agenticToolEditorCard">
+              <div class="agenticToolConfigHeader">Tool Config Editor</div>
+              <div class="agenticToolEditorMain">
+                <div class="agenticToolConfigTopRow">
+                  <div id="agenticToolConfigTitle" class="agenticToolConfigTitle">Select a tool</div>
+                  <div class="agenticToolConfigTopActions">
+                    <button id="btnAgenticToolConfigCancel" type="button">Cancel</button>
+                    <button id="btnAgenticToolConfigSave" type="button">Save</button>
+                  </div>
+                </div>
+                <textarea id="agenticToolConfigEditor" class="agenticToolConfigEditor" placeholder="Tool config JSON"></textarea>
+                <div id="agenticToolConfigStatus" class="agenticToolConfigStatus">Click a tool on the left to edit.</div>
+              </div>
+            </div>
+          </div>
+          <div class="agenticGrid">
+            <div class="agenticCard">
+              <div class="agenticCardTitle">Step Timeline</div>
+              <div id="agenticTimeline" class="agenticTimeline"></div>
+            </div>
+            <div class="agenticCard">
+              <div class="agenticCardTitle">Tool Calls & Risk Events</div>
+              <div id="agenticToolPanel" class="agenticToolPanel"></div>
             </div>
           </div>
         </div>

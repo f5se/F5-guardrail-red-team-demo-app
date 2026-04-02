@@ -70,6 +70,9 @@ cp .env_example .env
 | `OOB_PROXY_URL` | OOB 模式下 NGINX Proxy 地址。**使用 OOB 时必填**，按实际部署填写（需与 docs/nginx 监听地址一致，如 `http://localhost:8787`） | `http://localhost:8787` |
 | `LLM_PROVIDER_KEY` | OOB 模式下发往 LLM 的 API Key（Bearer）。**使用 OOB 时必填**，按实际 LLM 提供商配置 | `Your-llm-provider-api-key` |
 | `OOB_MODEL` | OOB 请求使用的模型名。不填时**缺省为 `deepseek-chat`**；使用 OOB 时建议按实际调用的模型配置 | `deepseek-chat` |
+| `AGENTIC_BASE_URL` | **Agentic Security** 调用的 OpenAI-compatible **完整 Base URL**（含路径前缀，不含 `/chat/completions`）。留空时由后端使用 `CALYPSOAI_URL` + 内置 Provider 路径拼接 | `https://www.us1.calypsoai.app/openai/your-provider-slug` |
+| `AGENTIC_TOKEN` | Agentic Security 在走 Calypso 路径时的 Bearer Token。可与主项目令牌相同；若留空则**回退使用** `CALYPSOAI_TOKEN`（二者至少配置其一） | 与 `CALYPSOAI_TOKEN` 相同或独立令牌 |
+| `AGENTIC_MODEL` | Agentic Security 请求体中的 `model` 名称（OpenAI-compatible）。不填时默认 `deepseek-chat` | `deepseek-chat` |
 
 注意：你需要首先在 Calypso（F5 Guardrail）系统上设定相关 Project、Connection/Provider 及 Project API token。测试企业敏感信息防护等能力时，需在 F5 Guardrail 中提前配置 Custom scanner 等。
 提示：README 与 `.env_example` 中的 Key 都是示例占位符。
@@ -189,10 +192,18 @@ source .venv/bin/activate   # Linux/macOS
 1. **F5 AI Security SDK**（必选）  
    安装方式见官方文档：[First steps - Install the SDK](https://docs.aisecurity.f5.com/api-docs/first-steps.html#install-the-sdk)
 
-2. **其他依赖**
+2. **其他依赖（含 Agentic Security / LangGraph）**
+
+**Agentic Security** 视图依赖 **LangGraph**（`langgraph` 包）。安装时会自动安装其传递依赖（如 `langchain-core` 等）。若未安装，`POST /api/agentic/run` 启动阶段会报错并提示先安装 LangGraph。
+
+可任选其一：
 
 ```bash
-pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf httpx geoip2
+# 方式 A：下列单行安装（与历史文档中的 pip 列表一致，并增加 langgraph）
+pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf httpx geoip2 langgraph
+
+# 方式 B：使用项目根目录 requirements.txt（同样不含 Calypso SDK，需仍按上文单独安装）
+pip install -r requirements.txt
 ```
 
 #### 用户活动统计中的城市显示（GeoIP）
@@ -251,16 +262,20 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 - **Skills**：自动发现注册；企业知识库 Skill（本地目录，可配扩展名与字符上限）；可选 ReAct Agent 编排与步数。
 - **Guardrail 集成演示**：独立视图，Inline（请求经 Guardrail 检测）与 OOB（请求经 Proxy，Guardrail 旁路）两种模式及流程图、预设用例。
 - **Red Team 流水线**：模拟 CI/CD（提交→构建→部署→F5 Red Team 测试→安全决策），CASI 评分与人工审核/失败分支，示例报告；本演示为 Mock，不真实调用 Red Team API。
+- **Agentic Security（智能体安全仿真）**：基于 LangGraph 编排的多智能体工作流（Supervisor 规划与汇总、Research 取证、Action 工具执行、Legal Counsel 法务简评与附加对话），通过 Calypso **OpenAI-compatible** 接口调用模型并携带 `x-cai-metadata-session-id`，便于在 F5 AI Security 侧做会话级观测。内置采购风险类 Mock 工具与可配置业务数据（`config/agentic-tools-config.json`），支持风险场景模板（`config/agentic-risk-templates.json`）、步骤时间线、工具/风险标签面板、流程动效（进行中呼吸高亮、阶段成功完成绿色标识），以及可选「绕过 Guardrail 直连上游 LLM」对照运行。**Agentic Tool Config** 界面可在线编辑并保存工具域配置（含 Legal Counsel 两个可自定义的附加话题等）。最终实现中 Supervisor 产出用户可见结论后，由 Legal Counsel 追加不超过约 50 字的简要中文法律风险一句点评，并以纯对话形式各回答配置中的两个扩展话题。
+- **China Compliance Report（中国合规对照报告）**：导航中的独立视图，通过内嵌静态页 `compliance/index.html`（路由 `/compliance/index.html`）展示 **F5 LLM 安全保护能力与中国对 AI 合规性要求** 的映射与说明材料（中文排版），用于方案沟通与合规对照参考；内容以静态 HTML 为主，可按需直接修改 `compliance/` 下页面更新表述。另提供 `compliance/index_example.html` 可作为备份或改版参照。
 
 | 模块 | 实际能力 |
 |------|----------|
 | **护栏** | F5 云端 + 本地 ML（toxic-bert、protectai）；`f5_guardrail_only` 可仅用 F5；`guardrail_verbose` 可返回并展示 F5 Scanner 详情 |
-| **前端视图** | 四个入口：AI Chatbot/Agent、Red Team、Guardrail Integration、Settings |
+| **前端视图** | 导航含多视图：AI Chatbot/Agent、Red Team、Guardrail Integration、**Agentic Security**、Test Guide、**China Compliance Report**、Settings 等（部分视图如 User Activity 可按配置显示） |
 | **对话** | 单轮/多轮（滑动窗口）、攻击示例模板（`attack-presets.json`）、引擎状态条、回复 Markdown 渲染 |
 | **配置** | `settings.json` + UI：阈值、Pattern、KB 路径、Agent 步数、debug 写 raw JSON 等 |
 | **Skills** | `skills/` 自动发现注册；当前有 `read_enterprise_kb`（本地目录 KB）；可选 ReAct Agent 编排与 `agent_max_steps` |
 | **Guardrail 集成** | 独立视图：Inline（`/api/guardrail-scan`）与 OOB（`/api/oob-chat` 经 Proxy）两种模式、流程图、`guardrail-integration-presets.json` 预设 |
 | **Red Team** | 模拟 CI/CD 流水线（5 步 + 子步骤）、CASI 评分、人工审核/失败分支、`/redteam-report` 示例报告；**本演示为 Mock，不真实调用 Red Team API** |
+| **Agentic Security** | `POST /api/agentic/run` + `GET /api/agentic/run-trace`；LangGraph 状态机；Mock 工具与 `config/agentic-tools-config.json`、`config/agentic-risk-templates.json`；会话头直连 Calypso；步骤 trace、流程可视化、最终回复 Markdown |
+| **China Compliance Report** | iframe 嵌入 `compliance/index.html`；F5 能力与该国 AI 合规要点的对照说明（静态内容，可本地改版） |
 
 ---
 

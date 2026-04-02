@@ -21,12 +21,22 @@ const navButtons = Array.from(document.querySelectorAll(".navBtn"));
 
 // 攻击示例面板元素
 const attackCardEl = document.getElementById("attackCard");
+const agenticToolConfigCardEl = document.getElementById("agenticToolConfigCard");
+const agenticToolEditorOverlayEl = document.getElementById("agenticToolEditorOverlay");
+const agenticToolConfigListEl = document.getElementById("agenticToolConfigList");
+const agenticToolConfigTitleEl = document.getElementById("agenticToolConfigTitle");
+const agenticToolConfigEditorEl = document.getElementById("agenticToolConfigEditor");
+const agenticToolConfigStatusEl = document.getElementById("agenticToolConfigStatus");
+const btnAgenticToolConfigCancelEl = document.getElementById("btnAgenticToolConfigCancel");
+const btnAgenticToolConfigSaveEl = document.getElementById("btnAgenticToolConfigSave");
 const attackPanelBodyEl = document.getElementById("attackPanelBody");
 const attackPanelToggleEl = document.getElementById("attackPanelToggle");
 const attackPresets = Array.isArray(window.ATTACK_PRESETS) ? window.ATTACK_PRESETS : [];
 const guardrailIntegrationPresets = Array.isArray(window.GUARDRAIL_INTEGRATION_PRESETS) ? window.GUARDRAIL_INTEGRATION_PRESETS : [];
 let attackTooltipEl = null;
 let activeView = "CHAT";
+let agenticToolConfigData = null;
+let agenticSelectedTool = "";
 let currentBackendProviderName = "";
 let directModeAvailable = false;
 
@@ -34,6 +44,7 @@ function getViewBreadcrumbLabel(view) {
   if (view === "SETTINGS") return "Settings";
   if (view === "REDTEAM") return "Red Team";
   if (view === "GUARDRAIL_INTEGRATION") return "Guardrail Integration";
+  if (view === "AGENTIC_SECURITY") return "Agentic Security";
   if (view === "TEST_GUIDE") return "Test Guide";
   if (view === "COMPLIANCE_REPORT") return "Compliance Report";
   if (view === "USER_ACTIVITY") return "User Activity Analytics";
@@ -767,13 +778,33 @@ toggleMultiTurnEl.addEventListener("change", () => {
 
 const redteamView = document.getElementById("redteamView");
 const guardrailIntegrationView = document.getElementById("guardrailIntegrationView");
+const agenticSecurityView = document.getElementById("agenticSecurityView");
 const testGuideView = document.getElementById("testGuideView");
 const complianceReportView = document.getElementById("complianceReportView");
 const complianceReportFrame = document.getElementById("complianceReportFrame");
 const userActivityPanelView = document.getElementById("userActivityView");
 const testGuideContentEl = document.getElementById("testGuideContent");
+const agenticRiskTemplateEl = document.getElementById("agenticRiskTemplate");
+const agenticPromptEl = document.getElementById("agenticPrompt");
+const agenticBypassGuardrailEl = document.getElementById("agenticBypassGuardrail");
+const btnRunAgenticEl = document.getElementById("btnRunAgentic");
+const agenticSessionIdEl = document.getElementById("agenticSessionId");
+const agenticRuntimeEl = document.getElementById("agenticRuntime");
+const agenticProviderEl = document.getElementById("agenticProvider");
+const agenticStatusEl = document.getElementById("agenticStatus");
+const agenticFinalReplyEl = document.getElementById("agenticFinalReply");
+const agenticTimelineEl = document.getElementById("agenticTimeline");
+const agenticToolPanelEl = document.getElementById("agenticToolPanel");
+const agenticFlowVizEl = document.getElementById("agenticFlowViz");
+const agenticFlowHubTitleEl = document.getElementById("agenticFlowHubTitle");
+const agenticFlowHubSubEl = document.getElementById("agenticFlowHubSub");
 const engineRow = document.getElementById("engineRow");
 const layoutEl = document.querySelector(".layout");
+
+let agenticRiskPromptTemplates = {};
+let agenticSelectedScenario = "unsafe_procurement";
+let agenticRunningAnimTimer = null;
+let agenticRunningAnimFrame = 0;
 
 let testGuideLoaded = false;
 
@@ -806,6 +837,461 @@ function setUserActivityStatus(text, isError){
   if (!userActivityStatusEl) return;
   userActivityStatusEl.textContent = text || "";
   userActivityStatusEl.classList.toggle("error", !!isError);
+}
+
+function setAgenticStatus(text, isError){
+  if (!agenticStatusEl) return;
+  agenticStatusEl.textContent = text || "";
+  agenticStatusEl.classList.toggle("error", !!isError);
+}
+
+function renderAgenticFinalReply(markdownText){
+  if (!agenticFinalReplyEl) return;
+  const txt = String(markdownText || "").trim();
+  if (!txt) {
+    agenticFinalReplyEl.textContent = "No final result yet.";
+    return;
+  }
+  agenticFinalReplyEl.innerHTML = renderMarkdown(txt);
+}
+
+function agenticAgentNameToFlowNode(agentName){
+  const a = String(agentName || "").toLowerCase();
+  if (a.indexOf("supervisor") >= 0) return "supervisor";
+  if (a.indexOf("research") >= 0) return "research";
+  if (a.indexOf("action") >= 0) return "action";
+  if (a.indexOf("legal") >= 0) return "legal";
+  return null;
+}
+
+function computeAgenticFlowCompletedNodes(trace){
+  const rows = Array.isArray(trace) ? trace : [];
+  const isBlocked = item => String(item.guardrail_outcome || "").toLowerCase() === "blocked";
+  const nodeOf = item => agenticAgentNameToFlowNode(item.agent_name);
+  const supBlocked = rows.some(r => nodeOf(r) === "supervisor" && isBlocked(r));
+  const resBlocked = rows.some(r => nodeOf(r) === "research" && isBlocked(r));
+  const actBlocked = rows.some(r => nodeOf(r) === "action" && isBlocked(r));
+  const legBlocked = rows.some(r => nodeOf(r) === "legal" && isBlocked(r));
+  const hasFinalize = rows.some(r => {
+    if (nodeOf(r) !== "supervisor") return false;
+    return String(r.action_type || "").toLowerCase() === "finalize" && !isBlocked(r);
+  });
+  const hasActionAgent = rows.some(r => nodeOf(r) === "action");
+  const hasLegalSecond = rows.some(r => {
+    if (nodeOf(r) !== "legal") return false;
+    if (String(r.action_type || "").toLowerCase() !== "simple_dialog") return false;
+    return Number(r.dialog_topic_index) === 2 && !isBlocked(r);
+  });
+  const done = new Set();
+  if (hasFinalize && !supBlocked) done.add("supervisor");
+  if (hasActionAgent && !resBlocked) done.add("research");
+  if (hasFinalize && !actBlocked) done.add("action");
+  if (hasLegalSecond && !legBlocked) done.add("legal");
+  return done;
+}
+
+function updateAgenticFlowVisualization(trace, options){
+  const bypass = !!(options && options.bypass);
+  const running = !!(options && options.running);
+  if (!agenticFlowVizEl) return;
+  if (agenticFlowHubTitleEl) {
+    agenticFlowHubTitleEl.textContent = bypass ? "LLM" : "F5 CalypsoAI · Guardrail";
+  }
+  if (agenticFlowHubSubEl) {
+    agenticFlowHubSubEl.textContent = bypass ? "OpenAI-compatible · direct" : "OpenAI-compatible · Calypso session";
+  }
+  agenticFlowVizEl.querySelectorAll(".agenticFlowNode").forEach(el => {
+    el.classList.remove("agenticFlowNode--active", "agenticFlowNode--blocked", "agenticFlowNode--done");
+  });
+  const hubEl = agenticFlowVizEl.querySelector(".agenticFlowHub");
+  if (hubEl) hubEl.classList.remove("agenticFlowHub--blocked", "agenticFlowHub--comm", "agenticFlowHub--done");
+  agenticFlowVizEl.querySelectorAll(".agenticFlowEdge").forEach(el => {
+    el.classList.remove("agenticFlowEdge--active", "agenticFlowEdge--blocked");
+  });
+
+  const rows = Array.isArray(trace) ? trace : [];
+  let hubBlocked = false;
+  const blockedAgents = new Set();
+  rows.forEach(item => {
+    if (String(item.guardrail_outcome || "").toLowerCase() === "blocked") {
+      hubBlocked = true;
+      const n = agenticAgentNameToFlowNode(item.agent_name);
+      if (n) blockedAgents.add(n);
+    }
+  });
+  if (hubBlocked && hubEl) hubEl.classList.add("agenticFlowHub--blocked");
+  blockedAgents.forEach(n => {
+    const el = agenticFlowVizEl.querySelector(".agenticFlowNode[data-node=\"" + n + "\"]");
+    if (el) el.classList.add("agenticFlowNode--blocked");
+  });
+  if (hubBlocked) {
+    agenticFlowVizEl.querySelectorAll(".agenticFlowEdge").forEach(el => {
+      el.classList.add("agenticFlowEdge--blocked");
+    });
+  }
+
+  const completedNodes = computeAgenticFlowCompletedNodes(rows);
+  const flowNodeKeys = ["supervisor", "research", "action", "legal"];
+  flowNodeKeys.forEach(key => {
+    if (blockedAgents.has(key)) return;
+    const el = agenticFlowVizEl.querySelector(".agenticFlowNode[data-node=\"" + key + "\"]");
+    if (el && completedNodes.has(key)) el.classList.add("agenticFlowNode--done");
+  });
+
+  if (hubEl && !running && !hubBlocked && flowNodeKeys.every(k => completedNodes.has(k))) {
+    hubEl.classList.add("agenticFlowHub--done");
+  }
+
+  if (!running) return;
+
+  let active = "supervisor";
+  let lastRow = null;
+  if (rows.length) {
+    lastRow = rows[rows.length - 1];
+    const mapped = agenticAgentNameToFlowNode(lastRow.agent_name);
+    if (mapped) active = mapped;
+  }
+  const activeNode = agenticFlowVizEl.querySelector(".agenticFlowNode[data-node=\"" + active + "\"]");
+  if (activeNode && !activeNode.classList.contains("agenticFlowNode--blocked")) {
+    activeNode.classList.remove("agenticFlowNode--done");
+    activeNode.classList.add("agenticFlowNode--active");
+  }
+  const isToolStep = lastRow && String(lastRow.action_type || "").toLowerCase() === "tool_call";
+  if (isToolStep) {
+    return;
+  }
+  if (active === "supervisor") {
+    const e = agenticFlowVizEl.querySelector(".agenticFlowEdge[data-edge=\"supervisor-hub\"]");
+    if (e && !e.classList.contains("agenticFlowEdge--blocked")) e.classList.add("agenticFlowEdge--active");
+  } else if (active === "research") {
+    const e = agenticFlowVizEl.querySelector(".agenticFlowEdge[data-edge=\"hub-research\"]");
+    if (e && !e.classList.contains("agenticFlowEdge--blocked")) e.classList.add("agenticFlowEdge--active");
+  } else if (active === "action") {
+    const e = agenticFlowVizEl.querySelector(".agenticFlowEdge[data-edge=\"hub-action\"]");
+    if (e && !e.classList.contains("agenticFlowEdge--blocked")) e.classList.add("agenticFlowEdge--active");
+  } else if (active === "legal") {
+    const e = agenticFlowVizEl.querySelector(".agenticFlowEdge[data-edge=\"hub-legal\"]");
+    if (e && !e.classList.contains("agenticFlowEdge--blocked")) e.classList.add("agenticFlowEdge--active");
+  }
+  if (hubEl && !hubBlocked) {
+    const anyComm = !!agenticFlowVizEl.querySelector(".agenticFlowEdge--active");
+    if (anyComm) hubEl.classList.add("agenticFlowHub--comm");
+  }
+}
+
+function startAgenticRunningStatusAnimation(baseText){
+  stopAgenticRunningStatusAnimation();
+  const text = String(baseText || "Running agentic simulation");
+  const tick = () => {
+    const dots = ".".repeat((agenticRunningAnimFrame % 4));
+    setAgenticStatus(text + dots, false);
+    agenticRunningAnimFrame += 1;
+  };
+  agenticRunningAnimFrame = 0;
+  tick();
+  agenticRunningAnimTimer = setInterval(tick, 420);
+}
+
+function stopAgenticRunningStatusAnimation(){
+  if (agenticRunningAnimTimer) {
+    clearInterval(agenticRunningAnimTimer);
+    agenticRunningAnimTimer = null;
+  }
+}
+
+function setAgenticToolConfigStatus(text, isError){
+  if (!agenticToolConfigStatusEl) return;
+  agenticToolConfigStatusEl.textContent = text || "";
+  agenticToolConfigStatusEl.style.color = isError ? "#b42318" : "#64748b";
+}
+
+function getAgenticToolNames(){
+  return [
+    "get_vendor_profile",
+    "get_price_history",
+    "search_policy_docs",
+    "create_risk_report",
+    "submit_approval_request",
+    "notify_procurement",
+    "send_email",
+    "legal_counsel"
+  ];
+}
+
+function buildToolScopedConfig(toolName, cfg){
+  const conf = cfg || {};
+  if (toolName === "get_vendor_profile") {
+    return { defaults: conf.defaults || {}, vendors: conf.vendors || {} };
+  }
+  if (toolName === "get_price_history") {
+    return { defaults: conf.defaults || {}, prices: conf.prices || {} };
+  }
+  if (toolName === "search_policy_docs") {
+    return { policies: conf.policies || [] };
+  }
+  if (toolName === "create_risk_report") {
+    return { defaults: conf.defaults || {}, vendors: conf.vendors || {} };
+  }
+  if (toolName === "submit_approval_request") {
+    return { defaults: conf.defaults || {} };
+  }
+  if (toolName === "notify_procurement") {
+    return { defaults: conf.defaults || {} };
+  }
+  if (toolName === "send_email") {
+    return { defaults: conf.defaults || {} };
+  }
+  if (toolName === "legal_counsel") {
+    return {
+      legal_counsel: Object.assign(
+        { followup_topic_1: "", followup_topic_2: "" },
+        conf.legal_counsel && typeof conf.legal_counsel === "object" ? conf.legal_counsel : {}
+      )
+    };
+  }
+  return conf;
+}
+
+function applyToolScopedConfig(toolName, edited, current){
+  const base = current || {};
+  if (!toolName || !edited || typeof edited !== "object") return base;
+  if (toolName === "get_vendor_profile") {
+    if (edited.defaults && typeof edited.defaults === "object") base.defaults = edited.defaults;
+    if (edited.vendors && typeof edited.vendors === "object") base.vendors = edited.vendors;
+    return base;
+  }
+  if (toolName === "get_price_history") {
+    if (edited.defaults && typeof edited.defaults === "object") base.defaults = edited.defaults;
+    if (edited.prices && typeof edited.prices === "object") base.prices = edited.prices;
+    return base;
+  }
+  if (toolName === "search_policy_docs") {
+    if (Array.isArray(edited.policies)) base.policies = edited.policies;
+    return base;
+  }
+  if (toolName === "create_risk_report" || toolName === "submit_approval_request" || toolName === "notify_procurement" || toolName === "send_email") {
+    if (edited.defaults && typeof edited.defaults === "object") base.defaults = edited.defaults;
+    if (edited.vendors && typeof edited.vendors === "object") base.vendors = edited.vendors;
+    return base;
+  }
+  if (toolName === "legal_counsel") {
+    if (edited.legal_counsel && typeof edited.legal_counsel === "object") base.legal_counsel = edited.legal_counsel;
+    return base;
+  }
+  return base;
+}
+
+function renderAgenticToolConfigPanel(){
+  if (!agenticToolConfigListEl || !agenticToolConfigEditorEl) return;
+  const toolNames = getAgenticToolNames();
+  agenticToolConfigListEl.innerHTML = toolNames.map(name => {
+    const active = name === agenticSelectedTool ? " active" : "";
+    return "<button type=\"button\" class=\"agenticToolConfigItem" + active + "\" data-tool=\"" + escapeHtml(name) + "\">" + escapeHtml(name) + "</button>";
+  }).join("");
+  Array.from(agenticToolConfigListEl.querySelectorAll(".agenticToolConfigItem")).forEach(btn => {
+    btn.addEventListener("click", () => {
+      agenticSelectedTool = btn.getAttribute("data-tool") || "";
+      if (agenticToolEditorOverlayEl && activeView === "AGENTIC_SECURITY") {
+        agenticToolEditorOverlayEl.style.display = "";
+      }
+      renderAgenticToolConfigPanel();
+    });
+  });
+  if (agenticToolConfigTitleEl) {
+    agenticToolConfigTitleEl.textContent = agenticSelectedTool ? ("Config · " + agenticSelectedTool) : "Select a tool";
+  }
+  if (!agenticSelectedTool) {
+    agenticToolConfigEditorEl.value = "";
+    setAgenticToolConfigStatus("Click a tool on the left to edit.", false);
+    if (agenticToolEditorOverlayEl) agenticToolEditorOverlayEl.style.display = "none";
+    return;
+  }
+  const scoped = buildToolScopedConfig(agenticSelectedTool, agenticToolConfigData || {});
+  agenticToolConfigEditorEl.value = JSON.stringify(scoped, null, 2);
+}
+
+async function loadAgenticToolConfig(){
+  if (!agenticToolConfigCardEl) return;
+  setAgenticToolConfigStatus("Loading tool config...", false);
+  try {
+    const resp = await authFetch("/api/agentic/tool-config", { cache: "no-store" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const data = await resp.json();
+    agenticToolConfigData = data;
+    agenticSelectedTool = "";
+    renderAgenticToolConfigPanel();
+    setAgenticToolConfigStatus("Loaded.", false);
+  } catch (e) {
+    setAgenticToolConfigStatus("Load failed: " + (e?.message || String(e)), true);
+  }
+}
+
+async function saveAgenticToolConfig(){
+  if (!agenticToolConfigEditorEl || !agenticSelectedTool) return;
+  let edited = null;
+  try {
+    edited = JSON.parse(agenticToolConfigEditorEl.value || "{}");
+  } catch (e) {
+    setAgenticToolConfigStatus("JSON parse failed: " + (e?.message || String(e)), true);
+    return;
+  }
+  const merged = applyToolScopedConfig(agenticSelectedTool, edited, agenticToolConfigData || {});
+  setAgenticToolConfigStatus("Saving...", false);
+  try {
+    const resp = await authFetch("/api/agentic/tool-config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(merged)
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
+    agenticToolConfigData = data.config || merged;
+    renderAgenticToolConfigPanel();
+    setAgenticToolConfigStatus("Saved. New config takes effect immediately.", false);
+    if (agenticToolEditorOverlayEl) agenticToolEditorOverlayEl.style.display = "none";
+  } catch (e) {
+    setAgenticToolConfigStatus("Save failed: " + (e?.message || String(e)), true);
+  }
+}
+
+function renderAgenticTimeline(trace){
+  if (!agenticTimelineEl) return;
+  const rows = Array.isArray(trace) ? trace : [];
+  if (!rows.length) {
+    agenticTimelineEl.innerHTML = "<div class=\"agenticEmpty\">No steps yet.</div>";
+    return;
+  }
+  agenticTimelineEl.innerHTML = rows.map(item => {
+    const blocked = String(item.guardrail_outcome || "").toLowerCase() === "blocked";
+    const outcomeClass = blocked ? "agenticStepOutcome--blocked" : "agenticStepOutcome--ok";
+    const summary = escapeHtml(String(item.summary || ""));
+    const agent = escapeHtml(String(item.agent_name || "UnknownAgent"));
+    const actionType = escapeHtml(String(item.action_type || "event"));
+    const stepIndex = escapeHtml(String(item.step_index || "-"));
+    const outcome = escapeHtml(String(item.guardrail_outcome || item.outcome || "unknown"));
+    const routeDecision = escapeHtml(String(item.route_decision || ""));
+    const routeLine = routeDecision ? ("<div class=\"agenticStepRoute\">Route: " + routeDecision + "</div>") : "";
+    const tags = Array.isArray(item.risk_tags) ? item.risk_tags : [];
+    const riskHint = tags.length
+      ? ("<div class=\"agenticStepRoute\">Risk Hint: " + tags.map(tag => escapeHtml(String(tag))).join(", ") + "</div>")
+      : "";
+    const failedScanners = Array.isArray(item.failed_scanner_ids) ? item.failed_scanner_ids : [];
+    const failedScannerLine = failedScanners.length
+      ? ("<div class=\"agenticStepRoute\">Failed scanners: " + failedScanners.map(id => escapeHtml(String(id))).join(", ") + "</div>")
+      : "";
+    return (
+      "<div class=\"agenticStepItem\">" +
+        "<div class=\"agenticStepHead\">" +
+          "<span class=\"agenticStepIndex\">Step " + stepIndex + "</span>" +
+          "<span class=\"agenticStepAgent\">" + agent + "</span>" +
+          "<span class=\"agenticStepType\">" + actionType + "</span>" +
+          "<span class=\"agenticStepOutcome " + outcomeClass + "\">" + outcome + "</span>" +
+        "</div>" +
+        "<div class=\"agenticStepSummary\">" + summary + "</div>" +
+        riskHint +
+        failedScannerLine +
+        routeLine +
+      "</div>"
+    );
+  }).join("");
+}
+
+function renderAgenticToolPanel(trace){
+  if (!agenticToolPanelEl) return;
+  const rows = Array.isArray(trace) ? trace.filter(item => item && (item.tool_name || (Array.isArray(item.risk_tags) && item.risk_tags.length))) : [];
+  if (!rows.length) {
+    agenticToolPanelEl.innerHTML = "<div class=\"agenticEmpty\">No tool calls or risk tags for current run.</div>";
+    return;
+  }
+  agenticToolPanelEl.innerHTML = rows.map(item => {
+    const toolName = escapeHtml(String(item.tool_name || "-"));
+    const argsText = escapeHtml(JSON.stringify(item.tool_args || {}, null, 0));
+    const resultText = escapeHtml(JSON.stringify(item.tool_result || {}, null, 2));
+    const tags = Array.isArray(item.risk_tags) ? item.risk_tags : [];
+    const tagsHtml = tags.length
+      ? tags.map(tag => "<span class=\"agenticRiskTag\">" + escapeHtml(String(tag)) + "</span>").join("")
+      : "<span class=\"agenticRiskTag agenticRiskTag--none\">none</span>";
+    return (
+      "<div class=\"agenticToolItem\">" +
+        "<div><strong>Tool:</strong> " + toolName + "</div>" +
+        "<div><strong>Args:</strong> <code>" + argsText + "</code></div>" +
+        "<div><strong>Risk Tags:</strong> " + tagsHtml + "</div>" +
+        "<details class=\"agenticToolRaw\">" +
+          "<summary>View raw tool_result</summary>" +
+          "<pre><code>" + resultText + "</code></pre>" +
+        "</details>" +
+      "</div>"
+    );
+  }).join("");
+}
+
+async function runAgenticSecurity(){
+  if (!btnRunAgenticEl) return;
+  const prompt = (agenticPromptEl?.value || "").trim();
+  if (!prompt) {
+    setAgenticStatus("Please input a prompt first.", true);
+    return;
+  }
+  const scenario = (agenticSelectedScenario || "unsafe_procurement").trim();
+  const bypassF5Guardrail = !!agenticBypassGuardrailEl?.checked;
+  const sessionId = "agentic-" + Date.now() + "-" + Math.random().toString(16).slice(2, 10);
+  btnRunAgenticEl.disabled = true;
+  if (agenticSessionIdEl) agenticSessionIdEl.textContent = sessionId;
+  startAgenticRunningStatusAnimation("Running agentic simulation");
+  renderAgenticFinalReply("");
+  let poller = null;
+  let lastPolledTrace = [];
+  const pollTrace = async (flowDone) => {
+    try {
+      const traceResp = await authFetch("/api/agentic/run-trace?session_id=" + encodeURIComponent(sessionId), { cache: "no-store" });
+      if (!traceResp.ok) return;
+      const traceData = await traceResp.json();
+      const trace = Array.isArray(traceData.trace) ? traceData.trace : [];
+      lastPolledTrace = trace;
+      renderAgenticTimeline(trace);
+      renderAgenticToolPanel(trace);
+      updateAgenticFlowVisualization(trace, { running: !flowDone, bypass: bypassF5Guardrail });
+    } catch (_e) {
+      // ignore transient polling errors
+    }
+  };
+  poller = setInterval(() => { void pollTrace(false); }, 1200);
+  void pollTrace(false);
+  try {
+    const res = await authFetch("/api/agentic/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, scenario, bypass_f5_guardrail: bypassF5Guardrail, session_id: sessionId })
+    });
+    const data = await res.json();
+    if (agenticSessionIdEl) agenticSessionIdEl.textContent = data.session_id || "-";
+    if (agenticRuntimeEl) agenticRuntimeEl.textContent = data.runtime_engine || "LangGraph";
+    if (agenticProviderEl) agenticProviderEl.textContent = data.provider || "deepseek-JingLin-real-charge";
+    renderAgenticTimeline(data.trace || []);
+    renderAgenticToolPanel(data.trace || []);
+    updateAgenticFlowVisualization(data.trace || [], { running: false, bypass: bypassF5Guardrail });
+    if (!res.ok) {
+      stopAgenticRunningStatusAnimation();
+      const scanners = Array.isArray(data.failed_scanner_ids) ? data.failed_scanner_ids : [];
+      const scannerText = scanners.length ? (" | failed scanners: " + scanners.join(", ")) : "";
+      const msg = data.error_message || data.detail || ("HTTP " + res.status);
+      setAgenticStatus("Agentic run blocked: " + msg + scannerText, true);
+      renderAgenticFinalReply("");
+      return;
+    }
+    stopAgenticRunningStatusAnimation();
+    renderAgenticFinalReply(data.reply || "");
+    setAgenticStatus("Completed.", !!(data.risk_detected || data.blocked));
+  } catch (e) {
+    stopAgenticRunningStatusAnimation();
+    setAgenticStatus("Agentic run failed: " + (e?.message || String(e)), true);
+    renderAgenticFinalReply("");
+  } finally {
+    stopAgenticRunningStatusAnimation();
+    if (poller) clearInterval(poller);
+    await pollTrace(true);
+    btnRunAgenticEl.disabled = false;
+  }
 }
 
 function buildSimpleBarList(items, nameKey, valueKey, emptyText){
@@ -1071,6 +1557,9 @@ function setActiveView(view){
   settingsView.style.display = "none";
   redteamView.style.display = "none";
   if (guardrailIntegrationView) guardrailIntegrationView.style.display = "none";
+  if (agenticToolConfigCardEl) agenticToolConfigCardEl.style.display = "none";
+  if (agenticToolEditorOverlayEl) agenticToolEditorOverlayEl.style.display = "none";
+  if (agenticSecurityView) agenticSecurityView.style.display = "none";
   if (testGuideView) testGuideView.style.display = "none";
   if (complianceReportView) complianceReportView.style.display = "none";
   if (userActivityPanelView) userActivityPanelView.style.display = "none";
@@ -1088,11 +1577,13 @@ function setActiveView(view){
     setChatSubtitle();
     if (guardrailCardEl) guardrailCardEl.style.display = "";
     if (layoutEl) layoutEl.classList.add("layout--with-guardrail");
+    if (layoutEl) layoutEl.classList.remove("layout--agentic-security");
     inputEl.focus();
   } else {
     if (attackCardEl) attackCardEl.style.display = "none";
     if (guardrailCardEl) guardrailCardEl.style.display = "none";
     if (layoutEl) layoutEl.classList.remove("layout--with-guardrail");
+    if (layoutEl) layoutEl.classList.remove("layout--agentic-security");
     if (view === "SETTINGS"){
       chatTitleEl.textContent = "Settings";
       settingsView.style.display = "";
@@ -1106,6 +1597,17 @@ function setActiveView(view){
       if (guardrailIntegrationView) guardrailIntegrationView.style.display = "";
       if (attackCardEl) attackCardEl.style.display = "";
       if (subEl) subEl.textContent = "F5 AI Guardrail 与 LLM Provider 集成架构与安全检查流程演示";
+    } else if (view === "AGENTIC_SECURITY"){
+      chatTitleEl.textContent = "Agentic Security";
+      if (agenticSecurityView) agenticSecurityView.style.display = "";
+      if (agenticToolConfigCardEl) agenticToolConfigCardEl.style.display = "";
+      if (guardrailCardEl) guardrailCardEl.style.display = "none";
+      if (layoutEl) layoutEl.classList.remove("layout--with-guardrail");
+      if (layoutEl) layoutEl.classList.add("layout--agentic-security");
+      if (subEl) subEl.textContent = "Independent multi-agent risk simulation with step-level visualization";
+      void loadAgenticToolConfig();
+      void loadAgenticRiskTemplates();
+      updateAgenticFlowVisualization([], { running: false, bypass: !!agenticBypassGuardrailEl?.checked });
     } else if (view === "TEST_GUIDE"){
       chatTitleEl.textContent = "Test Guide";
       if (testGuideView) testGuideView.style.display = "";
@@ -1127,6 +1629,53 @@ function setActiveView(view){
 }
 navButtons.forEach(btn => {
   btn.addEventListener("click", () => setActiveView(btn.dataset.view));
+});
+agenticRiskTemplateEl?.addEventListener("change", () => {
+  const key = (agenticRiskTemplateEl.value || "").trim();
+  if (!key) return;
+  const tpl = agenticRiskPromptTemplates[key];
+  if (!tpl) return;
+  if (agenticPromptEl && tpl.prompt) {
+    agenticPromptEl.value = tpl.prompt;
+  }
+  if (tpl.scenario) agenticSelectedScenario = String(tpl.scenario);
+});
+
+async function loadAgenticRiskTemplates(){
+  if (!agenticRiskTemplateEl) return;
+  try {
+    const resp = await authFetch("/api/agentic/risk-templates", { cache: "no-store" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const data = await resp.json();
+    const templates = Array.isArray(data.templates) ? data.templates : [];
+    agenticRiskPromptTemplates = {};
+    const options = ["<option value=\"\">Custom input (manual)</option>"];
+    templates.forEach((t) => {
+      if (!t || typeof t !== "object") return;
+      const id = String(t.id || "").trim();
+      const label = String(t.label || id || "Template").trim();
+      const prompt = String(t.prompt || "").trim();
+      if (!id || !prompt) return;
+      agenticRiskPromptTemplates[id] = {
+        scenario: String(t.scenario || "unsafe_procurement"),
+        prompt
+      };
+      options.push("<option value=\"" + escapeHtml(id) + "\">" + escapeHtml(label) + "</option>");
+    });
+    agenticRiskTemplateEl.innerHTML = options.join("");
+  } catch (_e) {
+    agenticRiskTemplateEl.innerHTML = "<option value=\"\">Custom input (manual)</option>";
+  }
+}
+btnRunAgenticEl?.addEventListener("click", () => void runAgenticSecurity());
+btnAgenticToolConfigCancelEl?.addEventListener("click", () => {
+  if (agenticToolEditorOverlayEl) agenticToolEditorOverlayEl.style.display = "none";
+});
+btnAgenticToolConfigSaveEl?.addEventListener("click", () => void saveAgenticToolConfig());
+agenticToolEditorOverlayEl?.addEventListener("click", (e) => {
+  if (e.target === agenticToolEditorOverlayEl) {
+    agenticToolEditorOverlayEl.style.display = "none";
+  }
 });
 
 function buildChatSubtitle(){

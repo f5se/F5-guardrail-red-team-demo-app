@@ -82,6 +82,9 @@ Variables in `.env_example`:
 | `OOB_PROXY_URL` | NGINX Proxy URL for OOB mode. **Required when using OOB**; must match the docs/nginx listen address (e.g. `http://localhost:8787`). | `http://localhost:8787` |
 | `LLM_PROVIDER_KEY` | API Key (Bearer) sent to the LLM in OOB mode. **Required when using OOB**; set per your LLM provider. | `Your-llm-provider-api-key` |
 | `OOB_MODEL` | Model name for OOB requests. **Default `deepseek-chat`** when unset; when using OOB, set to your actual model. | `deepseek-chat` |
+| `AGENTIC_BASE_URL` | Full OpenAI-compatible **base URL** for **Agentic Security** (path prefix included; **no** `/chat/completions`). If empty, the backend builds a URL from `CALYPSOAI_URL` plus a built-in provider path segment | `https://www.us1.calypsoai.app/openai/your-provider-slug` |
+| `AGENTIC_TOKEN` | Bearer token for Agentic Security when using the Calypso OpenAI-compatible route. May match the main project token; if unset, **`CALYPSOAI_TOKEN` is used as fallback** (configure at least one) | Same as `CALYPSOAI_TOKEN` or a dedicated token |
+| `AGENTIC_MODEL` | `model` field in Agentic Security chat-completions requests. Default `deepseek-chat` when unset | `deepseek-chat` |
 
 **Note:** Configure the corresponding Project, Connection/Provider, and Project API token in Calypso (F5 Guardrail) first. For features like enterprise-sensitive data protection, configure Custom scanners in the F5 Guardrail system in advance.
 Security note: Keys shown in README and `.env_example` are placeholders only.
@@ -199,10 +202,18 @@ source .venv/bin/activate   # Linux/macOS
 1. **F5 AI Security SDK** (required)  
    See official docs: [First steps - Install the SDK](https://docs.aisecurity.f5.com/api-docs/first-steps.html#install-the-sdk)
 
-2. **Other dependencies**
+2. **Other dependencies (including Agentic Security / LangGraph)**
+
+The **Agentic Security** view uses **LangGraph** (`langgraph` on PyPI). Installing it pulls transitive dependencies (e.g. `langchain-core`). If it is missing, building the LangGraph runner at `POST /api/agentic/run` fails with an error asking you to install LangGraph first.
+
+Use either:
 
 ```bash
-pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf httpx geoip2
+# Option A: one-line install (same package set as before, plus langgraph)
+pip install python-dotenv fastapi uvicorn pydantic jinja2 transformers torch protobuf httpx geoip2 langgraph
+
+# Option B: project requirements.txt (still excludes the Calypso SDK—install that separately)
+pip install -r requirements.txt
 ```
 
 #### City Display in User Activity Analytics (GeoIP)
@@ -261,16 +272,20 @@ On first run, the app will download local detection models from Hugging Face (e.
 - **Skills:** Auto-discovered registry; enterprise KB Skill (local directory, configurable extensions and limits); optional ReAct agent orchestration and step count.
 - **Guardrail Integration view:** Dedicated view for Inline (request via Guardrail) vs OOB (request via Proxy, Guardrail on the side) with flow diagrams and preset prompts.
 - **Red Team pipeline:** Simulated CI/CD (commit→build→deploy→F5 Red Team test→security decision), CASI score and manual review/fail branches, sample report link; demo is Mock (no real Red Team API calls).
+- **Agentic Security:** A LangGraph-style multi-agent workflow (Supervisor planning and final user-facing summary, Research evidence gathering, Action tool execution, **Legal Counsel** for a brief legal-risk one-liner in Chinese, capped to roughly 50 characters, plus two extra plain conversational follow-ups driven by config). Model calls go through Calypso’s **OpenAI-compatible** endpoint with `x-cai-metadata-session-id` for session-level observability in F5 AI Security. Built-in mock procurement-risk tools and file-driven business data (`config/agentic-tools-config.json`), scenario templates (`config/agentic-risk-templates.json`), step timeline, tool/risk side panel, flow diagram (active step “breathe” highlight; completed stages turn green), and an optional **bypass** path that talks to an upstream LLM without Guardrail for contrast. The **Agentic Tool Config** UI edits and persists tool-scoped settings (including Legal Counsel’s two configurable follow-up topics). *Not legal advice; the Legal Counsel step is a demo-only brief commentary.*
+- **China Compliance Report:** A dedicated nav view that embeds the static site `compliance/index.html` (served at `/compliance/index.html`). It presents a **mapping/reference** between F5 LLM security capabilities and **China-oriented AI compliance** narrative (Chinese UI copy), aimed at customer conversations and internal alignment—content is static HTML you can edit under `compliance/`. `compliance/index_example.html` is available as a backup or layout reference.
 
 | Module | Capability |
 |--------|------------|
 | **Guardrails** | F5 cloud + local ML (toxic-bert, protectai); `f5_guardrail_only` to use F5 only; `guardrail_verbose` to return and show F5 Scanner details |
-| **Frontend views** | Four entries: AI Chatbot/Agent, Red Team, Guardrail Integration, Settings |
+| **Frontend views** | Nav includes multiple views: AI Chatbot/Agent, Red Team, Guardrail Integration, **Agentic Security**, Test Guide, **China Compliance Report**, Settings, etc. (some entries such as User Activity may be toggled by configuration) |
 | **Chat** | Single/multi-turn (sliding window), attack preset templates (`attack-presets.json`), engine status bar, Markdown rendering for replies |
 | **Settings** | `settings.json` + UI: thresholds, Pattern, KB path, agent steps, debug raw JSON, etc. |
 | **Skills** | Auto-discover under `skills/`; includes `read_enterprise_kb` (local directory KB); optional ReAct agent orchestration and `agent_max_steps` |
 | **Guardrail Integration** | Dedicated view: Inline (`/api/guardrail-scan`) and OOB (`/api/oob-chat` via Proxy) with flow diagrams and `guardrail-integration-presets.json` presets |
 | **Red Team** | Simulated CI/CD pipeline (5 steps + substeps), CASI score, manual review/fail branches, `/redteam-report` sample report; **demo is Mock, no real Red Team API calls** |
+| **Agentic Security** | `POST /api/agentic/run` + `GET /api/agentic/run-trace`; LangGraph runner; mock tools + `config/agentic-tools-config.json` + `config/agentic-risk-templates.json`; Calypso session header on LLM calls; step trace, flow visualization, Markdown final reply |
+| **China Compliance Report** | iframe to `compliance/index.html`; static narrative mapping F5 capabilities to China AI compliance themes (editable static content) |
 
 ---
 
