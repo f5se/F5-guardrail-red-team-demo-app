@@ -107,6 +107,10 @@
 
 ----------------------
 
+### 4. Agentic Security
+
+这是一个基于LangGraph的多智能体系统，一个围绕采购流程的Agentic AI，用于帮助自主分析采购流程中的风险并给出建议。在测试时候，主要是选择case 1模板，并对比勾选或不勾选`Bypass F5 Guardrail (Direct OpenAI-compatible)`时智能体自主工作的表现。当没有Bypass的时候，任务会因为Action agent违规调用邮件发送tool（F5 Guardrail上设置了策略）而被拒绝。此功能主要是用于演示CalypsoAI中Agentic Fingerprint功能对多智能体AI程序在工作中的每一步动作的洞察与安全分析。
+
 ### 其它QA
 Q1:为什么站点域名需要跳转到8000端口
 - 由于实验室专线线路无法开通80这类常用端口，受营运商管控
