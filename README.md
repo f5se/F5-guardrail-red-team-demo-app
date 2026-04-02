@@ -19,16 +19,18 @@
 7. 增加了Skills能力，可随时增加新的Skills并自动注册Skill
 8. 增加了Inline集成动画展现
 9. 增加了OOB集成动画展现
-10. 增加攻击场景示例模板
-11. 增加在聊天界面临时绕过所有检测，直通模型开关
-12. 增加了Redacted时，查看原始LLM消息功能
-13. 增加了HF的代理下载能力
-14. 增加了是否使用所有引擎开关
-15. 增加了后端原始响应json调试开关
-16. 增加了F5 AI/Calypso多Provider配置能力，容许用户前端切换选择Project对应的多个Providers
-17. 将env文件直接加载，无需设置环境变量
-18. 增加了前端Markdown响应的渲染
-19. 增加了F5 Red Team与DevSecOps的集成流水线演示。
+10. 增加了基于SecurIQLab实测结果的中国合规报告解读
+11. 增加Agentic Security用于测试Agentic Fingerprint
+12. 增加攻击场景示例模板
+13. 增加在聊天界面临时绕过所有检测，直通模型开关
+14. 增加了Redacted时，查看原始LLM消息功能
+15. 增加了HF的代理下载能力
+16. 增加了是否使用所有引擎开关
+17. 增加了后端原始响应json调试开关
+18. 增加了F5 AI/Calypso多Provider配置能力，容许用户前端切换选择Project对应的多个Providers
+19. 将env文件直接加载，无需设置环境变量
+20. 增加了前端Markdown响应的渲染
+21. 增加了F5 Red Team与DevSecOps的集成流水线演示。
 
    注意：考虑到实际Red Team耗时及环境可行性，这里的Red Team API集成是mock模拟的，并不实际在SaaS端创建真实对象。
 
@@ -74,7 +76,7 @@ cp .env_example .env
 | `AGENTIC_TOKEN` | Agentic Security 在走 Calypso 路径时的 Bearer Token。可与主项目令牌相同；若留空则**回退使用** `CALYPSOAI_TOKEN`（二者至少配置其一） | 与 `CALYPSOAI_TOKEN` 相同或独立令牌 |
 | `AGENTIC_MODEL` | Agentic Security 请求体中的 `model` 名称（OpenAI-compatible）。不填时默认 `deepseek-chat` | `deepseek-chat` |
 
-注意：你需要首先在 Calypso（F5 Guardrail）系统上设定相关 Project、Connection/Provider 及 Project API token。测试企业敏感信息防护等能力时，需在 F5 Guardrail 中提前配置 Custom scanner 等。
+注意：你需要首先在 Calypso（F5 Guardrail）系统上设定相关 Projects(标准App project,Agentic模式project，以及专用于`Enterprise Skill On`模式下的标准App project）、Connection/Provider 及 Project API token。测试企业敏感信息防护等能力时，需在 F5 Guardrail 中提前配置 Custom scanner 等。
 提示：README 与 `.env_example` 中的 Key 都是示例占位符。
 直连聊天模式下，**Enterprise KB Skill** 开关与主 Chat 一致：开启时由直连 LLM 执行与 Guardrail Agent 路径相同的 ReAct 工具推理（调用企业 KB 等）；关闭时为单次直连对话。
 

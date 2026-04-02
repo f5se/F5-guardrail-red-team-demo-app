@@ -25,22 +25,24 @@ A multi-engine AI guardrail demo Agent application based on F5 AI Guardrail (Cal
 7. Added Skills capability—new Skills can be added and auto-registered at any time
 
 8. Added Inline integration for dynamic visualization
-9.  Added and OOB integration for dynamic visualization
-10. Added sample templates for attack scenarios
-11. Add a switch that temporarily bypasses all detections in the chat interface and directly connects to the model
-12. Added the function of viewing original LLM messages when Redacted
+9. Added and OOB integration for dynamic visualization
+10. Added an interpretation of the China compliance report based on the actual test results of SecurIQLab 
+11. Added Agentic Security for testing Agentic Fingerprint
+12. Added sample templates for attack scenarios
+13. Add a switch that temporarily bypasses all detections in the chat interface and directly connects to the model
+14. Added the function of viewing original LLM messages when Redacted
 
-13. Added Hugging Face proxy download support
+15. Added Hugging Face proxy download support
 
-14. Added whether to use all engine switches 
+16. Added whether to use all engine switches 
 
-15. Added debug swtich for storing raw json that from F5 guardrail
-16. Added the F5 AI/Calypso multi-provider configuration capability, allowing users to switch and select different providers corresponding to the Project on the front end
-17. Load `.env` directly without setting environment variables
+17. Added debug swtich for storing raw json that from F5 guardrail
+18. Added the F5 AI/Calypso multi-provider configuration capability, allowing users to switch and select different providers corresponding to the Project on the front end
+19. Load `.env` directly without setting environment variables
 
-18. Added frontend Markdown response rendering
+20. Added frontend Markdown response rendering
 
-19. Added the integration pipeline demonstration of F5 Red Team and DevSecOps. 
+21. Added the integration pipeline demonstration of F5 Red Team and DevSecOps. 
 
    Note: Considering the actual time consumption of Red Team and the feasibility of the environment, the Red Team API integration here is mock simulation and does not actually create real objects on the SaaS.
 
@@ -86,7 +88,7 @@ Variables in `.env_example`:
 | `AGENTIC_TOKEN` | Bearer token for Agentic Security when using the Calypso OpenAI-compatible route. May match the main project token; if unset, **`CALYPSOAI_TOKEN` is used as fallback** (configure at least one) | Same as `CALYPSOAI_TOKEN` or a dedicated token |
 | `AGENTIC_MODEL` | `model` field in Agentic Security chat-completions requests. Default `deepseek-chat` when unset | `deepseek-chat` |
 
-**Note:** Configure the corresponding Project, Connection/Provider, and Project API token in Calypso (F5 Guardrail) first. For features like enterprise-sensitive data protection, configure Custom scanners in the F5 Guardrail system in advance.
+**Note:** Configure the corresponding Project(Standard App project,Agentic mode project, and standard App project for `Enterprise Skill On` mode), Connection/Provider, and Project API token in Calypso (F5 Guardrail) first. For features like enterprise-sensitive data protection, configure Custom scanners in the F5 Guardrail system in advance.
 Security note: Keys shown in README and `.env_example` are placeholders only.
 In **direct chat** mode, the **Enterprise KB Skill** toggle matches the main Chat: when ON, the direct LLM runs the same ReAct-style tool loop as the Guardrail Agent path (e.g. enterprise KB); when OFF, a single direct completion is used.
 
