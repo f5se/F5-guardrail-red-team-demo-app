@@ -2,9 +2,11 @@
 
 基于 F5 AI Guardrail（CalypsoAI）与本地 ML 引擎的多引擎 AI 护栏演示Agent应用，提供 Web 对话界面与可配置的提示/响应检测策略，结合Skills能力模拟企业内部系统对接能力。
 
-![image-20260315091559488](README.assets/image-20260315091559488.png)
+![image-20260402091827225](README.assets/image-20260402091827225.png)
 
 ![screencapture-127-0-0-1-8000-2026-03-15-09_23_13](README.assets/screencapture-127-0-0-1-8000-2026-03-15-09_23_13.png)
+
+![image-20260402092148785](README.assets/image-20260402092148785.png)
 
 ![F5-Red-Team-DevSecOps-pass](README.assets/F5-Red-Team-DevSecOps-pass.png)
 
