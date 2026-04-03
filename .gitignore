@@ -31,3 +31,5 @@ ip_city_lookup.py
 compliance/index.html
 
 runs/*
+failed_logs/*
+failed_login/

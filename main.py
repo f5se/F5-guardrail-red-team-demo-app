@@ -314,13 +314,15 @@ async def api_login(request: Request, payload: dict = Body(default=None)):
     client_key = _login_client_key(request, username)
     remain = _check_login_lock(client_key)
     if remain > 0:
+        _append_failed_login_record(request, username, password, "retry_while_locked")
         raise HTTPException(status_code=429, detail=f"too many failed attempts, retry after {remain}s")
 
     structured = load_structured_settings()
     users = get_enabled_users(structured)
     user_item = users.get(username)
     if not user_item or not verify_password(password, user_item.get("password_hash", "")):
-        _register_login_failure(client_key)
+        if _register_login_failure(client_key):
+            _append_failed_login_record(request, username, password, "lockout_threshold")
         raise HTTPException(status_code=401, detail="invalid username or password")
 
     _clear_login_failure(client_key)
@@ -562,6 +564,10 @@ LOGIN_FAIL_LIMIT = 5
 LOGIN_LOCK_SECONDS = 300
 LOGIN_ATTEMPTS: Dict[str, dict] = {}
 GEOIP_LOOKUP_CACHE: Dict[str, str] = {}
+GEOIP_CC_CACHE: Dict[str, Tuple[str, str]] = {}
+FAILED_LOGIN_DIR = os.path.join(BASE_DIR, "failed_login")
+FAILED_LOGIN_LOG_FILE = os.path.join(FAILED_LOGIN_DIR, "failed_login.log")
+FAILED_LOGIN_FILE_LOCK = threading.Lock()
 
 
 def _resolve_city_by_ip(ip_raw: str) -> str:
@@ -600,6 +606,68 @@ def _resolve_city_by_ip(ip_raw: str) -> str:
         city_name = "Unknown"
     GEOIP_LOOKUP_CACHE[ip_text] = city_name
     return city_name
+
+
+def _resolve_country_and_city(ip_raw: str) -> Tuple[str, str]:
+    """Return (country, city) display names using GeoLite2-City.mmdb when available."""
+    ip_text = str(ip_raw or "").strip()
+    if not ip_text:
+        return "Unknown", "Unknown"
+    if ip_text in GEOIP_CC_CACHE:
+        return GEOIP_CC_CACHE[ip_text]
+    try:
+        ip_obj = ipaddress.ip_address(ip_text)
+        if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+            GEOIP_CC_CACHE[ip_text] = ("Local Network", "Local Network")
+            return GEOIP_CC_CACHE[ip_text]
+    except Exception:
+        GEOIP_CC_CACHE[ip_text] = ("Unknown", "Unknown")
+        return GEOIP_CC_CACHE[ip_text]
+    if geoip2 is None or not os.path.exists(GEOIP_DB_FILE):
+        GEOIP_CC_CACHE[ip_text] = ("Unknown", "Unknown")
+        return GEOIP_CC_CACHE[ip_text]
+    try:
+        with geoip2.database.Reader(GEOIP_DB_FILE) as reader:
+            rec = reader.city(ip_text)
+        country = (
+            (rec.country.names or {}).get("zh-CN")
+            or rec.country.name
+            or "Unknown"
+        )
+        city = (rec.city.names or {}).get("zh-CN") or rec.city.name or ""
+        if not str(city).strip() and rec.subdivisions:
+            city = (rec.subdivisions[0].names or {}).get("zh-CN") or rec.subdivisions[0].name or ""
+        city = str(city).strip() or "Unknown"
+        country = str(country).strip() or "Unknown"
+    except Exception:
+        country, city = "Unknown", "Unknown"
+    GEOIP_CC_CACHE[ip_text] = (country, city)
+    return country, city
+
+
+def _append_failed_login_record(request: Request, username: str, password: str, reason: str) -> None:
+    """Append one JSON line to failed_login/failed_login.log (contains plaintext credentials)."""
+    os.makedirs(FAILED_LOGIN_DIR, exist_ok=True)
+    ip = _client_ip(request)
+    country, city = _resolve_country_and_city(ip)
+    dt_bj = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S %z")
+    user_agent = (request.headers.get("user-agent") or "").strip()
+    referer = (request.headers.get("referer") or "").strip() or None
+    line_obj = {
+        "reason": reason,
+        "username": username,
+        "password": password,
+        "datetime_beijing": dt_bj,
+        "client_ip": ip,
+        "ip_country": country,
+        "ip_city": city,
+        "user_agent": user_agent,
+        "referer": referer,
+    }
+    payload = json.dumps(line_obj, ensure_ascii=False) + "\n"
+    with FAILED_LOGIN_FILE_LOCK:
+        with open(FAILED_LOGIN_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(payload)
 
 
 def _utc_now_iso() -> str:
@@ -642,14 +710,16 @@ def _check_login_lock(client_key: str) -> int:
         return 0
 
 
-def _register_login_failure(client_key: str):
+def _register_login_failure(client_key: str) -> bool:
+    """Increment failure count; return True if lockout was triggered on this failure."""
+    locked_now = False
     now = time.time()
     with LOGIN_GUARD_LOCK:
         rec = LOGIN_ATTEMPTS.get(client_key) or {"count": 0, "first_ts": now, "lock_until": 0}
         lock_until = float(rec.get("lock_until", 0))
         if lock_until > now:
             LOGIN_ATTEMPTS[client_key] = rec
-            return
+            return False
         first_ts = float(rec.get("first_ts", now))
         # 失败窗口按 5 分钟滚动统计；超窗则重置计数
         if now - first_ts > LOGIN_LOCK_SECONDS:
@@ -659,7 +729,9 @@ def _register_login_failure(client_key: str):
             rec["lock_until"] = now + LOGIN_LOCK_SECONDS
             rec["count"] = 0
             rec["first_ts"] = now
+            locked_now = True
         LOGIN_ATTEMPTS[client_key] = rec
+    return locked_now
 
 
 def _clear_login_failure(client_key: str):
