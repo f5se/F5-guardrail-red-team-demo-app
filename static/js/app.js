@@ -1172,6 +1172,29 @@ async function saveAgenticToolConfig(){
   }
 }
 
+function agenticTimelineToolBlock(item){
+  const name = String(item.tool_name || "").trim();
+  if (!name) return "";
+  let argsPart = "";
+  const rawArgs = item.tool_args;
+  if (rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs) && Object.keys(rawArgs).length) {
+    try {
+      let s = JSON.stringify(rawArgs);
+      if (s.length > 260) s = s.slice(0, 260) + "…";
+      argsPart = "<div class=\"agenticStepToolArgs\"><span class=\"agenticStepToolArgsLabel\">args</span> <code>" + escapeHtml(s) + "</code></div>";
+    } catch (_e) {
+      /* ignore */
+    }
+  }
+  return (
+    "<div class=\"agenticStepTool\">" +
+      "<span class=\"agenticStepToolLabel\">Tool</span> " +
+      "<code class=\"agenticStepToolName\">" + escapeHtml(name) + "</code>" +
+      argsPart +
+    "</div>"
+  );
+}
+
 function renderAgenticTimeline(trace){
   if (!agenticTimelineEl) return;
   const rows = Array.isArray(trace) ? trace : [];
@@ -1189,6 +1212,7 @@ function renderAgenticTimeline(trace){
     const outcome = escapeHtml(String(item.guardrail_outcome || item.outcome || "unknown"));
     const routeDecision = escapeHtml(String(item.route_decision || ""));
     const routeLine = routeDecision ? ("<div class=\"agenticStepRoute\">Route: " + routeDecision + "</div>") : "";
+    const toolBlock = agenticTimelineToolBlock(item);
     const tags = Array.isArray(item.risk_tags) ? item.risk_tags : [];
     const riskHint = tags.length
       ? ("<div class=\"agenticStepRoute\">Risk Hint: " + tags.map(tag => escapeHtml(String(tag))).join(", ") + "</div>")
@@ -1205,6 +1229,7 @@ function renderAgenticTimeline(trace){
           "<span class=\"agenticStepType\">" + actionType + "</span>" +
           "<span class=\"agenticStepOutcome " + outcomeClass + "\">" + outcome + "</span>" +
         "</div>" +
+        toolBlock +
         "<div class=\"agenticStepSummary\">" + summary + "</div>" +
         riskHint +
         failedScannerLine +

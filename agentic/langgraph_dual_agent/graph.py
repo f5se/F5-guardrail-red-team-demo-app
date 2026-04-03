@@ -152,7 +152,7 @@ def build_langgraph_runner(llm_call: LlmCall, tool_dispatch: ToolDispatch, trace
                     "tool_name": tool_name,
                     "tool_args": tool_args,
                     "tool_result": tool_result,
-                    "summary": "fallback_tool_call_after_parse_error",
+                    "summary": f"{tool_name}: fallback_tool_call_after_parse_error"[:500],
                     "outcome": finish,
                     "guardrail_outcome": "cleared",
                     "risk_tags": tool_result.get("risk_tags") or [],
@@ -184,7 +184,9 @@ def build_langgraph_runner(llm_call: LlmCall, tool_dispatch: ToolDispatch, trace
                     "tool_name": tool_name,
                     "tool_args": tool_args,
                     "tool_result": tool_result,
-                    "summary": str(tool_result.get("detail") or "research tool executed")[:500],
+                    "summary": (
+                        (f"{tool_name}: " + str(tool_result.get("detail") or "ok"))[:500]
+                    ),
                     "outcome": finish,
                     "guardrail_outcome": "cleared",
                     "risk_tags": tool_result.get("risk_tags") or [],
@@ -241,7 +243,7 @@ def build_langgraph_runner(llm_call: LlmCall, tool_dispatch: ToolDispatch, trace
                     "tool_name": tool_name,
                     "tool_args": tool_args,
                     "tool_result": tool_result,
-                    "summary": "fallback_tool_call_after_parse_error",
+                    "summary": f"{tool_name}: fallback_tool_call_after_parse_error"[:500],
                     "outcome": finish,
                     "guardrail_outcome": "cleared",
                     "risk_tags": tool_result.get("risk_tags") or [],
@@ -273,7 +275,9 @@ def build_langgraph_runner(llm_call: LlmCall, tool_dispatch: ToolDispatch, trace
                     "tool_name": tool_name,
                     "tool_args": tool_args,
                     "tool_result": tool_result,
-                    "summary": str(tool_result.get("detail") or "action tool executed")[:500],
+                    "summary": (
+                        (f"{tool_name}: " + str(tool_result.get("detail") or "ok"))[:500]
+                    ),
                     "outcome": finish,
                     "guardrail_outcome": "cleared",
                     "risk_tags": tool_result.get("risk_tags") or [],
