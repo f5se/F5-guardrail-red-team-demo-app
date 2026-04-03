@@ -886,7 +886,7 @@ function computeAgenticFlowCompletedNodes(trace){
     if (nodeOf(r) !== "supervisor") return false;
     return String(r.action_type || "").toLowerCase() === "finalize" && !isBlocked(r);
   });
-  const hasActionAgent = rows.some(r => nodeOf(r) === "action");
+  const hasActionAgent = rows.some(r => nodeOf(r) === "action" && !isBlocked(r));
   const hasLegalSecond = rows.some(r => {
     if (nodeOf(r) !== "legal") return false;
     if (String(r.action_type || "").toLowerCase() !== "simple_dialog") return false;

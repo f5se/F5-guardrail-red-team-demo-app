@@ -1604,6 +1604,24 @@ def _extract_agentic_error_info(resp_data: object) -> Tuple[str, List[str]]:
     return msg, failed_ids
 
 
+def _infer_failed_agent_name(trace_rows: List[dict]) -> str:
+    """Infer which node was being executed when the LLM call failed."""
+    if not trace_rows:
+        return "SupervisorAgent"
+    last = trace_rows[-1] if isinstance(trace_rows[-1], dict) else {}
+    route = str(last.get("route_decision") or "").lower()
+    if "to_research" in route:
+        return "ResearchAgent"
+    if "to_action" in route:
+        return "ActionAgent"
+    if "to_finalize" in route:
+        return "SupervisorAgent"
+    if "to_legal" in route:
+        return "LegalCounselAgent"
+    fallback = str(last.get("agent_name") or "").strip()
+    return fallback or "SupervisorAgent"
+
+
 def _load_agentic_risk_templates() -> List[dict]:
     cfg_path = os.path.join(BASE_DIR, "config", "agentic-risk-templates.json")
     default_templates: List[dict] = [
@@ -1734,6 +1752,13 @@ async def api_agentic_run(request: Request, payload: AgenticRunIn):
     bypass_f5_guardrail = bool(payload.bypass_f5_guardrail)
     session_id = (payload.session_id or "").strip() or f"agentic-{int(time.time())}-{secrets.token_hex(4)}"
     now_ts = int(time.time())
+    runtime_trace: List[dict] = []
+
+    def _trace_logger_runtime(sid: str, row: dict):
+        if isinstance(row, dict):
+            runtime_trace.append(row)
+        _append_agentic_run_log(sid, row)
+
     try:
         runner = build_langgraph_runner(
             llm_call=lambda sid, msgs: _agentic_openai_chat(
@@ -1742,7 +1767,7 @@ async def api_agentic_run(request: Request, payload: AgenticRunIn):
                 bypass_f5_guardrail=bypass_f5_guardrail,
             ),
             tool_dispatch=lambda name, args, s, p: dispatch_agentic_tool(name, args, s, p),
-            trace_logger=_append_agentic_run_log,
+            trace_logger=_trace_logger_runtime,
         )
     except Exception as e:
         raise HTTPException(
@@ -1753,19 +1778,19 @@ async def api_agentic_run(request: Request, payload: AgenticRunIn):
     try:
         run_result = await runner(prompt, scenario, session_id, now_ts)
     except HTTPException as e:
-        trace = _read_agentic_run_trace(session_id)
-        step_index = len(trace) + 1
+        step_index = len(runtime_trace) + 1
         detail_obj = e.detail if isinstance(e.detail, dict) else {"message": str(e.detail or "Agentic run failed")}
         error_message = str(detail_obj.get("message") or "Agentic run failed")
         failed_scanner_ids = detail_obj.get("failed_scanner_ids")
         if not isinstance(failed_scanner_ids, list):
             failed_scanner_ids = []
         failed_scanner_ids = [str(x) for x in failed_scanner_ids if str(x).strip()]
+        failed_agent_name = _infer_failed_agent_name(runtime_trace)
         fail_step = {
             "step_index": step_index,
             "session_id": session_id,
             "ts": int(time.time()),
-            "agent_name": "ActionAgent",
+            "agent_name": failed_agent_name,
             "action_type": "llm_call",
             "summary": error_message[:500],
             "outcome": "blocked",
@@ -1774,8 +1799,8 @@ async def api_agentic_run(request: Request, payload: AgenticRunIn):
             "route_decision": "terminated: calypso_blocked",
             "failed_scanner_ids": failed_scanner_ids,
         }
-        _append_agentic_run_log(session_id, fail_step)
-        trace.append(fail_step)
+        _trace_logger_runtime(session_id, fail_step)
+        final_trace = list(runtime_trace)
         return JSONResponse(
             status_code=e.status_code if isinstance(e.status_code, int) else 500,
             content={
@@ -1787,7 +1812,7 @@ async def api_agentic_run(request: Request, payload: AgenticRunIn):
                 "blocked": True,
                 "risk_detected": True,
                 "reply": "",
-                "trace": trace,
+                "trace": final_trace,
                 "error_message": error_message,
                 "failed_scanner_ids": failed_scanner_ids,
             },
