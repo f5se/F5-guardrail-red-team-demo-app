@@ -1164,6 +1164,7 @@ async function saveAgenticToolConfig(){
     if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
     agenticToolConfigData = data.config || merged;
     renderAgenticToolConfigPanel();
+    void loadAgenticRiskTemplates();
     setAgenticToolConfigStatus("Saved. New config takes effect immediately.", false);
     if (agenticToolEditorOverlayEl) agenticToolEditorOverlayEl.style.display = "none";
   } catch (e) {
@@ -1650,6 +1651,14 @@ navButtons.forEach(btn => {
 agenticRiskTemplateEl?.addEventListener("change", () => {
   const key = (agenticRiskTemplateEl.value || "").trim();
   if (!key) return;
+  const selectedOpt = agenticRiskTemplateEl.options && agenticRiskTemplateEl.selectedIndex >= 0
+    ? agenticRiskTemplateEl.options[agenticRiskTemplateEl.selectedIndex]
+    : null;
+  if (selectedOpt && selectedOpt.disabled) {
+    agenticRiskTemplateEl.value = "";
+    setAgenticStatus("This risk template is disabled by current SEC-022 policy state.", true);
+    return;
+  }
   const tpl = agenticRiskPromptTemplates[key];
   if (!tpl) return;
   if (agenticPromptEl && tpl.prompt) {
@@ -1658,12 +1667,40 @@ agenticRiskTemplateEl?.addEventListener("change", () => {
   if (tpl.scenario) agenticSelectedScenario = String(tpl.scenario);
 });
 
+function isSec022PolicyItem(item){
+  if (!item || typeof item !== "object") return false;
+  return String(item.id || "").trim().toUpperCase() === "SEC-022";
+}
+
+function getRiskTemplateSec022Rule(id, label){
+  const key = String(id || "").trim();
+  const text = String(label || "").toLowerCase();
+  const isCase0 = key === "case_safe_baseline" || text.indexOf("case 0") >= 0;
+  const isCase1 = key === "case_indirect_prompt_injection" || text.indexOf("case 1") >= 0;
+  const isCase2 = key === "case_block_f5" || text.indexOf("case 2") >= 0;
+  if (isCase0 || isCase2) return "require_absent_sec022";
+  if (isCase1) return "require_present_sec022";
+  return "";
+}
+
+function buildRiskTemplateOptionLabel(baseLabel, disabled, reason){
+  if (!disabled || !reason) return baseLabel;
+  return baseLabel + " (" + reason + ")";
+}
+
 async function loadAgenticRiskTemplates(){
   if (!agenticRiskTemplateEl) return;
   try {
-    const resp = await authFetch("/api/agentic/risk-templates", { cache: "no-store" });
-    if (!resp.ok) throw new Error("HTTP " + resp.status);
-    const data = await resp.json();
+    const [tplResp, toolCfgResp] = await Promise.all([
+      authFetch("/api/agentic/risk-templates", { cache: "no-store" }),
+      authFetch("/api/agentic/tool-config", { cache: "no-store" })
+    ]);
+    if (!tplResp.ok) throw new Error("HTTP " + tplResp.status);
+    if (!toolCfgResp.ok) throw new Error("HTTP " + toolCfgResp.status);
+    const data = await tplResp.json();
+    const toolCfg = await toolCfgResp.json();
+    const policies = Array.isArray(toolCfg?.policies) ? toolCfg.policies : [];
+    const hasSec022 = policies.some(isSec022PolicyItem);
     const templates = Array.isArray(data.templates) ? data.templates : [];
     agenticRiskPromptTemplates = {};
     const options = ["<option value=\"\">Custom input (manual)</option>"];
@@ -1673,11 +1710,22 @@ async function loadAgenticRiskTemplates(){
       const label = String(t.label || id || "Template").trim();
       const prompt = String(t.prompt || "").trim();
       if (!id || !prompt) return;
+
+      const secRule = getRiskTemplateSec022Rule(id, label);
+      const disableCase0or2 = secRule === "require_absent_sec022" && hasSec022;
+      const disableCase1 = secRule === "require_present_sec022" && !hasSec022;
+      const disabled = disableCase0or2 || disableCase1;
+      const disabledReason = disableCase0or2
+        ? "disabled: SEC-022 exists in tool policies"
+        : (disableCase1 ? "disabled: SEC-022 missing in tool policies" : "");
+
       agenticRiskPromptTemplates[id] = {
         scenario: String(t.scenario || "unsafe_procurement"),
         prompt
       };
-      options.push("<option value=\"" + escapeHtml(id) + "\">" + escapeHtml(label) + "</option>");
+      const optionLabel = buildRiskTemplateOptionLabel(label, disabled, disabledReason);
+      const disabledAttr = disabled ? " disabled" : "";
+      options.push("<option value=\"" + escapeHtml(id) + "\"" + disabledAttr + ">" + escapeHtml(optionLabel) + "</option>");
     });
     agenticRiskTemplateEl.innerHTML = options.join("");
   } catch (_e) {
