@@ -341,6 +341,30 @@ body{
   color:#475569;
   margin-bottom:6px;
 }
+.agenticToolConfigHintActions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-bottom:8px;
+}
+.agenticToolConfigHintActions button{
+  border:1px solid #cbd5e1;
+  background:#fff;
+  color:#334155;
+  border-radius:8px;
+  padding:4px 8px;
+  font-size:12px;
+  cursor:pointer;
+}
+.agenticToolConfigHintActions button:hover:not(:disabled){
+  border-color:#93c5fd;
+  background:#eff6ff;
+  color:#1d4ed8;
+}
+.agenticToolConfigHintActions button:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+}
 .agenticToolConfigHintCode{
   margin:0;
   white-space:pre-wrap;
