@@ -10,7 +10,7 @@ import json
 import os
 import re
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TOOL_CONFIG_PATH = os.path.join(BASE_DIR, "config", "agentic-tools-config.json")
 
 DEFAULT_VENDOR_DATA = {
