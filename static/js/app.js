@@ -18,6 +18,10 @@ const localEngineCards = [
   document.getElementById("cardProtect")
 ].filter(Boolean);
 const navButtons = Array.from(document.querySelectorAll(".navBtn"));
+const customBlockedMessageInputEl = document.getElementById("customBlockedMessageInput");
+const btnResetBlockedMessageEl = document.getElementById("btnResetBlockedMessage");
+const DEFAULT_BLOCKED_MESSAGE = "The requested Prompt was rejected by F5 AI Guardrail because it violated the company's AI security policy.";
+let currentCustomBlockedMessage = DEFAULT_BLOCKED_MESSAGE;
 
 // 攻击示例面板元素
 const attackCardEl = document.getElementById("attackCard");
@@ -1893,16 +1897,35 @@ function isRejected(text){
   return t.startsWith("Prompt Rejected") || t.startsWith("Response Rejected");
 }
 
+function getEffectiveCustomBlockedMessage() {
+  const customized = String(currentCustomBlockedMessage || "").trim();
+  return customized || DEFAULT_BLOCKED_MESSAGE;
+}
+
+function openBlockedMessageSetting() {
+  setActiveView("SETTINGS");
+  const settingWrap = document.getElementById("customBlockedMessageSetting");
+  if (settingWrap) {
+    settingWrap.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  if (customBlockedMessageInputEl) {
+    setTimeout(() => customBlockedMessageInputEl.focus(), 150);
+  }
+}
+
 function renderRejectedBubble(el, fullText){
-  const safe = escapeHtml(fullText);
-  const parts = safe.split("\n");
-  const title = parts.shift() || "";
-  const body = parts.join("\n").trim();
+  const raw = String(fullText || "");
+  const parts = raw.split("\n");
+  const title = escapeHtml((parts.shift() || "").trim());
+  const body = escapeHtml(getEffectiveCustomBlockedMessage()).replaceAll("\n", "<br/>");
 
   el.classList.add("rejected");
   el.innerHTML =
-    `<span class="rejectTitle">${title}</span>` +
-    (body ? `<div>${body.replaceAll("\n","<br/>")}</div>` : "");
+    `<div class="rejectHeader">` +
+      `<span class="rejectTitle">${title}</span>` +
+      `<button type="button" class="rejectConfigLink" data-action="open-blocked-message-setting">自定义文案 · Customize</button>` +
+    `</div>` +
+    (body ? `<div>${body}</div>` : "");
 }
 
 function safeJsonParse(value){
@@ -2122,6 +2145,12 @@ async function send(){
 }
 
 btnSend.addEventListener("click", send);
+messagesEl?.addEventListener("click", (event) => {
+  const trigger = event.target?.closest?.("[data-action='open-blocked-message-setting']");
+  if (!trigger) return;
+  event.preventDefault();
+  openBlockedMessageSetting();
+});
 
 btnClear.addEventListener("click", () => {
   messagesEl.innerHTML = "";
@@ -2169,6 +2198,11 @@ async function loadSettings(){
     setMultiTurnEnabled(persistedBadgeSettings.multiTurn);
 
     document.getElementById("patternBox").value = s.patterns || "";
+    const blockedMessage = String(s.custom_blocked_message || DEFAULT_BLOCKED_MESSAGE).trim() || DEFAULT_BLOCKED_MESSAGE;
+    currentCustomBlockedMessage = blockedMessage;
+    if (customBlockedMessageInputEl) {
+      customBlockedMessageInputEl.value = blockedMessage;
+    }
     document.getElementById("heuristicSlider").value = s.heuristic_threshold || 6;
     document.getElementById("toxSlider").value = s.toxic_threshold || 0.75;
     document.getElementById("piSlider").value = s.pi_threshold || 0.7;
@@ -2254,7 +2288,8 @@ async function saveSettings(showToast = true){
     agent_skill_enabled: !!document.getElementById("toggleAgentSkill")?.checked,
     f5_guardrail_only: !!document.getElementById("toggleF5GuardrailOnly")?.checked,
     debug_guardrail_raw_enabled: !!document.getElementById("toggleGuardrailDebug")?.checked,
-    default_provider: (document.getElementById("providerSelect")?.value || "").trim()
+    default_provider: (document.getElementById("providerSelect")?.value || "").trim(),
+    custom_blocked_message: (customBlockedMessageInputEl?.value || "").trim() || DEFAULT_BLOCKED_MESSAGE
   };
   if (isAdminUser) {
     payload.kb_dir = document.getElementById("kbDirInput")?.value || "./enterprise_kb";
@@ -2280,6 +2315,12 @@ async function saveSettings(showToast = true){
 }
 
 document.getElementById("btnSaveSettings")?.addEventListener("click", () => saveSettings(true));
+btnResetBlockedMessageEl?.addEventListener("click", () => {
+  if (customBlockedMessageInputEl) {
+    customBlockedMessageInputEl.value = DEFAULT_BLOCKED_MESSAGE;
+    customBlockedMessageInputEl.focus();
+  }
+});
 document.getElementById("toggleAgentSkill")?.addEventListener("change", () => {
   sessionBadgeOverrides.agentSkill = null;
   persistedBadgeSettings.agentSkill = !!toggleAgentSkillEl?.checked;

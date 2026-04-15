@@ -529,6 +529,10 @@ DEFAULT_SETTINGS = {
     "kb_max_file_chars": 8000,
     "kb_max_result_chars": 5000,
     "default_provider": "",  # 前端可选；空则用 env DEFAULT_PROVIDER
+    "custom_blocked_message": (
+        "The requested Prompt was rejected by F5 AI Guardrail because it violated "
+        "the company's AI security policy."
+    ),
     "dual_project_routing_enabled": False,  # admin 全局开关：Enterprise Skill ON 时走第二个 project
 }
 NEW_USER_PATTERNS_FALLBACK = "ignore:3\nsystem:3\nprompt:2\n忽略:3\n系统提示词:3\n忘记:2\n角色:4\n"
@@ -543,6 +547,7 @@ USER_SCOPED_KEYS = {
     "f5_guardrail_only",
     "debug_guardrail_raw_enabled",
     "default_provider",
+    "custom_blocked_message",
 }
 GLOBAL_SCOPED_KEYS = {k for k in DEFAULT_SETTINGS if k not in USER_SCOPED_KEYS}
 SETTINGS_LOCK = threading.Lock()
@@ -1018,6 +1023,10 @@ def get_runtime_settings(raw: dict) -> dict:
         "kb_max_file_chars": to_int(raw.get("kb_max_file_chars", 8000), 8000, 500, 50000),
         "kb_max_result_chars": to_int(raw.get("kb_max_result_chars", 5000), 5000, 500, 20000),
         "default_provider": str(raw.get("default_provider", "") or ""),
+        "custom_blocked_message": str(
+            raw.get("custom_blocked_message", DEFAULT_SETTINGS["custom_blocked_message"])
+            or DEFAULT_SETTINGS["custom_blocked_message"]
+        ).strip(),
         "dual_project_routing_enabled": to_bool(raw.get("dual_project_routing_enabled", False)),
     }
 

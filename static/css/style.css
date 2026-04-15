@@ -888,6 +888,31 @@ body{
   margin-bottom: 6px;
   display:block;
 }
+.rejectHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}
+.rejectConfigLink{
+  border:1px solid #fdba74;
+  background:#fff7ed;
+  color:#9a3412;
+  font-size:11px;
+  line-height:1;
+  border-radius:999px;
+  padding:4px 8px;
+  cursor:pointer;
+  font-weight:700;
+  white-space:nowrap;
+}
+.rejectConfigLink:hover{
+  background:#ffedd5;
+}
+.rejectConfigLink:focus-visible{
+  outline:2px solid #fb923c;
+  outline-offset:2px;
+}
 
 /* Markdown 渲染（助手气泡内） */
 .bubble.md{
@@ -1591,6 +1616,35 @@ code{
   font-size:13px;
   color:var(--muted);
   line-height:1.4;
+}
+.settingsSaveBtn{
+  margin-top:12px;
+  appearance:none;
+  border:none;
+  border-radius:12px;
+  padding:10px 16px;
+  min-width:150px;
+  font-size:14px;
+  font-weight:800;
+  letter-spacing:.2px;
+  color:#fff;
+  background:linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
+  box-shadow:0 8px 18px rgba(37,99,235,.28);
+  cursor:pointer;
+  transition:transform .12s ease, box-shadow .12s ease, filter .12s ease;
+}
+.settingsSaveBtn:hover{
+  transform:translateY(-1px);
+  box-shadow:0 10px 22px rgba(37,99,235,.32);
+  filter:brightness(1.02);
+}
+.settingsSaveBtn:active{
+  transform:translateY(0);
+  box-shadow:0 6px 14px rgba(37,99,235,.26);
+}
+.settingsSaveBtn:focus-visible{
+  outline:2px solid #93c5fd;
+  outline-offset:2px;
 }
 
 /* Toggle switch */
