@@ -33,8 +33,8 @@
 19. 将env文件直接加载，无需设置环境变量
 20. 增加了前端Markdown响应的渲染
 21. 增加了F5 Red Team与DevSecOps的集成流水线演示。
-22. 增加了 **Dataset Test（数据集批量 Guardrail 评测）**：CSV/XLSX 上传、按行扫描、暂停/恢复、结果 CSV、错误行补测；并行任务上限由管理员在 Settings（`dataset_max_running_tasks`）配置（详见下文「Dataset Test」）。
-23. **环境与模块职责**：主 Chat/Agent 仅读取 **`CALYPSOAI_*`** 与 **`DEFAULT_PROVIDER`**；Dataset Test 可选用 **`Guardrail_PoC_*`** 作为向导未填写时的默认回退（不与主对话混用）。
+22. 增加了 **Dataset Test**：五步向导（新建/历史任务）、**拦截率 / 误拦率** 两种测试类型、CSV/XLSX 批量扫描、可配置并发与批次间隔、暂停/恢复/取消、结果 CSV 与 **error 行补测**；全局并行任务数、上传大小与并发上限由 **admin** 在 Settings 配置（详见下文）。
+23. **环境与模块职责**：主 Chat/Agent 仅读取 **`CALYPSOAI_*`** 与 **`DEFAULT_PROVIDER`**；Dataset 向导未填项可回退 **`Guardrail_PoC_*`**，再回退主环境变量（不与主对话混用）。
 
    注意：考虑到实际Red Team耗时及环境可行性，这里的Red Team API集成是mock模拟的，并不实际在SaaS端创建真实对象。
 
@@ -79,7 +79,7 @@ cp .env_example .env
 | `AGENTIC_BASE_URL` | **Agentic Security** 调用的 OpenAI-compatible **完整 Base URL**（含路径前缀，不含 `/chat/completions`）。留空时由后端使用 `CALYPSOAI_URL` + 内置 Provider 路径拼接 | `https://www.us1.calypsoai.app/openai/your-provider-slug` |
 | `AGENTIC_TOKEN` | Agentic Security 在走 Calypso 路径时的 Bearer Token。可与主项目令牌相同；若留空则**回退使用** `CALYPSOAI_TOKEN`（二者至少配置其一） | 与 `CALYPSOAI_TOKEN` 相同或独立令牌 |
 | `AGENTIC_MODEL` | Agentic Security 请求体中的 `model` 名称（OpenAI-compatible）。不填时默认 `deepseek-chat` | `deepseek-chat` |
-| （Dataset Test） | **批量评测**：主应用仍只用上表 **`CALYPSOAI_*`** / **`DEFAULT_PROVIDER`**。向导中可逐项填写 Project、Provider、API Key；若留空则先用可选的 **`Guardrail_PoC_Project`** / **`Guardrail_PoC_Provider`** / **`Guardrail_PoC_Token`** / **`Guardrail_PoC_Calypso_URL`**（未配置时再回退到 **`CALYPSOAI_PROJECT_ID`** / **`DEFAULT_PROVIDER`** / **`CALYPSOAI_TOKEN`** / **`CALYPSOAI_URL`**）。单行 Guardrail 超时默认 **`GUARDRAIL_TIMEOUT_SECONDS`**；全局并行 running/queued 任务上限由 admin 在 Settings 写入 **`dataset_max_running_tasks`**（`settings.json`），不在 `.env` |
+| （Dataset Test） | **批量评测**：主应用仍只用 **`CALYPSOAI_*`** / **`DEFAULT_PROVIDER`**。向导可填 Project、Provider、API Key；留空则 **`Guardrail_PoC_*`**（若配置）→ **`CALYPSOAI_PROJECT_ID`** / **`DEFAULT_PROVIDER`** / **`CALYPSOAI_TOKEN`** / **`CALYPSOAI_URL`**。Dataset **单行 Guardrail 超时**在向导中可设，**新建任务默认 20 秒**（与主聊天 **`GUARDRAIL_TIMEOUT_SECONDS`** 无强制一致）。**管理员**在 Settings 写入 **`dataset_max_running_tasks`**、**`dataset_max_upload_mb`**、**`dataset_max_concurrency`**、**`app_timezone`**（均在 **`settings.json`**），不在 `.env` |
 | `Guardrail_PoC_Project` | （可选）Dataset 向导未填写 Project 时的默认值；不设则退回 `CALYPSOAI_PROJECT_ID`。**主 Chat/Agent 不使用** | — |
 | `Guardrail_PoC_Provider` | （可选）Dataset 向导未填写 Provider 时的默认值；不设则退回 `DEFAULT_PROVIDER`。**主 Chat/Agent 不使用** | — |
 | `Guardrail_PoC_Token` | （可选）Dataset 向导未填写 API Key 时的默认值；不设则退回 `CALYPSOAI_TOKEN`。**主 Chat/Agent 不使用** | — |
@@ -169,10 +169,39 @@ python scripts/gen_password_hash.py \
 
 ### Dataset Test（数据集批量 Guardrail 评测）
 
-面向大量提示词的 **批量 Guardrail 评测**：上传 **CSV** 或 **Excel（.xlsx）**，选择 prompt 列与行范围，按配置并发调用 Calypso **Project + Provider** 扫描；运行过程可暂停/恢复，完成后在 **Step 5** 查看阻断/通过/错误统计，下载 **result CSV**；对 **API/超时等 error 行** 可 **补测** 并按 `row_index` 覆盖写回。原始文件、结果与任务状态默认落在项目目录 `poc/raw`、`poc/result`、`poc/state`。
+面向大量提示词调用 **F5 Guardrail（Calypso Project + Provider）** 的批量评测：原始上传、结果 CSV、任务状态默认落在项目目录 **`poc/raw`**、**`poc/result`**、**`poc/state`**。
 
-- **Python 依赖**：与主应用相同，另需 **`openpyxl`**（已在 `requirements.txt`）以支持 `.xlsx`；**CSV 仅标准库**。**F5 Calypso Python SDK（`calypsoai`）** 须按官方文档单独安装。
-- **运行配置**：主 Chat/Agent **仅**使用 **`CALYPSOAI_*`** 与 **`DEFAULT_PROVIDER`**，**不读取** **`Guardrail_PoC_*`**。Dataset 向导可填写 Project / Provider / API Key（写入任务状态）；若留空，则依次尝试 **`Guardrail_PoC_*`**（若配置了）再回退到 **`CALYPSOAI_PROJECT_ID` / `DEFAULT_PROVIDER` / `CALYPSOAI_TOKEN` / `CALYPSOAI_URL`**。单机 Guardrail 超时默认 **`GUARDRAIL_TIMEOUT_SECONDS`**；全局「最多并行 running/queued 数据集任务数」由 **admin** 在 Settings 配置（`dataset_max_running_tasks`，写入 `settings.json`）。
+**界面与流程**
+
+- **新建测试 / 历史任务**：新建走 **Step 1–5** 向导；历史可查看、恢复未完成任务或下载结果。
+- **容量提示**：当全局 **running + queued** 任务数达到上限时，禁止再创建新任务（上限见 Settings）。
+- **运行控制**：排队、运行中可 **取消**；运行中可 **暂停 / 恢复**（任务状态落盘，服务重启后可继续）。
+
+**Step 1**
+
+- **任务名称**（必填）。
+- **测试类型**：**拦截率测试**（恶意/攻击样本期望被 **rejected**）与 **误拦率测试**（正常样本期望 **通过**）。结果 CSV 的 `label` 列会按模式标注 “Expected / Unexpected”，便于统计。
+- **上传文件**：**CSV** 或 **Excel `.xlsx`**。旧版 **`.xls`** 不支持，请先另存为 `.xlsx`。
+
+**Step 2**
+
+- 选择 **prompt 列**（1-based）、是否有 **表头**、数据 **起止行**。
+- **Calypso**：可填写 **Project ID**、**Provider**、**API Key**（保存在任务状态中）；任意留空则按 **`Guardrail_PoC_*`（若配置）→ `CALYPSOAI_PROJECT_ID` / `DEFAULT_PROVIDER` / `CALYPSOAI_TOKEN` / `CALYPSOAI_URL`** 解析（主 Chat/Agent **从不**读取 `Guardrail_PoC_*`）。
+- **性能与调试**：**每批并发行数**（受管理员设定的 Step2 并发上限约束）、**批次间隔**（秒）、**单行 Guardrail 超时**（向导可改；新建任务默认 **20** 秒，与主聊天 **`GUARDRAIL_TIMEOUT_SECONDS`** 独立）、可选 **记录失败 Scanner 名称**（写入结果列 `failed_scanner_names`）。
+
+**Step 3–5**
+
+- 确认参数 → 运行与进度（阻断/通过/错误计数、ETA 等）→ **Step 5** 汇总与下载 **result CSV**。
+- 对 **API/超时等 `guardrail_status=error`** 的行支持 **补测**，按 **`row_index`** 覆盖写回同一结果文件。
+
+**管理员设置（Settings → `settings.json`）**
+
+- **`dataset_max_running_tasks`**：所有用户合计的 **running + queued** 任务数上限；超限时无法新建任务。
+- **`dataset_max_upload_mb`**：Step 1 原始文件大小上限（MB）。
+- **`dataset_max_concurrency`**：Step 2 中用户可填的 **并发数** 上限。
+- **`app_timezone`**：任务时间与结果 CSV 时间戳所用显示时区（固定 UTC 偏移）。
+
+**依赖**：与主应用相同；**`.xlsx`** 需 **`openpyxl`**（见 `requirements.txt`）；**F5 Calypso Python SDK（`calypsoai`）** 须按官方文档单独安装。
 
 ### OOB 模式下 NGINX 配置简要说明
 
