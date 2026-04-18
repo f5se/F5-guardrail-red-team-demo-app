@@ -797,8 +797,12 @@
 
               <div class="datasetStepPage is-active" id="datasetStep1">
                 <h4>Step 1 上传与数据准备 <span class="zh">/ Upload & Data Preparation</span></h4>
-                <div class="datasetRow datasetFormRow">
-                  <label class="datasetFieldLabel">任务名称（必填） / Task Name (Required) <input type="text" id="datasetTaskNameInput" placeholder="请输入任务名称 / Enter task name" autocomplete="off" /></label>
+                <div class="datasetRow datasetFormRow datasetTaskNameField">
+                  <label class="datasetFieldLabel" for="datasetTaskNameInput">任务名称（必填） / Task Name (Required)</label>
+                  <div class="datasetTaskNameInputRow">
+                    <input type="text" id="datasetTaskNameInput" class="datasetTaskNameInput" maxlength="80" placeholder="请输入任务名称 / Enter task name" autocomplete="off" />
+                    <span class="datasetTaskNameLenHint">最多 80 个字符 <span class="zh">/ Max 80 characters</span></span>
+                  </div>
                 </div>
                 <div class="datasetFileUploadRow">
                   <input type="file" id="datasetFileInput" accept=".csv,.xlsx,.xls" />
