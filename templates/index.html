@@ -243,6 +243,16 @@
           </div>
 
           <div class="sliderBlock" style="margin-top:12px;">
+            <label>Dataset 单文件上传上限（MB，Admin）</label>
+            <input id="datasetMaxUploadMbInput" type="number" min="1" max="500" step="1"
+              style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;">
+            <div class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;">
+              Step 1 上传原始数据文件时的最大体积；默认 20 MB（范围 1–500）。
+              <span class="zh">Max upload size for Dataset Step 1 raw file; default 20 MB (1–500).</span>
+            </div>
+          </div>
+
+          <div class="sliderBlock" style="margin-top:12px;">
             <label>系统时区（Admin）</label>
             <select id="appTimezoneSelect" style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;"></select>
             <div class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;">
@@ -271,7 +281,7 @@
             </label>
           </div>
           <div id="adminOnlySettingsHint" class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;display:none;">
-            Enterprise KB Directory, Agent Max Steps and Dual Project Routing are read-only for non-admin accounts.
+            Enterprise KB Directory, Agent Max Steps, Dataset admin limits (parallel jobs, upload size), and Dual Project Routing are read-only for non-admin accounts.
           </div>
 
           <hr style="margin:16px 0; border:0; border-top:1px solid #e5e7eb;">
@@ -793,6 +803,9 @@
                 <div class="datasetFileUploadRow">
                   <input type="file" id="datasetFileInput" accept=".csv,.xlsx,.xls" />
                   <button type="button" id="datasetUploadBtn" class="datasetUploadBtnPrimary">上传文件 / Upload</button>
+                  <p class="datasetHint datasetUploadFormatHint">
+                    允许上传：.csv、.xlsx；.xls 请先另存为 .xlsx。单文件不超过 <span id="datasetUploadMaxMbCn">20</span> MB。<span class="zh">Allowed: .csv, .xlsx; legacy .xls must be converted to .xlsx. Max <span id="datasetUploadMaxMbEn">20</span> MB per file.</span>
+                  </p>
                 </div>
                 <div id="datasetUploadMeta" class="datasetUploadMetaCard">尚未上传文件 / No file uploaded yet</div>
                 <div class="datasetRow datasetFormRow">
@@ -820,6 +833,7 @@
                 </div>
                 <div class="datasetRow datasetFormRow">
                   <label class="datasetFieldLabel">并发数 / Concurrency <input type="number" id="datasetConcurrency" min="1" max="10" value="1" /></label>
+                  <label class="datasetFieldLabel">Guardrail 超时(秒) / Guardrail Timeout (s) <input type="number" id="datasetGuardrailTimeout" min="1" max="120" step="1" value="20" title="单行 Guardrail 调用超时 / Per-call timeout stored in task state as guardrail_timeout_seconds" /></label>
                   <label class="datasetFieldLabel">批次间隔(秒) / Batch Interval (s) <input type="number" id="datasetInterval" min="0" max="30" step="0.5" value="1" /></label>
                 </div>
                 <div class="datasetRow datasetFormRow">

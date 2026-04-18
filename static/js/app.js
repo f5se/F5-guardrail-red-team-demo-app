@@ -60,6 +60,7 @@ const datasetProjectId = document.getElementById("datasetProjectId");
 const datasetApiKey = document.getElementById("datasetApiKey");
 const datasetProvider = document.getElementById("datasetProvider");
 const datasetConcurrency = document.getElementById("datasetConcurrency");
+const datasetGuardrailTimeout = document.getElementById("datasetGuardrailTimeout");
 const datasetInterval = document.getElementById("datasetInterval");
 const datasetRecordFailedScanners = document.getElementById("datasetRecordFailedScanners");
 const datasetStartBtn = document.getElementById("datasetStartBtn");
@@ -82,6 +83,7 @@ const datasetHistoryPageSize = document.getElementById("datasetHistoryPageSize")
 const datasetHistoryTableWrap = document.getElementById("datasetHistoryTableWrap");
 const datasetHistoryPager = document.getElementById("datasetHistoryPager");
 const datasetMaxRunningTasksInputEl = document.getElementById("datasetMaxRunningTasksInput");
+const datasetMaxUploadMbInputEl = document.getElementById("datasetMaxUploadMbInput");
 const appTimezoneSelectEl = document.getElementById("appTimezoneSelect");
 const attackPresets = Array.isArray(window.ATTACK_PRESETS) ? window.ATTACK_PRESETS : [];
 const guardrailIntegrationPresets = Array.isArray(window.GUARDRAIL_INTEGRATION_PRESETS) ? window.GUARDRAIL_INTEGRATION_PRESETS : [];
@@ -651,6 +653,24 @@ function buildUtcOffsetTimezoneOptions(){
   }
 }
 
+/** MB 上限：与后端 1–500 一致；用 round 避免 parseInt 把小数截成比预期小 1（如 27.9→27）。 */
+function clampDatasetUploadMbUi(v, fallback = 20){
+  const t = String(v ?? "").trim();
+  if (t === "") return fallback;
+  const x = Number(t);
+  if (!Number.isFinite(x)) return fallback;
+  const n = Math.round(x);
+  return Math.min(500, Math.max(1, n));
+}
+
+function updateDatasetUploadMaxMbHint(mb){
+  const safe = clampDatasetUploadMbUi(mb, 20);
+  const cn = document.getElementById("datasetUploadMaxMbCn");
+  const en = document.getElementById("datasetUploadMaxMbEn");
+  if (cn) cn.textContent = String(safe);
+  if (en) en.textContent = String(safe);
+}
+
 function setAdminOnlySettingsAccess(username){
   isAdminUser = String(username || "").trim().toLowerCase() === "admin";
   const disabled = !isAdminUser;
@@ -671,6 +691,10 @@ function setAdminOnlySettingsAccess(username){
   if (datasetMaxRunningTasksInputEl) {
     datasetMaxRunningTasksInputEl.disabled = disabled;
     datasetMaxRunningTasksInputEl.title = disabled ? reason : "";
+  }
+  if (datasetMaxUploadMbInputEl) {
+    datasetMaxUploadMbInputEl.disabled = disabled;
+    datasetMaxUploadMbInputEl.title = disabled ? reason : "";
   }
   if (appTimezoneSelectEl) {
     appTimezoneSelectEl.disabled = disabled;
@@ -2334,6 +2358,10 @@ async function loadSettings(){
     if (datasetMaxRunningTasksInputEl) {
       datasetMaxRunningTasksInputEl.value = String(s.dataset_max_running_tasks || 3);
     }
+    if (datasetMaxUploadMbInputEl) {
+      datasetMaxUploadMbInputEl.value = String(clampDatasetUploadMbUi(s.dataset_max_upload_mb, 20));
+    }
+    updateDatasetUploadMaxMbHint(s.dataset_max_upload_mb);
     configuredAppTimezone = String(s.app_timezone || "UTC+08:00").trim() || "UTC+08:00";
     if (appTimezoneSelectEl) {
       buildUtcOffsetTimezoneOptions();
@@ -2406,6 +2434,7 @@ async function saveSettings(showToast = true){
     payload.agent_max_steps = document.getElementById("agentMaxStepsSlider")?.value || 4;
     payload.dual_project_routing_enabled = !!toggleDualProjectRoutingEl?.checked;
     payload.dataset_max_running_tasks = document.getElementById("datasetMaxRunningTasksInput")?.value || 3;
+    payload.dataset_max_upload_mb = clampDatasetUploadMbUi(datasetMaxUploadMbInputEl?.value, 20);
     payload.app_timezone = (appTimezoneSelectEl?.value || "UTC+08:00").trim();
   }
   const res = await authFetch("/api/settings", {
@@ -2418,11 +2447,10 @@ async function saveSettings(showToast = true){
     alert("Save failed: " + text);
     return;
   }
-  const saved = await res.json();
+  await res.json();
   await loadSettings();
   if (showToast) {
-    const enabled = !!saved?.settings?.agent_skill_enabled;
-    alert("Saved. Agent Skill is " + (enabled ? "ON" : "OFF"));
+    alert("配置已保存。\nSaved.");
   }
 }
 
@@ -4358,6 +4386,7 @@ function datasetResetNewTaskForm(){
   if (datasetApiKey) datasetApiKey.value = "";
   if (datasetProvider) datasetProvider.value = "";
   if (datasetConcurrency) datasetConcurrency.value = "1";
+  if (datasetGuardrailTimeout) datasetGuardrailTimeout.value = "20";
   if (datasetInterval) datasetInterval.value = "1";
   if (datasetRecordFailedScanners) datasetRecordFailedScanners.checked = false;
   if (datasetUploadMeta) datasetUploadMeta.textContent = "尚未上传文件 / No file uploaded yet";
@@ -4478,6 +4507,11 @@ function datasetApplyTaskToForm(task){
   if (datasetConcurrency && task.concurrency_per_batch != null) {
     datasetConcurrency.value = String(task.concurrency_per_batch);
   }
+  if (datasetGuardrailTimeout != null && task.guardrail_timeout_seconds != null && task.guardrail_timeout_seconds !== undefined) {
+    datasetGuardrailTimeout.value = String(task.guardrail_timeout_seconds);
+  } else if (datasetGuardrailTimeout) {
+    datasetGuardrailTimeout.value = "20";
+  }
   if (datasetInterval && task.interval_seconds != null) {
     datasetInterval.value = String(task.interval_seconds);
   }
@@ -4560,7 +4594,15 @@ function datasetBuildSummary(){
     datasetSummaryKV("Project ID", (String(datasetProjectId?.value || "").trim() || "（系统缺省） / (Server default)")),
     datasetSummaryKV("Provider", (String(datasetProvider?.value || "").trim() || "（系统缺省） / (Server default)")),
     apiNote,
-    datasetSummaryKV("并发 / 批次间隔 / Concurrency & Interval", String(datasetConcurrency?.value || 1) + " / " + String(datasetInterval?.value || 1) + " 秒 / s"),
+    datasetSummaryKV(
+      "并发 / Guardrail超时 / 批次间隔",
+      String(datasetConcurrency?.value || 1)
+        + " / "
+        + String(datasetGuardrailTimeout?.value ?? "20")
+        + "s / "
+        + String(datasetInterval?.value || 1)
+        + " 秒",
+    ),
     datasetSummaryKV("记录阻挡Scanner名称 / Record Blocked Scanner Names", datasetRecordFailedScanners?.checked ? "是 / Yes" : "否 / No"),
     datasetSummaryKV("任务状态 / Task Status", String(datasetTaskSnapshot.status || "—") + " · " + String(datasetTaskSnapshot.phase || "—")),
   ].join("");
@@ -4672,6 +4714,7 @@ async function datasetSaveConfig(){
     provider_name: String(datasetProvider?.value || "").trim() || null,
     concurrency_per_batch: Number(datasetConcurrency?.value || 1),
     interval_seconds: Number(datasetInterval?.value || 1),
+    guardrail_timeout_seconds: Number(datasetGuardrailTimeout?.value ?? 20),
     record_failed_scanner_names: !!datasetRecordFailedScanners?.checked
   };
   const resp = await authFetch("/api/dataset-test/configure", {
@@ -4696,10 +4739,13 @@ async function datasetSaveConfigIfAllowed(){
     return false;
   }
   const st = String(datasetTaskSnapshot.status || "");
-  if (st !== "draft" && st !== "queued") {
+  if (st === "running" || st === "paused") {
     return true;
   }
-  await datasetSaveConfig();
+  if (st === "draft" || st === "queued" || st === "completed" || st === "failed") {
+    await datasetSaveConfig();
+    return true;
+  }
   return true;
 }
 
@@ -4835,7 +4881,7 @@ async function datasetRetryErrors(){
     return;
   }
   const ok = window.confirm(
-    "将对 result.csv 中标记为 Error 的行按 row_index 重新测试并覆盖该行记录。是否继续？\nRetry error rows and overwrite matching rows in result CSV?"
+    "将对 result.csv 中标记为 Error 的行按 row_index 重新测试并覆盖该行记录；补测沿用当前任务 state 中的 Step 2 参数（超时、并发、Project/Provider 等）。若在 Step 2 修改过参数，请先点「下一步」保存。\nRetry error rows in result CSV. Uses Step 2 settings saved in task state. If you changed Step 2, click Next there to save first."
   );
   if (!ok) return;
   try {

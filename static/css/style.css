@@ -3633,6 +3633,7 @@ code{
 .datasetGhostBtn{background:#fff!important;color:#1d4ed8!important}
 .datasetNavRow{display:flex;gap:10px;justify-content:flex-end;margin-top:12px}
 .datasetHint{font-size:13px;color:#475467}
+.datasetFileUploadRow .datasetUploadFormatHint{width:100%;flex-basis:100%;margin:0;line-height:1.45}
 .datasetStepHint{margin:0 0 10px 0;font-size:13px;color:#64748b;line-height:1.5}
 .datasetStepHint code{font-size:12px;background:#f1f5f9;padding:1px 5px;border-radius:4px}
 .datasetSummaryCard{border:1px solid #dbeafe;background:#eff6ff;border-radius:12px;padding:12px;line-height:1.6;color:#1e3a8a}

@@ -565,6 +565,7 @@ DEFAULT_SETTINGS = {
     ),
     "dual_project_routing_enabled": False,  # admin 全局开关：Enterprise Skill ON 时走第二个 project
     "dataset_max_running_tasks": 3,  # admin 全局阈值：所有用户并行 running/queued 总任务数
+    "dataset_max_upload_mb": 20,  # admin：Dataset Step1 上传原始文件大小上限（MB）
     "app_timezone": "Asia/Shanghai",  # admin 全局时区
 }
 NEW_USER_PATTERNS_FALLBACK = "ignore:3\nsystem:3\nprompt:2\n忽略:3\n系统提示词:3\n忘记:2\n角色:4\n"
@@ -1090,6 +1091,14 @@ def parse_patterns(raw: str) -> dict:
             pass
     return result
 
+def _coerce_mb_setting(v, default: int) -> int:
+    """Parse MB as a positive integer; uses round() so stored floats near an int don't truncate to N-1."""
+    try:
+        return int(round(float(v)))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
 def get_runtime_settings(raw: dict) -> dict:
     patterns = raw.get("patterns", DEFAULT_SETTINGS["patterns"])
     if not isinstance(patterns, str):
@@ -1119,6 +1128,9 @@ def get_runtime_settings(raw: dict) -> dict:
         ).strip(),
         "dual_project_routing_enabled": to_bool(raw.get("dual_project_routing_enabled", False)),
         "dataset_max_running_tasks": to_int(raw.get("dataset_max_running_tasks", 3), 3, 1, 100),
+        "dataset_max_upload_mb": to_int(
+            _coerce_mb_setting(raw.get("dataset_max_upload_mb", 20), 20), 20, 1, 500
+        ),
         "app_timezone": _normalize_app_timezone_name(raw.get("app_timezone", DEFAULT_APP_TIMEZONE)),
     }
 
@@ -1145,6 +1157,14 @@ def _dataset_current_capacity_limit() -> int:
     raw = get_effective_raw_settings(None)
     runtime = get_runtime_settings(raw)
     return int(runtime.get("dataset_max_running_tasks") or 3)
+
+
+def _dataset_max_file_size_bytes() -> int:
+    raw = get_effective_raw_settings(None)
+    runtime = get_runtime_settings(raw)
+    mb = int(runtime.get("dataset_max_upload_mb") or 20)
+    return max(1, mb) * 1024 * 1024
+
 
 def _normalize_guardrail_result_payload(raw) -> dict:
     """API may return `result` as an object or a single-element array of objects."""
@@ -2520,6 +2540,8 @@ def _empty_user_activity_payload(selected_range: str, start_iso: Optional[str], 
 async def get_settings(request: Request):
     username = require_user(request)
     out = dict(get_effective_raw_settings(username))
+    rt = get_runtime_settings(out)
+    out["dataset_max_upload_mb"] = rt["dataset_max_upload_mb"]
     out["provider_options"] = _get_provider_options()
     out["effective_provider"] = (str(out.get("default_provider", "") or "").strip() or (DEFAULT_PROVIDER or "").strip())
     out["username"] = username
@@ -2535,11 +2557,21 @@ async def get_settings(request: Request):
 async def post_settings(request: Request, payload: dict = Body(default=None)):
     username = require_user(request)
     clean_payload = dict(payload) if isinstance(payload, dict) else {}
-    admin_only_keys = {"kb_dir", "agent_max_steps", "dual_project_routing_enabled", "dataset_max_running_tasks", "app_timezone"}
+    admin_only_keys = {
+        "kb_dir",
+        "agent_max_steps",
+        "dual_project_routing_enabled",
+        "dataset_max_running_tasks",
+        "dataset_max_upload_mb",
+        "app_timezone",
+    }
     if username != "admin":
         forbidden = [k for k in clean_payload.keys() if k in admin_only_keys]
         if forbidden:
-            raise HTTPException(status_code=403, detail="only admin can modify kb_dir, agent_max_steps, dual_project_routing_enabled, dataset_max_running_tasks, or app_timezone")
+            raise HTTPException(
+                status_code=403,
+                detail="only admin can modify kb_dir, agent_max_steps, dual_project_routing_enabled, dataset_max_running_tasks, dataset_max_upload_mb, or app_timezone",
+            )
     structured = load_structured_settings()
     if username not in structured["user_settings"]:
         structured["user_settings"][username] = _new_user_settings_from_template(structured)
@@ -2799,11 +2831,11 @@ DATASET_RAW_DIR = os.path.join(BASE_DIR, "poc", "raw")
 DATASET_RESULT_DIR = os.path.join(BASE_DIR, "poc", "result")
 DATASET_STATE_DIR = os.path.join(BASE_DIR, "poc", "state")
 DATASET_LOCK = threading.Lock()
-DATASET_MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024
 DATASET_ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 DATASET_MAX_CONCURRENCY = 10
 DATASET_MAX_INTERVAL_SECONDS = 30.0
 DATASET_MAX_RETRY = 2
+DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS = 20.0
 DATASET_TASK_RUNTIME_KEYS: Dict[str, dict] = {}
 DATASET_RUNNING_TASKS: Dict[str, asyncio.Task] = {}
 DATASET_RETRY_TASKS: Dict[str, asyncio.Task] = {}
@@ -2832,6 +2864,7 @@ class DatasetTaskConfigureIn(BaseModel):
     provider_name: Optional[str] = None
     concurrency_per_batch: int = 1
     interval_seconds: float = 1.0
+    guardrail_timeout_seconds: float = DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS
     record_failed_scanner_names: bool = False
 
 
@@ -2985,6 +3018,12 @@ def _dataset_to_status_payload(state: dict) -> dict:
         "api_key_masked": str(state.get("api_key_masked") or ""),
         "concurrency_per_batch": int(state.get("concurrency_per_batch") or 1),
         "interval_seconds": float(state.get("interval_seconds") or 1.0),
+        "guardrail_timeout_seconds": to_float(
+            state.get("guardrail_timeout_seconds"),
+            DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS,
+            1.0,
+            120.0,
+        ),
         "record_failed_scanner_names": bool(state.get("record_failed_scanner_names", False)),
         "retry_in_progress": bool(state.get("retry_in_progress", False)),
         "retry_progress": (
@@ -3254,10 +3293,15 @@ async def _dataset_retry_error_rows_task(task_id: str):
                 _dataset_save_state(s)
             return
 
+        with DATASET_LOCK:
+            fresh = _dataset_load_state(task_id)
+            if isinstance(fresh, dict):
+                state = fresh
+
         rows_data = _dataset_read_all_rows(state["source_file_path"])
         provider_name = str(state.get("provider_name") or "").strip()
         project_id = str(state.get("project_id") or "").strip() or CALYPSOAI_PROJECT_ID
-        timeout_seconds = float(state.get("guardrail_timeout_seconds") or GUARDRAIL_TIMEOUT_SECONDS)
+        timeout_seconds = float(state.get("guardrail_timeout_seconds") or DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS)
         verbose_enabled = bool(state.get("record_failed_scanner_names", False))
         send_kwargs = build_send_kwargs(project_id=project_id, verbose=verbose_enabled, provider_override=provider_name or None)
 
@@ -3368,7 +3412,7 @@ async def _dataset_run_task(task_id: str):
     selected = [(i, p) for (i, p) in selected if i > last]
     provider_name = str(state.get("provider_name") or "").strip()
     project_id = str(state.get("project_id") or "").strip() or CALYPSOAI_PROJECT_ID
-    timeout_seconds = float(state.get("guardrail_timeout_seconds") or GUARDRAIL_TIMEOUT_SECONDS)
+    timeout_seconds = float(state.get("guardrail_timeout_seconds") or DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS)
     verbose_enabled = bool(state.get("record_failed_scanner_names", False))
     send_kwargs = build_send_kwargs(project_id=project_id, verbose=verbose_enabled, provider_override=provider_name or None)
     result_path = state["result_file_path"]
@@ -3518,8 +3562,9 @@ async def api_dataset_test_upload(
         if guess_ext and ext not in (guess_ext, ".xls", ".xlsx", ".csv"):
             raise HTTPException(status_code=400, detail="file MIME type mismatch")
     body = await file.read()
-    if len(body) > DATASET_MAX_FILE_SIZE_BYTES:
-        raise HTTPException(status_code=413, detail="file too large")
+    max_bytes = _dataset_max_file_size_bytes()
+    if len(body) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"file too large (max {max_bytes // (1024 * 1024)} MB)")
     task_id = _dataset_make_task_id()
     raw_path = os.path.join(DATASET_RAW_DIR, f"{task_id}{ext}")
     with open(raw_path, "wb") as f:
@@ -3551,7 +3596,7 @@ async def api_dataset_test_upload(
         "concurrency_per_batch": 1,
         "interval_seconds": 1.0,
         "record_failed_scanner_names": False,
-        "guardrail_timeout_seconds": GUARDRAIL_TIMEOUT_SECONDS,
+        "guardrail_timeout_seconds": DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS,
         "processed_count": 0,
         "blocked_count": 0,
         "passed_count": 0,
@@ -3599,8 +3644,14 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
     with DATASET_LOCK:
         state = _dataset_load_state(payload.task_id)
         _dataset_validate_access(state, username)
-        if state.get("status") not in ("draft", "queued"):
+        orig_status = str(state.get("status") or "")
+        if orig_status not in ("draft", "queued", "completed", "failed"):
             raise HTTPException(status_code=400, detail="task cannot be configured in current status")
+        if state.get("retry_in_progress"):
+            raise HTTPException(
+                status_code=400,
+                detail="补测进行中，无法修改配置 / Cannot change configuration while retry is in progress",
+            )
         _dataset_require_source_file(state)
         rows = _dataset_read_all_rows(state["source_file_path"])
         if payload.prompt_column < 1:
@@ -3629,7 +3680,8 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
             raise HTTPException(status_code=400, detail="缺少 Provider：请填写或在 .env 中配置 Guardrail_PoC_Provider / DEFAULT_PROVIDER")
         if not resolved_api_key:
             raise HTTPException(status_code=400, detail="缺少 API Key：请填写或在 .env 中配置 Guardrail_PoC_Token / CALYPSOAI_TOKEN")
-        state["phase"] = "step2_configured"
+        if orig_status not in ("completed",):
+            state["phase"] = "step2_configured"
         state["prompt_column"] = int(payload.prompt_column) - 1
         state["has_header"] = bool(payload.has_header)
         state["row_start"] = row_start
@@ -3647,6 +3699,12 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
         state["provider_name"] = resolved_provider_name
         state["concurrency_per_batch"] = max(1, min(int(payload.concurrency_per_batch or 1), DATASET_MAX_CONCURRENCY))
         state["interval_seconds"] = max(0.0, min(float(payload.interval_seconds or 1.0), DATASET_MAX_INTERVAL_SECONDS))
+        state["guardrail_timeout_seconds"] = to_float(
+            payload.guardrail_timeout_seconds,
+            DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS,
+            1.0,
+            120.0,
+        )
         state["record_failed_scanner_names"] = bool(payload.record_failed_scanner_names)
         _dataset_save_state(state)
     return JSONResponse({"status": "ok", "task": _dataset_to_status_payload(state)})
