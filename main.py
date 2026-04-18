@@ -1,4 +1,5 @@
 import asyncio
+import csv
 import os
 import time
 import json
@@ -9,11 +10,13 @@ import base64
 import hashlib
 import secrets
 import threading
+import mimetypes
 from collections import defaultdict, deque
 from datetime import datetime, timezone, timedelta
 from typing import Deque, Dict, List, Optional, Tuple
 from urllib.request import Request as UrlRequest, urlopen
 from urllib.error import HTTPError, URLError
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
@@ -44,8 +47,8 @@ def _read_env_literal_value(name: str) -> str:
 # -----------------------------
 HF_PROXY = os.getenv("HF_PROXY") or os.getenv("PROXY")
 
-from fastapi import FastAPI, Request, HTTPException, Body, Query
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, PlainTextResponse, RedirectResponse
+from fastapi import FastAPI, Request, HTTPException, Body, Query, UploadFile, File, Form
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, PlainTextResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
@@ -60,6 +63,10 @@ try:
     import geoip2.database
 except Exception:
     geoip2 = None
+try:
+    import openpyxl
+except Exception:
+    openpyxl = None
 
 from skills import get_all_tool_definitions, dispatch_tool
 from skills.utils import to_bool, to_int, to_float, normalize_extensions, agent_debug_log
@@ -76,12 +83,21 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # -----------------------------
 # ENV
 # -----------------------------
+def _env_first(*keys: str) -> str:
+    """Return first non-empty env/.env value by key order."""
+    for k in keys:
+        v = (os.getenv(k) or _read_env_literal_value(k) or "").strip()
+        if v:
+            return v
+    return ""
+
+
 CALYPSOAI_URL = (os.getenv("CALYPSOAI_URL") or _read_env_literal_value("CALYPSOAI_URL")).strip()
-CALYPSOAI_TOKEN = (os.getenv("CALYPSOAI_TOKEN") or _read_env_literal_value("CALYPSOAI_TOKEN")).strip()
-CALYPSOAI_PROJECT_ID = (os.getenv("CALYPSOAI_PROJECT_ID") or _read_env_literal_value("CALYPSOAI_PROJECT_ID")).strip()  # your requirement
+CALYPSOAI_TOKEN = _env_first("Guardrail_PoC_Token", "CALYPSOAI_TOKEN")
+CALYPSOAI_PROJECT_ID = _env_first("Guardrail_PoC_Project", "CALYPSOAI_PROJECT_ID")  # your requirement
 CALYPSOAI_TOKEN_SECOND_PROJECT = (os.getenv("CALYPSOAI_TOKEN_SECOND_PROJECT") or _read_env_literal_value("CALYPSOAI_TOKEN_SECOND_PROJECT")).strip()
 CALYPSOAI_PROJECT_ID_SECOND = (os.getenv("CALYPSOAI_PROJECT_ID_SECOND") or _read_env_literal_value("CALYPSOAI_PROJECT_ID_SECOND")).strip()
-DEFAULT_PROVIDER = os.getenv("DEFAULT_PROVIDER")
+DEFAULT_PROVIDER = _env_first("Guardrail_PoC_Provider", "DEFAULT_PROVIDER")
 # Hugging Face：用于模型下载，可提升速率并避免匿名 API 限制。在 .env 中设置 HF_TOKEN=hf_xxx
 HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE_HUB_TOKEN")
 
@@ -108,7 +124,7 @@ GUARDRAIL_DEBUG = os.getenv("GUARDRAIL_DEBUG", "").lower() in ("1", "true", "yes
 
 def _guardrail_debug(msg: str):
     if GUARDRAIL_DEBUG:
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        ts = datetime.now(_get_app_timezone()).isoformat(timespec="milliseconds")
         print(f"[GUARDRAIL-DEBUG] {ts} {msg}")
 
 
@@ -499,11 +515,25 @@ def classify_rejection(reply: str) -> tuple[str, Optional[str]]:
         return "error", None
 
     t = reply.strip()
+    # Guardrail / provider sometimes returns cleared outcome but puts client parse errors in `response`.
+    if _looks_like_guardrail_upstream_parse_fault(t):
+        return "error", "upstream_parse"
     if t.startswith("Prompt Rejected"):
         return "rejected", "prompt"
     if t.startswith("Response Rejected"):
         return "rejected", "response"
     return "ok", None
+
+
+_GUARDRAIL_UPSTREAM_PARSE_FAULT_MARKERS = (
+    "response.json() is an array",
+    "can't index with string",
+)
+
+
+def _looks_like_guardrail_upstream_parse_fault(text: str) -> bool:
+    tl = (text or "").strip().lower()
+    return any(m in tl for m in _GUARDRAIL_UPSTREAM_PARSE_FAULT_MARKERS)
 
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
 LOGIN_ACTIVITY_FILE = os.path.join(BASE_DIR, "login_activity.log")
@@ -534,6 +564,8 @@ DEFAULT_SETTINGS = {
         "the company's AI security policy."
     ),
     "dual_project_routing_enabled": False,  # admin 全局开关：Enterprise Skill ON 时走第二个 project
+    "dataset_max_running_tasks": 3,  # admin 全局阈值：所有用户并行 running/queued 总任务数
+    "app_timezone": "Asia/Shanghai",  # admin 全局时区
 }
 NEW_USER_PATTERNS_FALLBACK = "ignore:3\nsystem:3\nprompt:2\n忽略:3\n系统提示词:3\n忘记:2\n角色:4\n"
 
@@ -559,6 +591,13 @@ ACTIVITY_THRESHOLD_SECONDS = 120
 SESSION_COOKIE_NAME = "aigr_session"
 SESSION_IDLE_TIMEOUT_SECONDS = 20 * 60
 BEIJING_TZ = timezone(timedelta(hours=8))
+DEFAULT_APP_TIMEZONE = "UTC+08:00"
+APP_TZ_CACHE = {
+    "name": DEFAULT_APP_TIMEZONE,
+    "zone": timezone(timedelta(hours=8)),
+    "loaded_at": 0.0,
+}
+APP_TZ_CACHE_TTL_SECONDS = 5.0
 AUDIT_TRIGGER_PATHS = {
     "/api/chat",
     "/api/guardrail-scan",
@@ -650,12 +689,62 @@ def _resolve_country_and_city(ip_raw: str) -> Tuple[str, str]:
     return country, city
 
 
+def _normalize_app_timezone_name(raw: str) -> str:
+    name = str(raw or "").strip() or DEFAULT_APP_TIMEZONE
+    m = re.match(r"^UTC([+-])(\d{1,2})(?::?(\d{2}))?$", name, re.IGNORECASE)
+    if m:
+        sign = 1 if m.group(1) == "+" else -1
+        hh = int(m.group(2))
+        mm = int(m.group(3) or 0)
+        if hh <= 14 and mm in (0, 30, 45):
+            return f"UTC{'+' if sign >= 0 else '-'}{hh:02d}:{mm:02d}"
+    try:
+        ZoneInfo(name)
+        return name
+    except Exception:
+        return DEFAULT_APP_TIMEZONE
+
+
+def _refresh_app_timezone_cache_if_needed(force: bool = False):
+    now = time.time()
+    if (not force) and (now - float(APP_TZ_CACHE.get("loaded_at") or 0.0) < APP_TZ_CACHE_TTL_SECONDS):
+        return
+    try:
+        raw = get_effective_raw_settings(None)
+        tz_name = _normalize_app_timezone_name(str(raw.get("app_timezone") or DEFAULT_APP_TIMEZONE))
+    except Exception:
+        tz_name = DEFAULT_APP_TIMEZONE
+    APP_TZ_CACHE["name"] = tz_name
+    m = re.match(r"^UTC([+-])(\d{2}):(\d{2})$", tz_name, re.IGNORECASE)
+    if m:
+        sign = 1 if m.group(1) == "+" else -1
+        hh = int(m.group(2))
+        mm = int(m.group(3))
+        APP_TZ_CACHE["zone"] = timezone(sign * timedelta(hours=hh, minutes=mm))
+    else:
+        APP_TZ_CACHE["zone"] = ZoneInfo(tz_name)
+    APP_TZ_CACHE["loaded_at"] = now
+
+
+def _get_app_timezone_name() -> str:
+    _refresh_app_timezone_cache_if_needed()
+    return str(APP_TZ_CACHE.get("name") or DEFAULT_APP_TIMEZONE)
+
+
+def _get_app_timezone():
+    _refresh_app_timezone_cache_if_needed()
+    z = APP_TZ_CACHE.get("zone")
+    if z is not None:
+        return z
+    return timezone(timedelta(hours=8))
+
+
 def _append_failed_login_record(request: Request, username: str, password: str, reason: str) -> None:
     """Append one JSON line to failed_login/failed_login.log (contains plaintext credentials)."""
     os.makedirs(FAILED_LOGIN_DIR, exist_ok=True)
     ip = _client_ip(request)
     country, city = _resolve_country_and_city(ip)
-    dt_bj = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S %z")
+    dt_bj = datetime.now(_get_app_timezone()).strftime("%Y-%m-%d %H:%M:%S %z")
     user_agent = (request.headers.get("user-agent") or "").strip()
     referer = (request.headers.get("referer") or "").strip() or None
     line_obj = {
@@ -676,7 +765,8 @@ def _append_failed_login_record(request: Request, username: str, password: str, 
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # 兼容旧命名：实际返回“当前配置时区”ISO字符串。
+    return datetime.now(_get_app_timezone()).isoformat()
 
 
 def _client_ip(request: Request) -> str:
@@ -1028,13 +1118,75 @@ def get_runtime_settings(raw: dict) -> dict:
             or DEFAULT_SETTINGS["custom_blocked_message"]
         ).strip(),
         "dual_project_routing_enabled": to_bool(raw.get("dual_project_routing_enabled", False)),
+        "dataset_max_running_tasks": to_int(raw.get("dataset_max_running_tasks", 3), 3, 1, 100),
+        "app_timezone": _normalize_app_timezone_name(raw.get("app_timezone", DEFAULT_APP_TIMEZONE)),
     }
 
+
+def _dataset_count_running_like_tasks() -> int:
+    _dataset_ensure_dirs()
+    cnt = 0
+    for name in os.listdir(DATASET_STATE_DIR):
+        if not name.endswith(".json"):
+            continue
+        p = os.path.join(DATASET_STATE_DIR, name)
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            st = str((state or {}).get("status") or "").lower()
+            if st in ("running", "queued"):
+                cnt += 1
+        except Exception:
+            continue
+    return cnt
+
+
+def _dataset_current_capacity_limit() -> int:
+    raw = get_effective_raw_settings(None)
+    runtime = get_runtime_settings(raw)
+    return int(runtime.get("dataset_max_running_tasks") or 3)
+
+def _normalize_guardrail_result_payload(raw) -> dict:
+    """API may return `result` as an object or a single-element array of objects."""
+    if raw is None:
+        return {}
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                return item
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    return {}
+
+
+def _extract_guardrail_cleared_response_text(guardrail_result: dict) -> str:
+    resp = guardrail_result.get("response") if isinstance(guardrail_result, dict) else None
+    if isinstance(resp, str):
+        return resp
+    if isinstance(resp, list):
+        parts: List[str] = []
+        for x in resp:
+            if isinstance(x, str):
+                parts.append(x)
+            elif isinstance(x, dict):
+                for key in ("content", "text", "message", "body"):
+                    v = x.get(key)
+                    if isinstance(v, str) and v.strip():
+                        parts.append(v)
+                        break
+        return "\n".join(parts)
+    if resp is None:
+        return ""
+    return str(resp)
+
+
 def format_guardrail_reply(data: dict) -> str:
-    guardrail_result = (data.get("result") or {})
-    outcome = guardrail_result.get("outcome")
-    if outcome == "cleared" or outcome == "redacted":
-        return guardrail_result.get("response", "") or "(empty response)"
+    guardrail_result = _normalize_guardrail_result_payload(data.get("result"))
+    outcome = str(guardrail_result.get("outcome") or "").lower()
+    if outcome in ("cleared", "redacted"):
+        text = _extract_guardrail_cleared_response_text(guardrail_result)
+        return (text.strip() if text else "") or "(empty response)"
     calypso_type = str(data.get("type", "")).lower()
     label = "Response" if calypso_type == "response" else "Prompt"
     return (
@@ -1460,7 +1612,13 @@ async def api_chat(request: Request, payload: ChatIn):
             "heuristic": {"status": "IDLE", "score": "—"},
             "toxic": {"status": "IDLE", "score": "—"},
             "protectai": {"status": "IDLE", "score": "—"},
-            "f5": {"status": "BLOCK" if status == "rejected" else "PASS"}
+            "f5": {
+                "status": (
+                    "BLOCK"
+                    if status == "rejected"
+                    else ("ERROR" if status == "error" else "PASS")
+                )
+            },
         }
     else:
         heuristic_threshold = settings["heuristic_threshold"]
@@ -1534,8 +1692,12 @@ async def api_chat(request: Request, payload: ChatIn):
                 "label": pi_label # GOAL 2 FIX: Send label to frontend
             },
             "f5": {
-                "status": "BLOCK" if status == "rejected" else "PASS"
-            }
+                "status": (
+                    "BLOCK"
+                    if status == "rejected"
+                    else ("ERROR" if status == "error" else "PASS")
+                )
+            },
         }
 
     # Optional debug: save raw F5 Guardrail response to .cursor for inspection
@@ -2331,8 +2493,9 @@ def _build_latency_stats(latencies: List[float]) -> dict:
     }
 
 
-def _empty_user_activity_payload(selected_range: str, start_iso: Optional[str], end_iso: Optional[str]) -> dict:
+def _empty_user_activity_payload(selected_range: str, start_iso: Optional[str], end_iso: Optional[str], timezone_name: str) -> dict:
     return {
+        "timezone": timezone_name,
         "range": selected_range,
         "start": start_iso,
         "end": end_iso,
@@ -2372,11 +2535,11 @@ async def get_settings(request: Request):
 async def post_settings(request: Request, payload: dict = Body(default=None)):
     username = require_user(request)
     clean_payload = dict(payload) if isinstance(payload, dict) else {}
-    admin_only_keys = {"kb_dir", "agent_max_steps", "dual_project_routing_enabled"}
+    admin_only_keys = {"kb_dir", "agent_max_steps", "dual_project_routing_enabled", "dataset_max_running_tasks", "app_timezone"}
     if username != "admin":
         forbidden = [k for k in clean_payload.keys() if k in admin_only_keys]
         if forbidden:
-            raise HTTPException(status_code=403, detail="only admin can modify kb_dir, agent_max_steps, or dual_project_routing_enabled")
+            raise HTTPException(status_code=403, detail="only admin can modify kb_dir, agent_max_steps, dual_project_routing_enabled, dataset_max_running_tasks, or app_timezone")
     structured = load_structured_settings()
     if username not in structured["user_settings"]:
         structured["user_settings"][username] = _new_user_settings_from_template(structured)
@@ -2409,6 +2572,7 @@ async def post_settings(request: Request, payload: dict = Body(default=None)):
     for k in GLOBAL_SCOPED_KEYS:
         structured["global_settings"][k] = runtime[k]
     save_structured_settings(structured)
+    _refresh_app_timezone_cache_if_needed(force=True)
     return {"status": "ok", "settings": runtime}
 
 
@@ -2424,17 +2588,19 @@ async def get_user_activity(
     if username != "admin":
         raise HTTPException(status_code=403, detail="admin only")
 
-    now_bj = datetime.now(BEIJING_TZ)
+    app_tz = _get_app_timezone()
+    app_tz_name = _get_app_timezone_name()
+    now_local = datetime.now(app_tz)
     selected_range = str(range_key or "1m").strip().lower()
     start_dt: Optional[datetime] = None
     end_dt: Optional[datetime] = None
 
     if selected_range == "1m":
-        start_dt = (now_bj - timedelta(days=30)).astimezone(timezone.utc)
-        end_dt = now_bj.astimezone(timezone.utc)
+        start_dt = (now_local - timedelta(days=30)).astimezone(timezone.utc)
+        end_dt = now_local.astimezone(timezone.utc)
     elif selected_range == "3m":
-        start_dt = (now_bj - timedelta(days=90)).astimezone(timezone.utc)
-        end_dt = now_bj.astimezone(timezone.utc)
+        start_dt = (now_local - timedelta(days=90)).astimezone(timezone.utc)
+        end_dt = now_local.astimezone(timezone.utc)
     elif selected_range == "custom":
         start_dt = _parse_utc_iso(start or "")
         end_dt = _parse_utc_iso(end or "")
@@ -2446,7 +2612,7 @@ async def get_user_activity(
         raise HTTPException(status_code=400, detail="range must be one of: 1m, 3m, custom")
 
     if not os.path.exists(LOGIN_ACTIVITY_FILE):
-        return _empty_user_activity_payload(selected_range, start_dt.isoformat(), end_dt.isoformat())
+        return _empty_user_activity_payload(selected_range, start_dt.isoformat(), end_dt.isoformat(), app_tz_name)
 
     filtered_records = []
     invalid_lines = 0
@@ -2484,7 +2650,7 @@ async def get_user_activity(
             )
 
     if not filtered_records:
-        payload = _empty_user_activity_payload(selected_range, start_dt.isoformat(), end_dt.isoformat())
+        payload = _empty_user_activity_payload(selected_range, start_dt.isoformat(), end_dt.isoformat(), app_tz_name)
         payload["invalid_lines"] = invalid_lines
         return payload
 
@@ -2503,7 +2669,7 @@ async def get_user_activity(
 
     for rec in filtered_records:
         uname = rec["username"] or "unknown"
-        login_local = rec["login_dt"].astimezone(BEIJING_TZ)
+        login_local = rec["login_dt"].astimezone(app_tz)
         user_counts[uname] += 1
         client_ip = rec["client_ip"] or "unknown"
         ip_counts[client_ip] += 1
@@ -2516,7 +2682,7 @@ async def get_user_activity(
 
         threshold_dt = rec["threshold_dt"]
         if threshold_dt:
-            threshold_local = threshold_dt.astimezone(BEIJING_TZ)
+            threshold_local = threshold_dt.astimezone(app_tz)
             hour_threshold[threshold_local.hour] += 1
             latency_sec = (threshold_dt - rec["login_dt"]).total_seconds()
             if latency_sec < 0:
@@ -2529,8 +2695,8 @@ async def get_user_activity(
                         "username": uname,
                         "session_id": rec["session_id"],
                         "client_ip": rec["client_ip"],
-                        "login_datetime": login_local.strftime("%Y-%m-%dT%H:%M:%S+08:00"),
-                        "threshold_reached_datetime": threshold_local.strftime("%Y-%m-%dT%H:%M:%S+08:00"),
+                        "login_datetime": login_local.isoformat(),
+                        "threshold_reached_datetime": threshold_local.isoformat(),
                         "latency_seconds": round(latency_sec, 2),
                     }
                 )
@@ -2602,7 +2768,7 @@ async def get_user_activity(
     slowest_sessions = sorted(slowest_sessions, key=lambda x: -x["latency_seconds"])[:10]
 
     return {
-        "timezone": "Asia/Shanghai",
+        "timezone": app_tz_name,
         "range": selected_range,
         "start": start_dt.isoformat(),
         "end": end_dt.isoformat(),
@@ -2624,3 +2790,1142 @@ async def get_user_activity(
         "city_activity_distribution": city_activity_distribution,
         "slowest_sessions": slowest_sessions,
     }
+
+
+# -----------------------------
+# Dataset Test
+# -----------------------------
+DATASET_RAW_DIR = os.path.join(BASE_DIR, "poc", "raw")
+DATASET_RESULT_DIR = os.path.join(BASE_DIR, "poc", "result")
+DATASET_STATE_DIR = os.path.join(BASE_DIR, "poc", "state")
+DATASET_LOCK = threading.Lock()
+DATASET_MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024
+DATASET_ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
+DATASET_MAX_CONCURRENCY = 10
+DATASET_MAX_INTERVAL_SECONDS = 30.0
+DATASET_MAX_RETRY = 2
+DATASET_TASK_RUNTIME_KEYS: Dict[str, dict] = {}
+DATASET_RUNNING_TASKS: Dict[str, asyncio.Task] = {}
+DATASET_RETRY_TASKS: Dict[str, asyncio.Task] = {}
+
+DATASET_RESULT_FIELDNAMES = [
+    "row_index",
+    "prompt",
+    "guardrail_status",
+    "label",
+    "failed_scanner_names",
+    "response_excerpt",
+    "error",
+    "latency_ms",
+    "ts",
+]
+
+
+class DatasetTaskConfigureIn(BaseModel):
+    task_id: str
+    prompt_column: int  # 1-based index from UI
+    has_header: bool = True
+    row_start: Optional[int] = None
+    row_end: Optional[int] = None
+    project_id: Optional[str] = None
+    api_key: Optional[str] = None
+    provider_name: Optional[str] = None
+    concurrency_per_batch: int = 1
+    interval_seconds: float = 1.0
+    record_failed_scanner_names: bool = False
+
+
+class DatasetTaskActionIn(BaseModel):
+    task_id: str
+    keep_file: bool = True
+
+
+class DatasetTaskDeleteIn(BaseModel):
+    task_id: str
+
+
+class DatasetTaskBatchDeleteIn(BaseModel):
+    task_ids: List[str]
+
+
+def _dataset_ensure_dirs():
+    for p in (DATASET_RAW_DIR, DATASET_RESULT_DIR, DATASET_STATE_DIR):
+        os.makedirs(p, exist_ok=True)
+
+
+def _dataset_now_iso() -> str:
+    return datetime.now(_get_app_timezone()).isoformat()
+
+
+def _dataset_state_path(task_id: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "", str(task_id or ""))
+    return os.path.join(DATASET_STATE_DIR, f"{safe}.json")
+
+
+def _dataset_result_path(task_id: str) -> str:
+    return os.path.join(DATASET_RESULT_DIR, f"{task_id}_result.csv")
+
+
+def _dataset_make_task_id() -> str:
+    return datetime.now().strftime("%Y%m%d%H%M%S") + "-" + secrets.token_hex(4)
+
+
+def _dataset_atomic_json_write(path: str, data: dict):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def _dataset_load_state(task_id: str) -> Optional[dict]:
+    p = _dataset_state_path(task_id)
+    if not os.path.exists(p):
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        return None
+    return None
+
+
+def _dataset_save_state(state: dict):
+    state["updated_at"] = _dataset_now_iso()
+    _dataset_atomic_json_write(_dataset_state_path(state["task_id"]), state)
+
+
+def _dataset_sanitize_filename(name: str) -> str:
+    base = os.path.basename(str(name or "dataset"))
+    return re.sub(r"[^a-zA-Z0-9._-]", "_", base)[:120] or "dataset"
+
+
+def _dataset_guess_rows_from_csv(path: str) -> List[List[str]]:
+    rows: List[List[str]] = []
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            rows.append([str(c) for c in row])
+    return rows
+
+
+def _dataset_guess_rows_from_excel(path: str) -> List[List[str]]:
+    if openpyxl is None:
+        raise HTTPException(status_code=500, detail="Excel support requires openpyxl")
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    ws = wb.active
+    out: List[List[str]] = []
+    for row in ws.iter_rows(values_only=True):
+        out.append([("" if c is None else str(c)) for c in row])
+    wb.close()
+    return out
+
+
+def _dataset_read_all_rows(path: str) -> List[List[str]]:
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".csv":
+        return _dataset_guess_rows_from_csv(path)
+    if ext == ".xlsx":
+        return _dataset_guess_rows_from_excel(path)
+    if ext == ".xls":
+        raise HTTPException(status_code=400, detail="legacy .xls is not supported, please convert to .xlsx")
+    raise HTTPException(status_code=400, detail="unsupported dataset type")
+
+
+def _dataset_validate_access(task: dict, username: str):
+    if not task:
+        raise HTTPException(status_code=404, detail="task not found")
+    if task.get("owner") != username and username.strip().lower() != "admin":
+        raise HTTPException(status_code=403, detail="forbidden")
+
+
+def _dataset_to_status_payload(state: dict) -> dict:
+    total = int(state.get("effective_rows") or 0)
+    done = int(state.get("processed_count") or 0)
+    pct = round((done / total) * 100.0, 2) if total > 0 else 0.0
+    recent = state.get("recent_latencies") or []
+    eta = None
+    if total > 0 and done > 0 and recent:
+        avg = sum(float(x) for x in recent) / max(1, len(recent))
+        remaining = max(0, total - done)
+        c = max(1, int(state.get("concurrency_per_batch") or 1))
+        eta = round((remaining * avg) / c, 1)
+    pc0 = int(state.get("prompt_column") or 0)
+    raw_path = str(state.get("source_file_path") or "").strip()
+    source_file_exists = bool(raw_path and os.path.isfile(raw_path))
+    result_path = str(state.get("result_file_path") or "").strip()
+    result_file_exists = bool(result_path and os.path.isfile(result_path))
+    return {
+        "task_id": state.get("task_id"),
+        "task_name": str(state.get("task_name") or "").strip(),
+        "status": state.get("status"),
+        "phase": state.get("phase"),
+        "source_file_exists": source_file_exists,
+        "result_file_exists": result_file_exists,
+        "progress_percent": pct,
+        "processed_count": done,
+        "effective_rows": total,
+        "blocked_count": int(state.get("blocked_count") or 0),
+        "passed_count": int(state.get("passed_count") or 0),
+        "error_count": int(state.get("error_count") or 0),
+        "eta_seconds": eta,
+        "result_file_name": os.path.basename(str(state.get("result_file_path") or "")),
+        "source_original_name": state.get("source_original_name") or "",
+        "updated_at": state.get("updated_at"),
+        # UI restore / summary（不含 API Key 明文）
+        "total_rows": int(state.get("total_rows") or 0),
+        "prompt_column_1based": max(1, pc0 + 1),
+        "has_header": bool(state.get("has_header", True)),
+        "row_start": int(state.get("row_start") or 1),
+        "row_end": int(state.get("row_end") or 0) or int(state.get("total_rows") or 0),
+        "project_id": str(state.get("project_id") or "").strip(),
+        "provider_name": str(state.get("provider_name") or "").strip(),
+        "api_key_source": str(state.get("api_key_source") or "env"),
+        "api_key_masked": str(state.get("api_key_masked") or ""),
+        "concurrency_per_batch": int(state.get("concurrency_per_batch") or 1),
+        "interval_seconds": float(state.get("interval_seconds") or 1.0),
+        "record_failed_scanner_names": bool(state.get("record_failed_scanner_names", False)),
+        "retry_in_progress": bool(state.get("retry_in_progress", False)),
+        "retry_progress": (
+            {"current": int((state.get("retry_progress") or {}).get("current") or 0), "total": int((state.get("retry_progress") or {}).get("total") or 0)}
+            if isinstance(state.get("retry_progress"), dict)
+            else None
+        ),
+    }
+
+
+def _dataset_require_source_file(state: dict):
+    p = str(state.get("source_file_path") or "").strip()
+    if not p or not os.path.isfile(p):
+        raise HTTPException(
+            status_code=400,
+            detail="未找到原始数据文件，请先重新上传数据集后再继续。",
+        )
+
+
+def _extract_failed_scanner_friendly_names(guardrail_raw: Optional[dict]) -> List[str]:
+    """Extract failed scanner friendly names from verbose guardrail response."""
+    if not isinstance(guardrail_raw, dict):
+        return []
+    result = guardrail_raw.get("result")
+    if not isinstance(result, dict):
+        return []
+    scanner_results = result.get("scannerResults")
+    if not isinstance(scanner_results, list):
+        scanner_results = result.get("scanner_results")
+    if not isinstance(scanner_results, list):
+        return []
+    scanners_map = guardrail_raw.get("scanners")
+    if not isinstance(scanners_map, dict):
+        scanners_map = {}
+    inner = scanners_map.get("scanners") if isinstance(scanners_map, dict) else None
+    if isinstance(inner, dict):
+        scanners_map = inner
+    names: List[str] = []
+    seen = set()
+    for item in scanner_results:
+        if not isinstance(item, dict):
+            continue
+        outcome = str(item.get("outcome") or item.get("status") or "").strip().lower()
+        if outcome != "failed":
+            continue
+        sid = str(item.get("scannerId") or item.get("scanner_id") or item.get("id") or "").strip()
+        friendly = sid
+        if sid and isinstance(scanners_map, dict):
+            meta = scanners_map.get(sid)
+            if isinstance(meta, dict):
+                friendly = str(meta.get("name") or meta.get("title") or sid).strip() or sid
+        if not friendly or friendly in seen:
+            continue
+        seen.add(friendly)
+        names.append(friendly)
+    return names
+
+
+def _dataset_result_row_to_strings(row: dict) -> dict:
+    out: dict = {}
+    for k in DATASET_RESULT_FIELDNAMES:
+        v = row.get(k)
+        if v is None:
+            out[k] = ""
+        elif k == "row_index":
+            try:
+                out[k] = str(int(v))
+            except Exception:
+                out[k] = str(v).strip()
+        else:
+            out[k] = str(v)
+    return out
+
+
+def _dataset_read_result_rows_map(result_path: str) -> Dict[int, dict]:
+    rows_by_index: Dict[int, dict] = {}
+    try:
+        with open(result_path, "r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if not isinstance(row, dict):
+                    continue
+                try:
+                    ridx = int(str(row.get("row_index") or "").strip())
+                except Exception:
+                    continue
+                rows_by_index[ridx] = dict(row)
+    except Exception:
+        pass
+    return rows_by_index
+
+
+def _dataset_write_result_csv_atomic(result_path: str, rows_by_index: Dict[int, dict]) -> None:
+    tmp_path = result_path + ".tmp"
+    sorted_indices = sorted(rows_by_index.keys())
+    with open(tmp_path, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=DATASET_RESULT_FIELDNAMES)
+        writer.writeheader()
+        for idx in sorted_indices:
+            raw = rows_by_index.get(idx) or {}
+            writer.writerow(_dataset_result_row_to_strings(raw))
+    os.replace(tmp_path, result_path)
+
+
+def _dataset_apply_counts_from_rows_map(state: dict, rows_by_index: Dict[int, dict]) -> None:
+    blocked = passed = errs = 0
+    for r in rows_by_index.values():
+        gs = str(r.get("guardrail_status") or "").strip().lower()
+        if gs == "rejected":
+            blocked += 1
+        elif gs == "ok":
+            passed += 1
+        elif gs == "error":
+            errs += 1
+    state["blocked_count"] = blocked
+    state["passed_count"] = passed
+    state["error_count"] = errs
+
+
+def _dataset_maybe_resync_counts_from_result_file(state: dict) -> bool:
+    """
+    Persisted state keeps blocked/passed/error counts; if result CSV is edited out-of-band
+    (e.g. maintenance script), counts stay stale until we rescan when the file mtime changes.
+    Returns True if state was updated and should be saved.
+    """
+    if str(state.get("status") or "") != "completed":
+        return False
+    path = str(state.get("result_file_path") or "").strip()
+    if not path.startswith(DATASET_RESULT_DIR + os.sep):
+        return False
+    if not os.path.isfile(path):
+        return False
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return False
+    prev = state.get("result_counts_applied_mtime")
+    try:
+        if prev is not None and float(prev) == float(mtime):
+            return False
+    except (TypeError, ValueError):
+        pass
+    rows_by_index = _dataset_read_result_rows_map(path)
+    _dataset_apply_counts_from_rows_map(state, rows_by_index)
+    state["result_counts_applied_mtime"] = mtime
+    return True
+
+
+def _dataset_prompt_for_row_index(state: dict, rows_data: List[list], row_index: int) -> str:
+    prompt_col = int(state.get("prompt_column") or 0)
+    i = row_index - 1
+    if i < 0 or i >= len(rows_data):
+        return ""
+    row = rows_data[i]
+    if 0 <= prompt_col < len(row):
+        return str(row[prompt_col] or "")
+    return ""
+
+
+async def _dataset_process_row(state: dict, prompt_text: str, row_index: int, send_kwargs: dict, timeout_seconds: float) -> dict:
+    task_id = state["task_id"]
+    runtime = DATASET_TASK_RUNTIME_KEYS.get(task_id) or {}
+    api_key = runtime.get("api_key") or CALYPSOAI_TOKEN
+    cai_client = CalypsoAI(url=CALYPSOAI_URL, token=api_key)
+    begin = time.perf_counter()
+    last_err = ""
+    for attempt in range(DATASET_MAX_RETRY + 1):
+        try:
+            reply, guardrail_raw = await call_f5_guardrail(cai_client, prompt_text, send_kwargs, timeout_seconds=timeout_seconds)
+            status_text, _ = classify_rejection(reply)
+            latency_ms = int((time.perf_counter() - begin) * 1000)
+            if status_text == "error":
+                return {
+                    "row_index": row_index,
+                    "prompt": prompt_text,
+                    "guardrail_status": "error",
+                    "label": "Error",
+                    "failed_scanner_names": "",
+                    "response_excerpt": "",
+                    "error": (reply or "")[:500],
+                    "latency_ms": latency_ms,
+                    "ts": _dataset_now_iso(),
+                }
+            label = "Blocked(Expected)" if status_text == "rejected" else "Passed(Unexpected)"
+            guardrail_status = "rejected" if status_text == "rejected" else "ok"
+            failed_scanners = []
+            if bool(state.get("record_failed_scanner_names", False)):
+                failed_scanners = _extract_failed_scanner_friendly_names(guardrail_raw)
+            return {
+                "row_index": row_index,
+                "prompt": prompt_text,
+                "guardrail_status": guardrail_status,
+                "label": label,
+                "failed_scanner_names": ",".join(failed_scanners),
+                "response_excerpt": (reply or "")[:500],
+                "error": "",
+                "latency_ms": latency_ms,
+                "ts": _dataset_now_iso(),
+            }
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+            if attempt >= DATASET_MAX_RETRY:
+                break
+            await asyncio.sleep(0.2 * (attempt + 1))
+    latency_ms = int((time.perf_counter() - begin) * 1000)
+    return {
+        "row_index": row_index,
+        "prompt": prompt_text,
+        "guardrail_status": "error",
+        "label": "Error",
+        "failed_scanner_names": "",
+        "response_excerpt": "",
+        "error": last_err[:500],
+        "latency_ms": latency_ms,
+        "ts": _dataset_now_iso(),
+    }
+
+
+async def _dataset_retry_error_rows_task(task_id: str):
+    try:
+        with DATASET_LOCK:
+            state = _dataset_load_state(task_id)
+            if not state:
+                return
+        if str(state.get("status") or "") != "completed":
+            with DATASET_LOCK:
+                s = _dataset_load_state(task_id)
+                if s:
+                    s["retry_in_progress"] = False
+                    s["retry_progress"] = None
+                    _dataset_save_state(s)
+            return
+
+        result_path = str(state.get("result_file_path") or "").strip()
+        if not result_path or not os.path.isfile(result_path):
+            with DATASET_LOCK:
+                s = _dataset_load_state(task_id) or state
+                s["retry_in_progress"] = False
+                s["retry_progress"] = None
+                _dataset_save_state(s)
+            return
+
+        try:
+            _dataset_require_source_file(state)
+        except HTTPException:
+            with DATASET_LOCK:
+                s = _dataset_load_state(task_id) or state
+                s["retry_in_progress"] = False
+                s["retry_progress"] = None
+                _dataset_save_state(s)
+            return
+
+        rows_by_index = _dataset_read_result_rows_map(result_path)
+        error_indices: List[int] = []
+        for ridx, row in rows_by_index.items():
+            gs = str(row.get("guardrail_status") or "").strip().lower()
+            lb = str(row.get("label") or "").strip()
+            if gs == "error" or lb == "Error":
+                error_indices.append(ridx)
+        error_indices.sort()
+
+        if not error_indices:
+            with DATASET_LOCK:
+                s = _dataset_load_state(task_id) or state
+                s["retry_in_progress"] = False
+                s["retry_progress"] = {"current": 0, "total": 0}
+                _dataset_save_state(s)
+            return
+
+        rows_data = _dataset_read_all_rows(state["source_file_path"])
+        provider_name = str(state.get("provider_name") or "").strip()
+        project_id = str(state.get("project_id") or "").strip() or CALYPSOAI_PROJECT_ID
+        timeout_seconds = float(state.get("guardrail_timeout_seconds") or GUARDRAIL_TIMEOUT_SECONDS)
+        verbose_enabled = bool(state.get("record_failed_scanner_names", False))
+        send_kwargs = build_send_kwargs(project_id=project_id, verbose=verbose_enabled, provider_override=provider_name or None)
+
+        total = len(error_indices)
+        processed = 0
+
+        with DATASET_LOCK:
+            s = _dataset_load_state(task_id)
+            if s:
+                s["retry_progress"] = {"current": 0, "total": total}
+                _dataset_save_state(s)
+
+        c = max(1, min(int(state.get("concurrency_per_batch") or 1), DATASET_MAX_CONCURRENCY))
+        interval_seconds = max(0.0, min(float(state.get("interval_seconds") or 1.0), DATASET_MAX_INTERVAL_SECONDS))
+
+        for batch_start in range(0, len(error_indices), c):
+            batch_idx = error_indices[batch_start : batch_start + c]
+            results = await asyncio.gather(
+                *[
+                    _dataset_process_row(
+                        state,
+                        _dataset_prompt_for_row_index(state, rows_data, row_idx),
+                        row_idx,
+                        send_kwargs,
+                        timeout_seconds,
+                    )
+                    for row_idx in batch_idx
+                ]
+            )
+            for item in results:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    ridx = int(item.get("row_index") or 0)
+                except Exception:
+                    continue
+                rows_by_index[ridx] = item
+            processed += len(batch_idx)
+            _dataset_write_result_csv_atomic(result_path, rows_by_index)
+            with DATASET_LOCK:
+                s = _dataset_load_state(task_id) or state
+                _dataset_apply_counts_from_rows_map(s, rows_by_index)
+                s["retry_progress"] = {"current": min(processed, total), "total": total}
+                s["updated_at"] = _dataset_now_iso()
+                _dataset_save_state(s)
+            if batch_start + c < len(error_indices):
+                await asyncio.sleep(interval_seconds)
+
+        with DATASET_LOCK:
+            s = _dataset_load_state(task_id) or state
+            s["retry_in_progress"] = False
+            s["retry_progress"] = {"current": total, "total": total}
+            _dataset_apply_counts_from_rows_map(s, rows_by_index)
+            s["phase"] = "step5_completed"
+            s["retry_completed_pending"] = True
+            s["updated_at"] = _dataset_now_iso()
+            _dataset_save_state(s)
+    except Exception as e:
+        print(f"[DatasetTest] retry errors failed: {e}")
+        with DATASET_LOCK:
+            s = _dataset_load_state(task_id)
+            if s:
+                s["retry_in_progress"] = False
+                s["retry_progress"] = None
+                _dataset_save_state(s)
+
+
+def _dataset_schedule_retry_task(task_id: str):
+    existing = DATASET_RETRY_TASKS.get(task_id)
+    if existing and not existing.done():
+        return
+    loop = asyncio.get_running_loop()
+    t = loop.create_task(_dataset_retry_error_rows_task(task_id))
+    DATASET_RETRY_TASKS[task_id] = t
+
+    def _cleanup(_task):
+        DATASET_RETRY_TASKS.pop(task_id, None)
+
+    t.add_done_callback(_cleanup)
+
+
+async def _dataset_run_task(task_id: str):
+    with DATASET_LOCK:
+        state = _dataset_load_state(task_id)
+        if not state:
+            return
+        state["status"] = "running"
+        state["phase"] = "step4_running"
+        _dataset_save_state(state)
+    rows = _dataset_read_all_rows(state["source_file_path"])
+    has_header = bool(state.get("has_header"))
+    prompt_col = int(state.get("prompt_column") or 0)
+    row_start = int(state.get("row_start") or 1)
+    row_end = int(state.get("row_end") or len(rows))
+    data_start = 2 if has_header else 1
+    row_start = max(row_start, data_start)
+    row_end = min(row_end, len(rows))
+    selected: List[Tuple[int, str]] = []
+    for idx in range(row_start, row_end + 1):
+        row = rows[idx - 1] if idx - 1 < len(rows) else []
+        value = ""
+        if 0 <= prompt_col < len(row):
+            value = str(row[prompt_col] or "")
+        selected.append((idx, value))
+    with DATASET_LOCK:
+        state = _dataset_load_state(task_id) or state
+        last = int(state.get("last_processed_row") or 0)
+    selected = [(i, p) for (i, p) in selected if i > last]
+    provider_name = str(state.get("provider_name") or "").strip()
+    project_id = str(state.get("project_id") or "").strip() or CALYPSOAI_PROJECT_ID
+    timeout_seconds = float(state.get("guardrail_timeout_seconds") or GUARDRAIL_TIMEOUT_SECONDS)
+    verbose_enabled = bool(state.get("record_failed_scanner_names", False))
+    send_kwargs = build_send_kwargs(project_id=project_id, verbose=verbose_enabled, provider_override=provider_name or None)
+    result_path = state["result_file_path"]
+    if not os.path.exists(result_path):
+        # Use UTF-8 BOM for better compatibility when opening CSV directly in Microsoft Excel.
+        with open(result_path, "w", encoding="utf-8-sig", newline="") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=DATASET_RESULT_FIELDNAMES,
+            )
+            writer.writeheader()
+    # 轻量一致性保障：恢复时先读取已存在结果行号，写入前按 row_index 去重。
+    # 这样在异常重启/暂停恢复情况下，即便 last_processed_row 还未及时落盘，也可尽量避免重复写入。
+    seen_row_indexes = set()
+    try:
+        with open(result_path, "r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    seen_row_indexes.add(int(str(row.get("row_index") or "").strip()))
+                except Exception:
+                    continue
+    except Exception:
+        seen_row_indexes = set()
+
+    c = max(1, min(int(state.get("concurrency_per_batch") or 1), DATASET_MAX_CONCURRENCY))
+    interval_seconds = max(0.0, min(float(state.get("interval_seconds") or 1.0), DATASET_MAX_INTERVAL_SECONDS))
+    for i in range(0, len(selected), c):
+        with DATASET_LOCK:
+            latest = _dataset_load_state(task_id) or state
+            if latest.get("stop_requested"):
+                latest["status"] = "cancelled"
+                latest["phase"] = "cancelled"
+                _dataset_save_state(latest)
+                return
+            if str(latest.get("status") or "") == "paused":
+                latest["phase"] = "paused"
+                _dataset_save_state(latest)
+                return
+            state = latest
+        batch = selected[i:i + c]
+        results = await asyncio.gather(
+            *[_dataset_process_row(state, prompt, row_idx, send_kwargs, timeout_seconds) for (row_idx, prompt) in batch]
+        )
+        with DATASET_LOCK:
+            state = _dataset_load_state(task_id) or state
+            with open(result_path, "a", encoding="utf-8-sig", newline="") as f:
+                writer = csv.DictWriter(
+                    f,
+                    fieldnames=DATASET_RESULT_FIELDNAMES,
+                )
+                for item in results:
+                    ridx = int(item["row_index"])
+                    if ridx in seen_row_indexes:
+                        # 已有记录则跳过，避免重复行导致统计失真。
+                        state["last_processed_row"] = max(int(state.get("last_processed_row") or 0), ridx)
+                        continue
+                    writer.writerow(item)
+                    seen_row_indexes.add(ridx)
+                    state["processed_count"] = int(state.get("processed_count") or 0) + 1
+                    state["last_processed_row"] = max(int(state.get("last_processed_row") or 0), ridx)
+                    if item["guardrail_status"] == "rejected":
+                        state["blocked_count"] = int(state.get("blocked_count") or 0) + 1
+                    elif item["guardrail_status"] == "ok":
+                        state["passed_count"] = int(state.get("passed_count") or 0) + 1
+                    else:
+                        state["error_count"] = int(state.get("error_count") or 0) + 1
+                        errs = list(state.get("recent_errors") or [])
+                        errs.append({"row_index": item["row_index"], "error": item["error"]})
+                        state["recent_errors"] = errs[-20:]
+                    lats = list(state.get("recent_latencies") or [])
+                    lats.append(float(item.get("latency_ms") or 0) / 1000.0)
+                    state["recent_latencies"] = lats[-30:]
+            _dataset_save_state(state)
+        if i + c < len(selected):
+            await asyncio.sleep(interval_seconds)
+    with DATASET_LOCK:
+        state = _dataset_load_state(task_id) or state
+        if state.get("status") != "cancelled":
+            state["status"] = "completed"
+            state["phase"] = "step5_completed"
+        _dataset_save_state(state)
+
+
+def _dataset_schedule_task(task_id: str):
+    existing = DATASET_RUNNING_TASKS.get(task_id)
+    if existing and not existing.done():
+        return
+    loop = asyncio.get_running_loop()
+    t = loop.create_task(_dataset_run_task(task_id))
+    DATASET_RUNNING_TASKS[task_id] = t
+
+    def _cleanup(_task):
+        DATASET_RUNNING_TASKS.pop(task_id, None)
+
+    t.add_done_callback(_cleanup)
+
+
+@app.on_event("startup")
+async def dataset_test_startup_recover():
+    _dataset_ensure_dirs()
+    try:
+        for name in os.listdir(DATASET_STATE_DIR):
+            if not name.endswith(".json"):
+                continue
+            p = os.path.join(DATASET_STATE_DIR, name)
+            with open(p, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            if not isinstance(state, dict):
+                continue
+            if state.get("retry_in_progress"):
+                state["retry_in_progress"] = False
+                state["retry_progress"] = None
+                _dataset_save_state(state)
+            if state.get("status") in ("running", "queued"):
+                state["status"] = "queued"
+                state["phase"] = "recovering"
+                _dataset_save_state(state)
+                _dataset_schedule_task(state["task_id"])
+    except Exception as e:
+        print(f"[DatasetTest] startup recover failed: {e}")
+
+
+@app.post("/api/dataset-test/upload")
+async def api_dataset_test_upload(
+    request: Request,
+    task_name: str = Form(...),
+    file: UploadFile = File(...),
+):
+    username = require_user(request)
+    _dataset_ensure_dirs()
+    with DATASET_LOCK:
+        running_count = _dataset_count_running_like_tasks()
+    max_running = _dataset_current_capacity_limit()
+    if running_count >= max_running:
+        raise HTTPException(status_code=409, detail=f"running tasks exceed global limit ({running_count}/{max_running}), cannot create new task")
+    task_name_clean = str(task_name or "").strip()
+    if not task_name_clean:
+        raise HTTPException(status_code=400, detail="任务名称不能为空")
+    original = _dataset_sanitize_filename(file.filename or "dataset")
+    ext = os.path.splitext(original)[1].lower()
+    if ext not in DATASET_ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Only csv/xlsx/xls are allowed")
+    ctype = (file.content_type or "").strip().lower()
+    if ctype and ctype != "application/octet-stream":
+        guess_ext = mimetypes.guess_extension(ctype) or ""
+        if guess_ext and ext not in (guess_ext, ".xls", ".xlsx", ".csv"):
+            raise HTTPException(status_code=400, detail="file MIME type mismatch")
+    body = await file.read()
+    if len(body) > DATASET_MAX_FILE_SIZE_BYTES:
+        raise HTTPException(status_code=413, detail="file too large")
+    task_id = _dataset_make_task_id()
+    raw_path = os.path.join(DATASET_RAW_DIR, f"{task_id}{ext}")
+    with open(raw_path, "wb") as f:
+        f.write(body)
+    rows = _dataset_read_all_rows(raw_path)
+    max_cols = max((len(r) for r in rows), default=0)
+    preview = rows[:5]
+    state = {
+        "task_id": task_id,
+        "task_name": task_name_clean,
+        "owner": username,
+        "created_at": _dataset_now_iso(),
+        "updated_at": _dataset_now_iso(),
+        "status": "draft",
+        "phase": "step1_uploaded",
+        "source_file_path": raw_path,
+        "source_original_name": original,
+        "result_file_path": _dataset_result_path(task_id),
+        "prompt_column": 0,
+        "has_header": True,
+        "row_start": 2 if len(rows) > 1 else 1,
+        "row_end": len(rows),
+        "total_rows": len(rows),
+        "effective_rows": max(0, len(rows) - 1),
+        "project_id": CALYPSOAI_PROJECT_ID,
+        "provider_name": (DEFAULT_PROVIDER or "").strip(),
+        "api_key_source": "env",
+        "api_key_masked": "***",
+        "concurrency_per_batch": 1,
+        "interval_seconds": 1.0,
+        "record_failed_scanner_names": False,
+        "guardrail_timeout_seconds": GUARDRAIL_TIMEOUT_SECONDS,
+        "processed_count": 0,
+        "blocked_count": 0,
+        "passed_count": 0,
+        "error_count": 0,
+        "last_processed_row": 0,
+        "stop_requested": False,
+        "recent_errors": [],
+        "recent_latencies": [],
+        "retry_in_progress": False,
+        "retry_progress": None,
+    }
+    with DATASET_LOCK:
+        _dataset_save_state(state)
+    return JSONResponse(
+        {
+            "task_id": task_id,
+            "task_name": task_name_clean,
+            "preview_rows": preview,
+            "total_rows": len(rows),
+            "max_columns": max_cols,
+            "source_original_name": original,
+        }
+    )
+
+
+@app.get("/api/dataset-test/capacity")
+async def api_dataset_test_capacity(request: Request):
+    _ = require_user(request)
+    with DATASET_LOCK:
+        running_count = _dataset_count_running_like_tasks()
+    max_running = _dataset_current_capacity_limit()
+    return JSONResponse(
+        {
+            "status": "ok",
+            "running_count": running_count,
+            "max_running": max_running,
+            "allow_create_new_task": running_count < max_running,
+        }
+    )
+
+
+@app.post("/api/dataset-test/configure")
+async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfigureIn):
+    username = require_user(request)
+    with DATASET_LOCK:
+        state = _dataset_load_state(payload.task_id)
+        _dataset_validate_access(state, username)
+        if state.get("status") not in ("draft", "queued"):
+            raise HTTPException(status_code=400, detail="task cannot be configured in current status")
+        _dataset_require_source_file(state)
+        rows = _dataset_read_all_rows(state["source_file_path"])
+        if payload.prompt_column < 1:
+            raise HTTPException(status_code=400, detail="invalid prompt_column")
+        max_cols = max((len(r) for r in rows), default=0)
+        if payload.prompt_column > max_cols:
+            raise HTTPException(status_code=400, detail=f"prompt_column exceeds max columns: {max_cols}")
+        total_rows = len(rows)
+        row_start = int(payload.row_start or 1)
+        row_end = int(payload.row_end or total_rows)
+        header_offset = 1 if payload.has_header else 0
+        row_start = max(1 + header_offset, row_start)
+        row_end = min(total_rows, row_end)
+        if row_end < row_start:
+            raise HTTPException(status_code=400, detail="invalid row range")
+        effective_rows = max(0, row_end - row_start + 1)
+        if effective_rows <= 0:
+            raise HTTPException(status_code=400, detail="no rows selected")
+        resolved_project_id = str(payload.project_id or "").strip() or CALYPSOAI_PROJECT_ID
+        resolved_provider_name = str(payload.provider_name or "").strip() or (DEFAULT_PROVIDER or "").strip()
+        provided_key = str(payload.api_key or "").strip()
+        resolved_api_key = provided_key or CALYPSOAI_TOKEN
+        if not resolved_project_id:
+            raise HTTPException(status_code=400, detail="缺少 Project ID：请填写或在 .env 中配置 Guardrail_PoC_Project / CALYPSOAI_PROJECT_ID")
+        if not resolved_provider_name:
+            raise HTTPException(status_code=400, detail="缺少 Provider：请填写或在 .env 中配置 Guardrail_PoC_Provider / DEFAULT_PROVIDER")
+        if not resolved_api_key:
+            raise HTTPException(status_code=400, detail="缺少 API Key：请填写或在 .env 中配置 Guardrail_PoC_Token / CALYPSOAI_TOKEN")
+        state["phase"] = "step2_configured"
+        state["prompt_column"] = int(payload.prompt_column) - 1
+        state["has_header"] = bool(payload.has_header)
+        state["row_start"] = row_start
+        state["row_end"] = row_end
+        state["effective_rows"] = effective_rows
+        state["project_id"] = resolved_project_id
+        if provided_key:
+            state["api_key_source"] = "userProvided"
+            state["api_key_masked"] = "*" * 6 + provided_key[-4:]
+            DATASET_TASK_RUNTIME_KEYS[state["task_id"]] = {"api_key": provided_key}
+        else:
+            state["api_key_source"] = "env"
+            state["api_key_masked"] = "***"
+            DATASET_TASK_RUNTIME_KEYS.pop(state["task_id"], None)
+        state["provider_name"] = resolved_provider_name
+        state["concurrency_per_batch"] = max(1, min(int(payload.concurrency_per_batch or 1), DATASET_MAX_CONCURRENCY))
+        state["interval_seconds"] = max(0.0, min(float(payload.interval_seconds or 1.0), DATASET_MAX_INTERVAL_SECONDS))
+        state["record_failed_scanner_names"] = bool(payload.record_failed_scanner_names)
+        _dataset_save_state(state)
+    return JSONResponse({"status": "ok", "task": _dataset_to_status_payload(state)})
+
+
+@app.post("/api/dataset-test/start")
+async def api_dataset_test_start(request: Request, payload: DatasetTaskActionIn):
+    username = require_user(request)
+    with DATASET_LOCK:
+        state = _dataset_load_state(payload.task_id)
+        _dataset_validate_access(state, username)
+        _dataset_require_source_file(state)
+        st = state.get("status")
+        if st in ("running", "queued"):
+            return JSONResponse({"status": "ok", "already_running": True, "task": _dataset_to_status_payload(state)})
+        if st not in ("draft", "failed", "paused"):
+            raise HTTPException(status_code=400, detail="task cannot be started")
+        state["status"] = "queued"
+        state["phase"] = "step3_confirmed"
+        state["stop_requested"] = False
+        _dataset_save_state(state)
+    _dataset_schedule_task(payload.task_id)
+    return JSONResponse({"status": "ok", "task": _dataset_to_status_payload(state)})
+
+
+@app.post("/api/dataset-test/cancel")
+async def api_dataset_test_cancel(request: Request, payload: DatasetTaskActionIn):
+    username = require_user(request)
+    with DATASET_LOCK:
+        state = _dataset_load_state(payload.task_id)
+        _dataset_validate_access(state, username)
+        state["stop_requested"] = True
+        if state.get("status") in ("draft", "queued"):
+            state["status"] = "cancelled"
+            state["phase"] = "cancelled"
+        _dataset_save_state(state)
+    return JSONResponse({"status": "ok"})
+
+
+@app.post("/api/dataset-test/pause")
+async def api_dataset_test_pause(request: Request, payload: DatasetTaskActionIn):
+    username = require_user(request)
+    with DATASET_LOCK:
+        state = _dataset_load_state(payload.task_id)
+        _dataset_validate_access(state, username)
+        st = str(state.get("status") or "")
+        if st in ("running", "queued"):
+            state["status"] = "paused"
+            state["phase"] = "paused"
+            _dataset_save_state(state)
+            return JSONResponse({"status": "ok", "task": _dataset_to_status_payload(state)})
+        if st == "paused":
+            return JSONResponse({"status": "ok", "task": _dataset_to_status_payload(state)})
+        raise HTTPException(status_code=400, detail="task cannot be paused in current status")
+
+
+@app.post("/api/dataset-test/retry-errors")
+async def api_dataset_test_retry_errors(request: Request, payload: DatasetTaskActionIn):
+    username = require_user(request)
+    with DATASET_LOCK:
+        state = _dataset_load_state(payload.task_id)
+        _dataset_validate_access(state, username)
+        if str(state.get("status") or "") != "completed":
+            raise HTTPException(
+                status_code=400,
+                detail="仅已完成任务可补测错误项 / Only completed tasks can retry errors",
+            )
+        if state.get("retry_in_progress"):
+            raise HTTPException(status_code=400, detail="补测进行中 / Retry already in progress")
+        main_t = DATASET_RUNNING_TASKS.get(payload.task_id)
+        if main_t and not main_t.done():
+            raise HTTPException(status_code=400, detail="任务运行中，无法补测 / Task is running")
+        rt = DATASET_RETRY_TASKS.get(payload.task_id)
+        if rt and not rt.done():
+            raise HTTPException(status_code=400, detail="补测进行中 / Retry already in progress")
+        try:
+            _dataset_require_source_file(state)
+        except HTTPException as he:
+            raise he
+        state["retry_in_progress"] = True
+        state["retry_progress"] = {"current": 0, "total": 0}
+        state.pop("retry_completed_pending", None)
+        state["updated_at"] = _dataset_now_iso()
+        _dataset_save_state(state)
+        out = _dataset_to_status_payload(state)
+    _dataset_schedule_retry_task(payload.task_id)
+    return JSONResponse({"status": "ok", "task": out})
+
+
+@app.post("/api/dataset-test/delete")
+async def api_dataset_test_delete(request: Request, payload: DatasetTaskDeleteIn):
+    username = require_user(request)
+    _dataset_ensure_dirs()
+    with DATASET_LOCK:
+        state = _dataset_load_state(payload.task_id)
+        _dataset_validate_access(state, username)
+        if state.get("retry_in_progress"):
+            raise HTTPException(status_code=400, detail="补测进行中，无法删除 / Cannot delete while retry is running")
+        if state.get("status") in ("running", "queued"):
+            raise HTTPException(status_code=400, detail="running/queued task cannot be deleted")
+        raw_path = str(state.get("source_file_path") or "")
+        result_path = str(state.get("result_file_path") or "")
+        state_path = _dataset_state_path(payload.task_id)
+        DATASET_TASK_RUNTIME_KEYS.pop(payload.task_id, None)
+    for p in (raw_path, result_path, state_path):
+        if not p:
+            continue
+        try:
+            os.remove(p)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+    return JSONResponse({"status": "ok"})
+
+
+@app.post("/api/dataset-test/delete-batch")
+async def api_dataset_test_delete_batch(request: Request, payload: DatasetTaskBatchDeleteIn):
+    username = require_user(request)
+    _dataset_ensure_dirs()
+    task_ids = [str(x or "").strip() for x in (payload.task_ids or []) if str(x or "").strip()]
+    if not task_ids:
+        raise HTTPException(status_code=400, detail="task_ids is required")
+    deleted: List[str] = []
+    skipped_running: List[str] = []
+    skipped_retry: List[str] = []
+    not_found: List[str] = []
+    for tid in task_ids:
+        try:
+            with DATASET_LOCK:
+                state = _dataset_load_state(tid)
+                if not state:
+                    not_found.append(tid)
+                    continue
+                _dataset_validate_access(state, username)
+                if state.get("retry_in_progress"):
+                    skipped_retry.append(tid)
+                    continue
+                if state.get("status") in ("running", "queued"):
+                    skipped_running.append(tid)
+                    continue
+                raw_path = str(state.get("source_file_path") or "")
+                result_path = str(state.get("result_file_path") or "")
+                state_path = _dataset_state_path(tid)
+                DATASET_TASK_RUNTIME_KEYS.pop(tid, None)
+            for p in (raw_path, result_path, state_path):
+                if not p:
+                    continue
+                try:
+                    os.remove(p)
+                except FileNotFoundError:
+                    pass
+                except Exception:
+                    pass
+            deleted.append(tid)
+        except HTTPException:
+            raise
+        except Exception:
+            continue
+    return JSONResponse(
+        {
+            "status": "ok",
+            "deleted_count": len(deleted),
+            "deleted_task_ids": deleted,
+            "skipped_running": skipped_running,
+            "skipped_retry": skipped_retry,
+            "not_found": not_found,
+        }
+    )
+
+
+@app.get("/api/dataset-test/{task_id}/status")
+async def api_dataset_test_status(request: Request, task_id: str):
+    username = require_user(request)
+    with DATASET_LOCK:
+        state = _dataset_load_state(task_id)
+    _dataset_validate_access(state, username)
+    retry_completed_signal = False
+    with DATASET_LOCK:
+        state2 = _dataset_load_state(task_id)
+        if isinstance(state2, dict) and state2.get("retry_completed_pending"):
+            retry_completed_signal = True
+            state2.pop("retry_completed_pending", None)
+            _dataset_save_state(state2)
+        if isinstance(state2, dict) and _dataset_maybe_resync_counts_from_result_file(state2):
+            _dataset_save_state(state2)
+        payload = _dataset_to_status_payload(state2 or {})
+    if retry_completed_signal:
+        payload["retry_completed_signal"] = True
+    return JSONResponse({"status": "ok", "task": payload})
+
+
+@app.get("/api/dataset-test/{task_id}/preview")
+async def api_dataset_test_preview(request: Request, task_id: str):
+    """Return first rows preview for an existing task raw file (Step1 restore)."""
+    username = require_user(request)
+    with DATASET_LOCK:
+        state = _dataset_load_state(task_id)
+    _dataset_validate_access(state, username)
+    _dataset_require_source_file(state)
+    rows = _dataset_read_all_rows(state["source_file_path"])
+    max_cols = max((len(r) for r in rows), default=0)
+    return JSONResponse(
+        {
+            "status": "ok",
+            "preview_rows": rows[:5],
+            "total_rows": len(rows),
+            "max_columns": max_cols,
+        }
+    )
+
+
+@app.get("/api/dataset-test/history")
+async def api_dataset_test_history(
+    request: Request,
+    limit: int = Query(default=30, ge=1, le=200),
+):
+    username = require_user(request)
+    _dataset_ensure_dirs()
+    items = []
+    for name in os.listdir(DATASET_STATE_DIR):
+        if not name.endswith(".json"):
+            continue
+        p = os.path.join(DATASET_STATE_DIR, name)
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            if not isinstance(state, dict):
+                continue
+            owner = state.get("owner")
+            if owner != username and username.strip().lower() != "admin":
+                continue
+            with DATASET_LOCK:
+                tid = str(state.get("task_id") or "").strip()
+                if tid:
+                    fresh = _dataset_load_state(tid)
+                    if isinstance(fresh, dict):
+                        state = fresh
+                        if _dataset_maybe_resync_counts_from_result_file(state):
+                            _dataset_save_state(state)
+                payload = _dataset_to_status_payload(state)
+                payload["created_at"] = state.get("created_at")
+                payload["owner"] = owner
+                payload["task_time"] = state.get("created_at")
+                block = int(state.get("blocked_count") or 0)
+                passed = int(state.get("passed_count") or 0)
+                errs = int(state.get("error_count") or 0)
+                denom = block + passed + errs
+                payload["block_rate"] = round((block / denom) * 100.0, 2) if denom else 0.0
+                items.append(payload)
+        except Exception:
+            continue
+    items.sort(key=lambda x: str(x.get("created_at") or ""), reverse=True)
+    return JSONResponse({"status": "ok", "items": items[:limit]})
+
+
+@app.get("/api/dataset-test/{task_id}/download/raw")
+async def api_dataset_test_download_raw(request: Request, task_id: str):
+    username = require_user(request)
+    with DATASET_LOCK:
+        state = _dataset_load_state(task_id)
+    _dataset_validate_access(state, username)
+    path = state.get("source_file_path") or ""
+    if not path.startswith(DATASET_RAW_DIR + os.sep):
+        raise HTTPException(status_code=403, detail="invalid file path")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="file not found")
+    return FileResponse(path=path, filename=state.get("source_original_name") or os.path.basename(path))
+
+
+@app.get("/api/dataset-test/{task_id}/download/result")
+async def api_dataset_test_download_result(request: Request, task_id: str):
+    username = require_user(request)
+    with DATASET_LOCK:
+        state = _dataset_load_state(task_id)
+    _dataset_validate_access(state, username)
+    path = state.get("result_file_path") or ""
+    if not path.startswith(DATASET_RESULT_DIR + os.sep):
+        raise HTTPException(status_code=403, detail="invalid file path")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="result not found")
+    return FileResponse(path=path, filename=os.path.basename(path))

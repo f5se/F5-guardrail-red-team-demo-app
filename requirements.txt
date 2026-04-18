@@ -1,12 +1,25 @@
-# Third-party dependencies (see README: F5 Calypso SDK is installed separately).
+# Third-party dependencies.
+# Calypso / F5 AI Security Python SDK (`calypsoai`) is required for Guardrail API calls
+# (Chat, Dataset Test, etc.) — install separately per official docs; not pinned here.
+
+# --- Web stack (python-multipart: Form / file uploads) ---
 python-dotenv
 fastapi
+python-multipart
 uvicorn
 pydantic
 jinja2
+httpx
+
+# --- Local ML engines (pattern/toxic/PI local models in chat path) ---
 transformers
 torch
 protobuf
-httpx
+
+# --- Optional / auxiliary ---
 geoip2
 langgraph
+
+# --- Dataset Test (batch guardrail on uploaded prompts) ---
+# CSV: standard library only. Excel .xlsx uploads require openpyxl (legacy .xls is not supported).
+openpyxl

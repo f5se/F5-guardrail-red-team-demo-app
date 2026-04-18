@@ -27,6 +27,7 @@
             <button class="navBtn" data-view="REDTEAM" id="btnRedTeam">🎯 Red Team</button>
             <button class="navBtn" data-view="GUARDRAIL_INTEGRATION" id="btnGuardrailIntegration">🛡️ Guardrail Integration</button>
             <button class="navBtn" data-view="AGENTIC_SECURITY" id="btnAgenticSecurity">🤖 Agentic Security</button>
+            <button class="navBtn" data-view="DATASET_TEST" id="btnDatasetTest">🧪 Dataset Test</button>
             <button class="navBtn" data-view="TEST_GUIDE" id="btnTestGuide">📖 Test Guide</button>
             <button class="navBtn" data-view="COMPLIANCE_REPORT" id="btnComplianceReport">📑 China Compliance Report</button>
             <button class="navBtn" data-view="SETTINGS" id="btnSettings">⚙️ Settings</button>
@@ -230,6 +231,23 @@
             <label>Enterprise KB Directory</label>
             <input id="kbDirInput" type="text" placeholder="./enterprise_kb"
               style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;">
+          </div>
+
+          <div class="sliderBlock" style="margin-top:12px;">
+            <label>Dataset 全局最大并行任务数（Admin）</label>
+            <input id="datasetMaxRunningTasksInput" type="number" min="1" max="100"
+              style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;">
+            <div class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;">
+              超过该阈值时，所有用户将禁止创建新的 Dataset 任务（默认 3）。
+            </div>
+          </div>
+
+          <div class="sliderBlock" style="margin-top:12px;">
+            <label>系统时区（Admin）</label>
+            <select id="appTimezoneSelect" style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;"></select>
+            <div class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;">
+              采用固定 UTC 偏移（不含夏令时）。该设置会影响用户活动统计、Dataset 任务时间以及 result 文件时间戳等系统时间显示/写入。
+            </div>
           </div>
 
           <div class="sliderBlock">
@@ -747,6 +765,143 @@
             <a href="https://www.youtube.com/watch?v=PeFUR3E6uU4" target="_blank" rel="noopener noreferrer">YouTube 视频</a>。
             <span class="zh">No real Red Team objects are created on the F5 platform in this demo. For actual object creation demo, see the <a href="https://www.youtube.com/watch?v=PeFUR3E6uU4" target="_blank" rel="noopener noreferrer">YouTube video</a>.</span>
           </p>
+        </div>
+
+        <div class="panel datasetTestPanel" id="datasetTestView" style="display:none;">
+          <div class="datasetTabs">
+            <button type="button" id="datasetTabNew" class="datasetTab active">New Test <span class="zh">新建测试</span></button>
+            <button type="button" id="datasetTabHistory" class="datasetTab">History <span class="zh">历史任务</span></button>
+          </div>
+          <div id="datasetCapacityNotice" class="datasetCapacityNotice" style="display:none;"></div>
+          <div id="datasetRunningTasksBar" class="datasetRunningTasksBar" style="display:none;"></div>
+          <div id="datasetNewPane">
+            <div class="datasetWizard">
+              <div class="datasetStepper" id="datasetStepper">
+                <button type="button" class="datasetStepDot is-active" data-step="1">Step 1</button>
+                <button type="button" class="datasetStepDot" data-step="2">Step 2</button>
+                <button type="button" class="datasetStepDot" data-step="3">Step 3</button>
+                <button type="button" class="datasetStepDot" data-step="4">Step 4</button>
+                <button type="button" class="datasetStepDot" data-step="5">Step 5</button>
+              </div>
+              <div id="datasetTaskNameBanner" class="datasetTaskNameBanner">任务名称 / Task Name：未填写</div>
+
+              <div class="datasetStepPage is-active" id="datasetStep1">
+                <h4>Step 1 上传与数据准备 <span class="zh">/ Upload & Data Preparation</span></h4>
+                <div class="datasetRow datasetFormRow">
+                  <label class="datasetFieldLabel">任务名称（必填） / Task Name (Required) <input type="text" id="datasetTaskNameInput" placeholder="请输入任务名称 / Enter task name" autocomplete="off" /></label>
+                </div>
+                <div class="datasetFileUploadRow">
+                  <input type="file" id="datasetFileInput" accept=".csv,.xlsx,.xls" />
+                  <button type="button" id="datasetUploadBtn" class="datasetUploadBtnPrimary">上传文件 / Upload</button>
+                </div>
+                <div id="datasetUploadMeta" class="datasetUploadMetaCard">尚未上传文件 / No file uploaded yet</div>
+                <div class="datasetRow datasetFormRow">
+                  <label class="datasetFieldLabel">Prompt列索引(从1开始) / Prompt Column (1-based) <input type="number" id="datasetPromptColumn" min="1" value="1" /></label>
+                  <label class="datasetFieldLabel"><input type="checkbox" id="datasetHasHeader" checked /> 第一行是标题 / First row is header</label>
+                </div>
+                <div class="datasetRow datasetFormRow">
+                  <label class="datasetFieldLabel">起始行 / Start Row <input type="number" id="datasetRowStart" min="1" value="2" /></label>
+                  <label class="datasetFieldLabel">结束行 / End Row <input type="number" id="datasetRowEnd" min="1" value="2" /></label>
+                </div>
+                <div class="datasetHint">以下为前5行预览 / Preview of first 5 rows</div>
+                <div id="datasetPreviewWrap" class="datasetPreviewWrap"></div>
+                <div class="datasetNavRow">
+                  <button type="button" id="datasetStep1NextBtn">下一步 / Next</button>
+                </div>
+              </div>
+
+              <div class="datasetStepPage" id="datasetStep2">
+                <h4>Step 2 Guardrail 参数与速率 <span class="zh">/ Guardrail Config & Rate</span></h4>
+                <p class="datasetStepHint">以下三项留空即使用系统缺省（来自服务器 <code>.env</code> 中的 Project / Token / Provider）。<span class="zh"> Leave these fields empty to use server defaults from <code>.env</code>.</span></p>
+                <div class="datasetRow datasetFormRow">
+                  <label class="datasetFieldLabel">Project ID <input type="text" id="datasetProjectId" value="" placeholder="" autocomplete="off" /></label>
+                  <label class="datasetFieldLabel">API Key <input type="password" id="datasetApiKey" value="" placeholder="" autocomplete="off" /></label>
+                  <label class="datasetFieldLabel">Provider <input type="text" id="datasetProvider" value="" placeholder="" autocomplete="off" /></label>
+                </div>
+                <div class="datasetRow datasetFormRow">
+                  <label class="datasetFieldLabel">并发数 / Concurrency <input type="number" id="datasetConcurrency" min="1" max="10" value="1" /></label>
+                  <label class="datasetFieldLabel">批次间隔(秒) / Batch Interval (s) <input type="number" id="datasetInterval" min="0" max="30" step="0.5" value="1" /></label>
+                </div>
+                <div class="datasetRow datasetFormRow">
+                  <label class="datasetFieldLabel"><input type="checkbox" id="datasetRecordFailedScanners" /> 是否在测试结果中记录阻挡的scanner名称 / Record blocked scanner names in result</label>
+                </div>
+                <div class="datasetNavRow">
+                  <button type="button" id="datasetStep2PrevBtn" class="datasetGhostBtn">上一步 / Back</button>
+                  <button type="button" id="datasetStep2NextBtn">下一步（自动保存配置） / Next (Auto Save)</button>
+                </div>
+              </div>
+
+              <div class="datasetStepPage" id="datasetStep3">
+                <h4>Step 3 参数汇总确认 <span class="zh">/ Review & Confirm</span></h4>
+                <div id="datasetSummaryCard" class="datasetSummaryCard">请先完成 Step 1 和 Step 2 配置。 / Complete Step 1 and Step 2 first.</div>
+                <div class="datasetNavRow">
+                  <button type="button" id="datasetStep3PrevBtn" class="datasetGhostBtn">上一步 / Back</button>
+                  <button type="button" id="datasetStep3BackProgressBtn" class="datasetGhostBtn" style="display:none;">返回进度 / Back to Progress</button>
+                  <button type="button" id="datasetStartBtn">正式测试 / Start Test</button>
+                </div>
+              </div>
+
+              <div class="datasetStepPage" id="datasetStep4">
+                <h4>Step 4 测试进行中 <span class="zh">/ Running</span></h4>
+                <div id="datasetStatusText" class="datasetHint">尚无任务状态 / No task status yet</div>
+                <div class="datasetProgress"><div id="datasetProgressBar"></div></div>
+                <div class="datasetRow">
+                  <button type="button" id="datasetCancelBtn">取消任务 / Cancel</button>
+                  <button type="button" id="datasetPauseBtn" class="datasetGhostBtn">暂停任务 / Pause</button>
+                  <button type="button" id="datasetResumeBtn" class="datasetGhostBtn" style="display:none;">恢复任务 / Resume</button>
+                  <button type="button" id="datasetRefreshStatusBtn" class="datasetGhostBtn">刷新状态 / Refresh</button>
+                </div>
+                <div class="datasetNavRow">
+                  <button type="button" id="datasetStep4PrevBtn" class="datasetGhostBtn">查看任务参数汇总 / View Params</button>
+                  <button type="button" id="datasetStep4NextBtn">查看结果 / View Result</button>
+                </div>
+              </div>
+
+              <div class="datasetStepPage" id="datasetStep5">
+                <h4>Step 5 测试总结 <span class="zh">/ Final Report</span></h4>
+                <div class="datasetResultHero">
+                  <div class="datasetResultTitle">Dataset Test Final Report</div>
+                  <div class="datasetResultSub" id="datasetResultSub">等待测试完成后展示最终统计 / Final stats will appear after completion</div>
+                  <div class="datasetKpiMain">
+                    <div class="datasetKpiMainLabel">Block Rate</div>
+                    <div class="datasetKpiMainValue" id="datasetKpiBlockRate">0.00%</div>
+                  </div>
+                  <div id="datasetStats" class="datasetStats datasetStats--hero"></div>
+                </div>
+                <div class="datasetRow">
+                  <a id="datasetDownloadRaw" href="#" target="_blank" rel="noopener">下载原始文件 / Download Raw</a>
+                  <a id="datasetDownloadResult" href="#" target="_blank" rel="noopener">下载结果文件 / Download Result</a>
+                </div>
+                <div id="datasetRetryWrap" class="datasetRetryWrap">
+                  <button type="button" id="datasetRetryErrorsBtn" style="display:none;">补测错误项 / Retry error rows</button>
+                  <div id="datasetRetryProgressWrap" class="datasetRetryProgressWrap" style="display:none;">
+                    <div id="datasetRetryProgressText" class="datasetRetryProgressText"></div>
+                    <div class="datasetRetryProgressTrack"><div id="datasetRetryProgressInner" class="datasetRetryProgressInner"></div></div>
+                  </div>
+                </div>
+                <div class="datasetNavRow">
+                  <button type="button" id="datasetStep5PrevBtn" class="datasetGhostBtn">返回进度 / Back to Progress</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="datasetHistoryPane" style="display:none;">
+            <div class="datasetRow">
+              <button type="button" id="datasetHistoryRefreshBtn">刷新历史 / Refresh</button>
+              <button type="button" id="datasetHistoryBatchDeleteBtn" class="datasetGhostBtn">批量删除 / Batch Delete</button>
+              <label class="datasetPageSizeWrap">每页 / Per page
+                <select id="datasetHistoryPageSize">
+                  <option value="10">10</option>
+                  <option value="15" selected>15</option>
+                  <option value="30">30</option>
+                  <option value="50">50</option>
+                </select>
+                行 / rows
+              </label>
+            </div>
+            <div id="datasetHistoryTableWrap"></div>
+            <div id="datasetHistoryPager" class="datasetHistoryPager"></div>
+          </div>
         </div>
 
         <!-- Guardrail Integration View -->
