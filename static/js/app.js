@@ -101,6 +101,11 @@ let datasetHistoryItems = [];
 let datasetHistoryPage = 1;
 let datasetHistoryPageSizeValue = 15;
 let datasetCapacityState = { allow_create_new_task: true, running_count: 0, max_running: 3 };
+let datasetUploadBusy = false;
+/** Step1：一次上传成功后短时禁止再次上传，防止连点创建多个任务；不影响用户稍后重新选同一文件再传。 */
+const DATASET_UPLOAD_STEP1_COOLDOWN_MS = 2200;
+let datasetUploadCooldownUntil = 0;
+let datasetUploadCooldownTimer = null;
 let datasetCancellingTaskIds = new Set();
 let datasetWasRetryingUi = false;
 let configuredAppTimezone = "UTC+08:00";
@@ -729,9 +734,21 @@ function datasetNormalizeTestMode(v){
   return mode === "false_block_rate" ? "false_block_rate" : "block_rate";
 }
 
-function datasetGetSelectedTestMode(){
+function datasetHasExplicitTestModeSelection(){
+  return datasetTestModeRadios.some((r) => r.checked);
+}
+
+/** @returns {"block_rate"|"false_block_rate"|null} */
+function datasetGetExplicitTestMode(){
   const picked = datasetTestModeRadios.find((r) => r.checked);
-  return datasetNormalizeTestMode(picked?.value);
+  if (!picked) return null;
+  return datasetNormalizeTestMode(picked.value);
+}
+
+function datasetClearTestModeSelection(){
+  datasetTestModeRadios.forEach((r) => {
+    r.checked = false;
+  });
 }
 
 function datasetSetSelectedTestMode(mode){
@@ -739,6 +756,35 @@ function datasetSetSelectedTestMode(mode){
   datasetTestModeRadios.forEach((r) => {
     r.checked = r.value === normalized;
   });
+}
+
+function datasetIsTestModeEditable(task){
+  const t = task && typeof task === "object" ? task : {};
+  if (t.retry_in_progress) return false;
+  const st = String(t.status || "");
+  if (!st) return true;
+  return st === "draft";
+}
+
+function datasetUpdateTestModeLockUi(task){
+  const t = task && typeof task === "object" ? task : {};
+  const editable = datasetIsTestModeEditable(t);
+  const lockedHint =
+    "测试已开始或补测进行中时不可修改测试类型 / Test type cannot be changed after start or during retry.";
+  datasetTestModeRadios.forEach((r) => {
+    r.disabled = !editable;
+    r.title = editable ? "" : lockedHint;
+  });
+  const row = document.getElementById("datasetTestModePanel") || document.querySelector(".datasetTestModeRow");
+  const warn = document.getElementById("datasetTestModeWarn");
+  const needsChoice = editable && !datasetHasExplicitTestModeSelection();
+  if (row) {
+    row.classList.toggle("datasetTestModeRow--locked", !editable);
+    row.classList.toggle("datasetTestModeRow--needsChoice", needsChoice);
+  }
+  if (warn) {
+    warn.style.display = needsChoice ? "" : "none";
+  }
 }
 
 function datasetGetModeMeta(mode){
@@ -4321,6 +4367,46 @@ function datasetRenderRunningTasksBar(items){
     "<div class='datasetRunningTasksTitle'>当前正在运行/排队的任务 / Running & Queued Tasks</div>" + lines;
 }
 
+function datasetClearUploadCooldown(){
+  if (datasetUploadCooldownTimer) {
+    clearTimeout(datasetUploadCooldownTimer);
+    datasetUploadCooldownTimer = null;
+  }
+  datasetUploadCooldownUntil = 0;
+  datasetSyncUploadBtn();
+}
+
+/** 上传成功后调用：短时间禁用上传按钮，避免 Step1 连续提交。 */
+function datasetArmUploadCooldown(ms){
+  if (datasetUploadCooldownTimer) clearTimeout(datasetUploadCooldownTimer);
+  datasetUploadCooldownUntil = Date.now() + ms;
+  datasetSyncUploadBtn();
+  datasetUploadCooldownTimer = setTimeout(() => {
+    datasetUploadCooldownUntil = 0;
+    datasetUploadCooldownTimer = null;
+    datasetSyncUploadBtn();
+  }, ms);
+}
+
+function datasetSyncUploadBtn(){
+  if (!datasetUploadBtn) return;
+  const capOk = datasetCapacityState.allow_create_new_task;
+  const inCooldown = Date.now() < datasetUploadCooldownUntil;
+  datasetUploadBtn.disabled = datasetUploadBusy || !capOk || inCooldown;
+  if (datasetUploadBusy) {
+    datasetUploadBtn.textContent = "上传中 / Uploading...";
+    datasetUploadBtn.setAttribute("aria-busy", "true");
+  } else {
+    datasetUploadBtn.removeAttribute("aria-busy");
+    datasetUploadBtn.textContent = inCooldown ? "请稍候 / Please wait…" : "上传文件 / Upload";
+  }
+}
+
+function datasetSetUploadBusy(v){
+  datasetUploadBusy = !!v;
+  datasetSyncUploadBtn();
+}
+
 function datasetRenderCapacityNotice(cap){
   const c = cap || {};
   datasetCapacityState = {
@@ -4328,7 +4414,7 @@ function datasetRenderCapacityNotice(cap){
     running_count: Number(c.running_count || 0),
     max_running: Number(c.max_running || 3),
   };
-  if (datasetUploadBtn) datasetUploadBtn.disabled = !datasetCapacityState.allow_create_new_task;
+  datasetSyncUploadBtn();
   if (!datasetCapacityNotice) return;
   if (datasetCapacityState.allow_create_new_task) {
     datasetCapacityNotice.style.display = "none";
@@ -4480,7 +4566,7 @@ function datasetResetNewTaskForm(){
   datasetTaskSnapshot = {};
   datasetLastPreviewRows = [];
   if (datasetTaskNameInput) datasetTaskNameInput.value = "";
-  datasetSetSelectedTestMode("block_rate");
+  datasetClearTestModeSelection();
   if (datasetFileInput) datasetFileInput.value = "";
   if (datasetPromptColumn) datasetPromptColumn.value = "1";
   if (datasetHasHeader) datasetHasHeader.checked = true;
@@ -4506,6 +4592,8 @@ function datasetResetNewTaskForm(){
   if (datasetRetryProgressWrap) datasetRetryProgressWrap.style.display = "none";
   if (datasetRetryProgressInner) datasetRetryProgressInner.style.width = "0%";
   datasetWasRetryingUi = false;
+  datasetSetUploadBusy(false);
+  datasetClearUploadCooldown();
   datasetRenderCapacityNotice(datasetCapacityState);
   datasetGotoStep(1);
   datasetUpdateStep1FromTask(datasetTaskSnapshot);
@@ -4561,21 +4649,24 @@ function datasetUpdateStep1FromTask(task){
   const exists = !!t.source_file_exists;
   const totalRows = Number(t.total_rows || 0);
   const origName = String(t.source_original_name || "").trim();
-  if (!datasetUploadMeta) return;
-  if (!tid) {
-    datasetUploadMeta.textContent = "尚未上传文件 / No file uploaded yet";
-  } else if (!exists) {
-    datasetUploadMeta.textContent =
-      "任务 " + tid + "：服务器上找不到原始数据文件（可能已被删除或移动），请重新上传后再继续。 / Task " + tid + ": source file is missing on server, please upload again.";
-  } else {
-    let line = "任务 " + tid + "：原始文件已在服务器上就绪 / source file is ready";
-    if (origName) line += "（" + origName + "）";
-    if (totalRows > 0) line += "，共 " + String(totalRows) + " 行";
-    line += "。可在下方预览并调整 Prompt 列与行范围；若需更换数据请重新上传。 / You can preview below and adjust prompt column and row range.";
-    datasetUploadMeta.textContent = line;
+  if (datasetUploadMeta) {
+    if (!tid) {
+      datasetUploadMeta.textContent = "尚未上传文件 / No file uploaded yet";
+    } else if (!exists) {
+      datasetUploadMeta.textContent =
+        "任务 " + tid + "：服务器上找不到原始数据文件（可能已被删除或移动），请重新上传后再继续。 / Task " + tid + ": source file is missing on server, please upload again.";
+    } else {
+      let line = "任务 " + tid + "：原始文件已在服务器上就绪 / source file is ready";
+      if (origName) line += "（" + origName + "）";
+      if (totalRows > 0) line += "，共 " + String(totalRows) + " 行";
+      line += "。可在下方预览并调整 Prompt 列与行范围；若需更换数据请重新上传。 / You can preview below and adjust prompt column and row range.";
+      datasetUploadMeta.textContent = line;
+    }
   }
   const step1Next = document.getElementById("datasetStep1NextBtn");
-  if (step1Next) step1Next.disabled = !tid || !exists;
+  const modeOk = datasetHasExplicitTestModeSelection();
+  if (step1Next) step1Next.disabled = !tid || !exists || !modeOk;
+  datasetUpdateTestModeLockUi(t);
 }
 
 async function datasetFetchPreviewRows(){
@@ -4698,11 +4789,12 @@ function datasetBuildSummary(){
   const apiNote = String(datasetTaskSnapshot.api_key_source || "") === "userProvided"
     ? datasetSummaryKV("API Key", "已使用自定义 Key（出于安全不回显，留空则继续沿用已保存密钥） / Custom key is set (masked for security).")
     : datasetSummaryKV("API Key", "使用系统缺省（.env） / Using server default (.env)");
-  const modeMeta = datasetGetModeMeta(datasetGetSelectedTestMode());
+  const exMode = datasetGetExplicitTestMode();
+  const typeSummary = exMode ? datasetGetModeMeta(exMode).modeLabel : "未选择 / Not selected";
   const html = [
     datasetSummaryKV("任务名称 / Task Name", datasetGetTaskName(datasetTaskSnapshot) || "未填写 / Not set"),
     datasetSummaryKV("任务ID / Task ID", datasetTaskId || "未创建 / Not created"),
-    datasetSummaryKV("测试类型 / Test Type", modeMeta.modeLabel),
+    datasetSummaryKV("测试类型 / Test Type", typeSummary),
     datasetSummaryKV("Prompt列(1基) / Prompt Col(1-based)", String(datasetPromptColumn?.value || "1")),
     datasetSummaryKV("第一行是标题 / Header Row", datasetHasHeader?.checked ? "是 / Yes" : "否 / No"),
     datasetSummaryKV("测试行范围 / Row Range", String(datasetRowStart?.value || "-") + " ~ " + String(datasetRowEnd?.value || "-")),
@@ -4772,42 +4864,59 @@ function datasetRenderPreview(rows){
 }
 
 async function datasetUpload(){
+  if (datasetUploadBusy) return;
+  if (Date.now() < datasetUploadCooldownUntil) {
+    showSyncNotice("请勿连续上传，请稍候再试。 / Please wait before uploading again.", "info", 1800);
+    return;
+  }
   const taskName = String(datasetTaskNameInput?.value || "").trim();
   const taskNameErr = datasetValidateTaskName(taskName);
   if (taskNameErr) {
     showSyncNotice(taskNameErr, "error");
     return;
   }
-  await datasetRefreshCapacity().catch(() => {});
-  if (!datasetCapacityState.allow_create_new_task) {
-    showSyncNotice("当前运行任务数已超阈值，暂时无法创建新任务。 / Running task limit exceeded.", "error");
-    return;
-  }
   if (!datasetFileInput || !datasetFileInput.files || !datasetFileInput.files[0]) {
     showSyncNotice("请先选择文件 / Please choose a file", "error");
     return;
   }
-  const fd = new FormData();
-  fd.append("task_name", taskName);
-  fd.append("test_mode", datasetGetSelectedTestMode());
-  fd.append("file", datasetFileInput.files[0]);
-  const resp = await authFetch("/api/dataset-test/upload", { method: "POST", body: fd });
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(data?.detail || ("HTTP " + resp.status));
-  datasetTaskId = String(data.task_id || "");
-  if (datasetTaskNameInput && String(data.task_name || "").trim()) {
-    datasetTaskNameInput.value = String(data.task_name || "").trim();
+  const tm = datasetGetExplicitTestMode();
+  if (!tm) {
+    showSyncNotice("请先在上传前选择测试类型（拦截率或误拦率）。 / Select test type before uploading.", "error");
+    return;
   }
-  if (datasetUploadMeta) datasetUploadMeta.textContent = "任务ID / Task ID: " + datasetTaskId + "，总行数 / Total rows: " + String(data.total_rows || 0);
-  if (datasetRowEnd) datasetRowEnd.value = String(data.total_rows || 1);
-  datasetLastPreviewRows = Array.isArray(data.preview_rows) ? data.preview_rows : [];
-  datasetRenderPreview(datasetLastPreviewRows);
-  datasetUpdateDownloadLinks();
-  await datasetRefreshStatus().catch(() => {});
-  datasetRenderTaskNameBanner(datasetTaskSnapshot);
-  datasetBuildSummary();
-  showSyncNotice("上传成功 / Upload succeeded", "success");
-  await datasetRefreshCapacity().catch(() => {});
+  datasetSetUploadBusy(true);
+  try {
+    await datasetRefreshCapacity().catch(() => {});
+    if (!datasetCapacityState.allow_create_new_task) {
+      showSyncNotice("当前运行任务数已超阈值，暂时无法创建新任务。 / Running task limit exceeded.", "error");
+      return;
+    }
+    const fd = new FormData();
+    fd.append("task_name", taskName);
+    fd.append("test_mode", tm);
+    fd.append("file", datasetFileInput.files[0]);
+    const resp = await authFetch("/api/dataset-test/upload", { method: "POST", body: fd });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.detail || ("HTTP " + resp.status));
+    datasetTaskId = String(data.task_id || "");
+    if (datasetTaskNameInput && String(data.task_name || "").trim()) {
+      datasetTaskNameInput.value = String(data.task_name || "").trim();
+    }
+    if (datasetUploadMeta) datasetUploadMeta.textContent = "任务ID / Task ID: " + datasetTaskId + "，总行数 / Total rows: " + String(data.total_rows || 0);
+    if (datasetRowEnd) datasetRowEnd.value = String(data.total_rows || 1);
+    datasetLastPreviewRows = Array.isArray(data.preview_rows) ? data.preview_rows : [];
+    datasetRenderPreview(datasetLastPreviewRows);
+    datasetUpdateDownloadLinks();
+    await datasetRefreshStatus().catch(() => {});
+    datasetRenderTaskNameBanner(datasetTaskSnapshot);
+    datasetBuildSummary();
+    showSyncNotice("上传成功 / Upload succeeded", "success");
+    if (datasetFileInput) datasetFileInput.value = "";
+    await datasetRefreshCapacity().catch(() => {});
+    datasetArmUploadCooldown(DATASET_UPLOAD_STEP1_COOLDOWN_MS);
+  } finally {
+    datasetSetUploadBusy(false);
+  }
 }
 
 async function datasetSaveConfig(){
@@ -4829,6 +4938,11 @@ async function datasetSaveConfig(){
     );
     return;
   }
+  const tm = datasetGetExplicitTestMode();
+  if (!tm) {
+    showSyncNotice("请在 Step 1 选择测试类型后再保存配置。 / Select test type on Step 1 before saving.", "error");
+    return;
+  }
   const concCap = datasetGetConcurrencyCap();
   let concVal = Number(datasetConcurrency?.value || 1);
   if (!Number.isFinite(concVal) || concVal < 1) concVal = 1;
@@ -4846,7 +4960,7 @@ async function datasetSaveConfig(){
     interval_seconds: Number(datasetInterval?.value || 1),
     guardrail_timeout_seconds: Number(datasetGuardrailTimeout?.value ?? 20),
     record_failed_scanner_names: !!datasetRecordFailedScanners?.checked,
-    test_mode: datasetGetSelectedTestMode()
+    test_mode: tm
   };
   const resp = await authFetch("/api/dataset-test/configure", {
     method: "POST",
@@ -5498,11 +5612,16 @@ datasetConcurrency?.addEventListener("input", datasetUpdateConcurrencyOverMaxHin
 datasetConcurrency?.addEventListener("change", datasetUpdateConcurrencyOverMaxHint);
 datasetTestModeRadios.forEach((r) => {
   r.addEventListener("change", () => {
+    datasetUpdateStep1FromTask(datasetTaskSnapshot);
     datasetBuildSummary();
   });
 });
 
 document.getElementById("datasetStep1NextBtn")?.addEventListener("click", () => {
+  if (!datasetGetExplicitTestMode()) {
+    showSyncNotice("请先选择测试类型（拦截率或误拦率）。 / Please select a test type first.", "error");
+    return;
+  }
   if (!datasetTaskId) {
     showSyncNotice("请先在 Step 1 上传数据文件。 / Upload a file in Step 1 first.", "error");
     return;

@@ -2896,7 +2896,7 @@ class DatasetTaskConfigureIn(BaseModel):
     interval_seconds: float = 1.0
     guardrail_timeout_seconds: float = DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS
     record_failed_scanner_names: bool = False
-    test_mode: str = DATASET_TEST_MODE_BLOCK_RATE
+    test_mode: Optional[str] = None
 
 
 class DatasetTaskActionIn(BaseModel):
@@ -3009,6 +3009,17 @@ def _dataset_normalize_test_mode(v) -> str:
     if mode == DATASET_TEST_MODE_FALSE_BLOCK_RATE:
         return DATASET_TEST_MODE_FALSE_BLOCK_RATE
     return DATASET_TEST_MODE_BLOCK_RATE
+
+
+def _dataset_require_explicit_test_mode(v) -> str:
+    """Reject vague/missing selection so API clients cannot rely on implicit defaults."""
+    mode = str(v or "").strip().lower()
+    if mode not in (DATASET_TEST_MODE_BLOCK_RATE, DATASET_TEST_MODE_FALSE_BLOCK_RATE):
+        raise HTTPException(
+            status_code=400,
+            detail="请选择测试类型（拦截率或误拦率）/ Please select test type (blocking-rate or false-block-rate)",
+        )
+    return mode
 
 
 def _dataset_result_label_for_guardrail_outcome(state: dict, status_text: str) -> str:
@@ -3598,7 +3609,7 @@ async def dataset_test_startup_recover():
 async def api_dataset_test_upload(
     request: Request,
     task_name: str = Form(...),
-    test_mode: str = Form(DATASET_TEST_MODE_BLOCK_RATE),
+    test_mode: str = Form(""),
     file: UploadFile = File(...),
 ):
     username = require_user(request)
@@ -3639,7 +3650,7 @@ async def api_dataset_test_upload(
         "updated_at": _dataset_now_iso(),
         "status": "draft",
         "phase": "step1_uploaded",
-        "test_mode": _dataset_normalize_test_mode(test_mode),
+        "test_mode": _dataset_require_explicit_test_mode(test_mode),
         "source_file_path": raw_path,
         "source_original_name": original,
         "result_file_path": _dataset_result_path(task_id),
@@ -3783,7 +3794,8 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
             120.0,
         )
         state["record_failed_scanner_names"] = bool(payload.record_failed_scanner_names)
-        state["test_mode"] = _dataset_normalize_test_mode(payload.test_mode)
+        if orig_status == "draft":
+            state["test_mode"] = _dataset_require_explicit_test_mode(payload.test_mode)
         _dataset_save_state(state)
     return JSONResponse({"status": "ok", "task": _dataset_to_status_payload(state)})
 

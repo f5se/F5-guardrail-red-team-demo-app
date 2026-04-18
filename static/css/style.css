@@ -3663,9 +3663,18 @@ code{
 .datasetTaskNameInputRow{display:flex;flex-wrap:wrap;align-items:center;gap:12px;width:100%}
 .datasetTaskNameInputRow .datasetTaskNameInput{flex:1;min-width:min(100%,380px);max-width:780px}
 .datasetTaskNameLenHint{font-size:12px;color:#64748b;font-weight:400;line-height:1.45;flex-shrink:0}
+.datasetTestModePanel{flex-direction:column;align-items:stretch;gap:10px;border-width:2px;border-color:#f59e0b;background:linear-gradient(180deg,#fffbeb 0%,#ffffff 52%);box-shadow:0 4px 14px rgba(245,158,11,.14)}
+.datasetTestModePanelIntro{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0}
+.datasetTestModeBadge{font-size:11px;font-weight:800;letter-spacing:.06em;color:#92400e;background:#fde68a;border-radius:999px;padding:4px 11px;border:1px solid #fbbf24;line-height:1.2}
+.datasetTestModeHeading{font-size:17px;display:inline}
+.datasetTestModeLead{margin:0;font-size:13px;color:#78350f;line-height:1.55;font-weight:600}
+.datasetTestModeChoices{display:flex;flex-wrap:wrap;gap:12px 18px;align-items:flex-start;margin-top:2px}
 .datasetTestModeRow{gap:8px 14px}
-.datasetModeOption{font-weight:500}
+.datasetTestModeWarn{margin:2px 0 0 0}
+.datasetModeOption{font-weight:600}
 .datasetModeExplain{width:100%;margin-top:4px}
+.datasetTestModeRow--needsChoice{border-color:#dc2626!important;background:linear-gradient(180deg,#fef2f2 0%,#ffffff 58%)!important;box-shadow:0 4px 14px rgba(220,38,38,.12)!important}
+.datasetTestModeRow--locked .datasetModeOption{opacity:.95}
 /* Narrow Step 1 numeric fields to reduce visual width */
 #datasetPromptColumn,#datasetRowStart,#datasetRowEnd{width:72px;min-width:72px}
 .datasetFileUploadRow{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:10px 12px;border:1px dashed #93c5fd;border-radius:12px;background:linear-gradient(180deg,#f8fbff 0%,#eef6ff 100%)}
