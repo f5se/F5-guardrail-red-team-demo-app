@@ -28,7 +28,8 @@
     "agent_debug_enabled": true,
     "kb_dir": "./enterprise_kb",
     "agent_max_steps": 4,
-    "dataset_max_upload_mb": 20
+    "dataset_max_upload_mb": 20,
+    "dataset_max_concurrency": 3
   },
   "user_settings": {
     "admin": {

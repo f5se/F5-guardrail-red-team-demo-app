@@ -46,7 +46,9 @@ A multi-engine AI guardrail demo Agent application based on F5 AI Guardrail (Cal
 
 21. Added the integration pipeline demonstration of F5 Red Team and DevSecOps. 
 
-22. Added **Dataset Test** for batch prompt evaluation: upload CSV/XLSX, call F5 Guardrail per row, export result CSV, retry failed rows (see **Dataset Test** below).
+22. Added **Dataset Test** for batch Guardrail evaluation: CSV/XLSX upload, per-row scans, pause/resume, result CSV, retry failed rows; concurrent job cap is admin-set via **`dataset_max_running_tasks`** in Settings (see **Dataset Test** below).
+
+23. **Environment split:** main Chat/Agent reads **`CALYPSOAI_*`** and **`DEFAULT_PROVIDER`** only; Dataset Test may use optional **`Guardrail_PoC_*`** as defaults when wizard fields are empty (never mixed into main chat).
 
    Note: Considering the actual time consumption of Red Team and the feasibility of the environment, the Red Team API integration here is mock simulation and does not actually create real objects on the SaaS.
 
@@ -91,7 +93,11 @@ Variables in `.env_example`:
 | `AGENTIC_BASE_URL` | Full OpenAI-compatible **base URL** for **Agentic Security** (path prefix included; **no** `/chat/completions`). If empty, the backend builds a URL from `CALYPSOAI_URL` plus a built-in provider path segment | `https://www.us1.calypsoai.app/openai/your-provider-slug` |
 | `AGENTIC_TOKEN` | Bearer token for Agentic Security when using the Calypso OpenAI-compatible route. May match the main project token; if unset, **`CALYPSOAI_TOKEN` is used as fallback** (configure at least one) | Same as `CALYPSOAI_TOKEN` or a dedicated token |
 | `AGENTIC_MODEL` | `model` field in Agentic Security chat-completions requests. Default `deepseek-chat` when unset | `deepseek-chat` |
-| (Dataset Test) | **Batch dataset evaluation** **reuses** the same Calypso / Provider variables (`CALYPSOAI_URL`, `CALYPSOAI_TOKEN`, `CALYPSOAI_PROJECT_ID`, `DEFAULT_PROVIDER`, `PROVIDER_OPTIONS`, …). Per-row timeout defaults to **`GUARDRAIL_TIMEOUT_SECONDS`**. Max concurrent running/queued dataset jobs is **`dataset_max_running_tasks`** (admin Settings → `settings.json`, **not** set in `.env`) | — |
+| (Dataset Test) | **Batch evaluation:** the main app still uses **`CALYPSOAI_*`** / **`DEFAULT_PROVIDER`** only. The Dataset wizard may supply Project, Provider, and API key per task; if left blank, defaults resolve in order: optional **`Guardrail_PoC_*`**, then **`CALYPSOAI_PROJECT_ID`** / **`DEFAULT_PROVIDER`** / **`CALYPSOAI_TOKEN`** / **`CALYPSOAI_URL`**. Per-row timeout defaults to **`GUARDRAIL_TIMEOUT_SECONDS`**. Max concurrent running/queued jobs is **`dataset_max_running_tasks`** (admin Settings → `settings.json`, **not** in `.env`) |
+| `Guardrail_PoC_Project` | (Optional) Dataset default Project when the wizard field is empty; falls back to `CALYPSOAI_PROJECT_ID`. **Not read by main Chat/Agent** | — |
+| `Guardrail_PoC_Provider` | (Optional) Dataset default Provider when empty; falls back to `DEFAULT_PROVIDER`. **Not read by main Chat/Agent** | — |
+| `Guardrail_PoC_Token` | (Optional) Dataset default API token when empty; falls back to `CALYPSOAI_TOKEN`. **Not read by main Chat/Agent** | — |
+| `Guardrail_PoC_Calypso_URL` | (Optional) Calypso base URL for Dataset batch calls only; falls back to `CALYPSOAI_URL`. **Not read by main Chat/Agent** | — |
 
 **Note:** Configure the corresponding Project(Standard App project,Agentic mode project, and standard App project for `Enterprise Skill On` mode), Connection/Provider, and Project API token in Calypso (F5 Guardrail) first. For features like enterprise-sensitive data protection, configure Custom scanners in the F5 Guardrail system in advance.
 Security note: Keys shown in README and `.env_example` are placeholders only.
@@ -179,7 +185,7 @@ Example (single entry in `config/attack-presets.json`):
 **Dataset Test** runs **F5 Guardrail** over many prompts from an uploaded **CSV** or **Excel (.xlsx)** file: pick the prompt column and row range, run with configurable concurrency against your Calypso **Project + Provider**; pause/resume supported. After completion, **Step 5** shows blocked/passed/error counts and lets you download **result CSV**; rows with **API/timeout errors** can be **retried** and overwritten by `row_index`. Raw uploads, results, and task state are stored under `poc/raw`, `poc/result`, and `poc/state` by default.
 
 - **Python extras:** same stack as the main app; **`openpyxl`** (listed in `requirements.txt`) is required for **`.xlsx`** uploads—**CSV** uses the standard library only. The **F5 Calypso Python SDK (`calypsoai`)** must be installed separately per official docs.
-- **Configuration:** reuses `.env` **`CALYPSOAI_URL`**, **`CALYPSOAI_TOKEN`**, **`CALYPSOAI_PROJECT_ID`**, **`DEFAULT_PROVIDER`**, **`PROVIDER_OPTIONS`**, etc.; per-request timeout defaults to **`GUARDRAIL_TIMEOUT_SECONDS`**. The global cap on concurrent **running/queued** dataset jobs is **`dataset_max_running_tasks`** (admin-only in Settings, persisted in `settings.json`).
+- **Configuration:** main Chat/Agent use **`CALYPSOAI_*`** and **`DEFAULT_PROVIDER`** only (**`Guardrail_PoC_*`** are ignored). Dataset stores Project / Provider / API key from the wizard when provided; otherwise defaults resolve as optional **`Guardrail_PoC_*`**, then **`CALYPSOAI_PROJECT_ID`**, **`DEFAULT_PROVIDER`**, **`CALYPSOAI_TOKEN`**, **`CALYPSOAI_URL`**. Per-request timeout defaults to **`GUARDRAIL_TIMEOUT_SECONDS`**. The global cap on concurrent **running/queued** dataset jobs is **`dataset_max_running_tasks`** (admin-only in Settings, persisted in `settings.json`).
 
 ### OOB mode – NGINX configuration (brief)
 

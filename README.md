@@ -33,7 +33,8 @@
 19. 将env文件直接加载，无需设置环境变量
 20. 增加了前端Markdown响应的渲染
 21. 增加了F5 Red Team与DevSecOps的集成流水线演示。
-22. 增加了 **Dataset Test（数据集攻击测试）**：批量上传 CSV/XLSX、按行调用 F5 Guardrail、结果 CSV 与 error 行补测等（详见下文「Dataset Test」小节）。
+22. 增加了 **Dataset Test（数据集批量 Guardrail 评测）**：CSV/XLSX 上传、按行扫描、暂停/恢复、结果 CSV、错误行补测；并行任务上限由管理员在 Settings（`dataset_max_running_tasks`）配置（详见下文「Dataset Test」）。
+23. **环境与模块职责**：主 Chat/Agent 仅读取 **`CALYPSOAI_*`** 与 **`DEFAULT_PROVIDER`**；Dataset Test 可选用 **`Guardrail_PoC_*`** 作为向导未填写时的默认回退（不与主对话混用）。
 
    注意：考虑到实际Red Team耗时及环境可行性，这里的Red Team API集成是mock模拟的，并不实际在SaaS端创建真实对象。
 
@@ -78,7 +79,11 @@ cp .env_example .env
 | `AGENTIC_BASE_URL` | **Agentic Security** 调用的 OpenAI-compatible **完整 Base URL**（含路径前缀，不含 `/chat/completions`）。留空时由后端使用 `CALYPSOAI_URL` + 内置 Provider 路径拼接 | `https://www.us1.calypsoai.app/openai/your-provider-slug` |
 | `AGENTIC_TOKEN` | Agentic Security 在走 Calypso 路径时的 Bearer Token。可与主项目令牌相同；若留空则**回退使用** `CALYPSOAI_TOKEN`（二者至少配置其一） | 与 `CALYPSOAI_TOKEN` 相同或独立令牌 |
 | `AGENTIC_MODEL` | Agentic Security 请求体中的 `model` 名称（OpenAI-compatible）。不填时默认 `deepseek-chat` | `deepseek-chat` |
-| （Dataset Test） | **数据集攻击测试**与 Chat **共用**本表 **Calypso / Provider** 相关变量；单行 Guardrail 超时默认与 **`GUARDRAIL_TIMEOUT_SECONDS`** 一致。全局「并行 running/queued 数据集任务数」由 **admin** 在 Settings 写入 `settings.json` 的 `dataset_max_running_tasks`，**不在 `.env` 配置** | — |
+| （Dataset Test） | **批量评测**：主应用仍只用上表 **`CALYPSOAI_*`** / **`DEFAULT_PROVIDER`**。向导中可逐项填写 Project、Provider、API Key；若留空则先用可选的 **`Guardrail_PoC_Project`** / **`Guardrail_PoC_Provider`** / **`Guardrail_PoC_Token`** / **`Guardrail_PoC_Calypso_URL`**（未配置时再回退到 **`CALYPSOAI_PROJECT_ID`** / **`DEFAULT_PROVIDER`** / **`CALYPSOAI_TOKEN`** / **`CALYPSOAI_URL`**）。单行 Guardrail 超时默认 **`GUARDRAIL_TIMEOUT_SECONDS`**；全局并行 running/queued 任务上限由 admin 在 Settings 写入 **`dataset_max_running_tasks`**（`settings.json`），不在 `.env` |
+| `Guardrail_PoC_Project` | （可选）Dataset 向导未填写 Project 时的默认值；不设则退回 `CALYPSOAI_PROJECT_ID`。**主 Chat/Agent 不使用** | — |
+| `Guardrail_PoC_Provider` | （可选）Dataset 向导未填写 Provider 时的默认值；不设则退回 `DEFAULT_PROVIDER`。**主 Chat/Agent 不使用** | — |
+| `Guardrail_PoC_Token` | （可选）Dataset 向导未填写 API Key 时的默认值；不设则退回 `CALYPSOAI_TOKEN`。**主 Chat/Agent 不使用** | — |
+| `Guardrail_PoC_Calypso_URL` | （可选）Dataset 批量调用使用的 Calypso 基 URL；不设则退回 `CALYPSOAI_URL`。**主 Chat/Agent 不使用** | — |
 
 注意：你需要首先在 Calypso（F5 Guardrail）系统上设定相关 Projects(标准App project,Agentic模式project，以及专用于`Enterprise Skill On`模式下的标准App project）、Connection/Provider 及 Project API token。测试企业敏感信息防护等能力时，需在 F5 Guardrail 中提前配置 Custom scanner 等。
 提示：README 与 `.env_example` 中的 Key 都是示例占位符。
@@ -162,12 +167,12 @@ python scripts/gen_password_hash.py \
 }
 ```
 
-### Dataset Test（数据集攻击测试）
+### Dataset Test（数据集批量 Guardrail 评测）
 
 面向大量提示词的 **批量 Guardrail 评测**：上传 **CSV** 或 **Excel（.xlsx）**，选择 prompt 列与行范围，按配置并发调用 Calypso **Project + Provider** 扫描；运行过程可暂停/恢复，完成后在 **Step 5** 查看阻断/通过/错误统计，下载 **result CSV**；对 **API/超时等 error 行** 可 **补测** 并按 `row_index` 覆盖写回。原始文件、结果与任务状态默认落在项目目录 `poc/raw`、`poc/result`、`poc/state`。
 
 - **Python 依赖**：与主应用相同，另需 **`openpyxl`**（已在 `requirements.txt`）以支持 `.xlsx`；**CSV 仅标准库**。**F5 Calypso Python SDK（`calypsoai`）** 须按官方文档单独安装。
-- **运行配置**：与聊天共用 `.env` 中的 **`CALYPSOAI_URL` / `CALYPSOAI_TOKEN` / `CALYPSOAI_PROJECT_ID`** 等；单机 Guardrail 超时默认使用 **`GUARDRAIL_TIMEOUT_SECONDS`**。全局「最多并行 running/queued 数据集任务数」由 **admin** 在 Settings 中配置（`dataset_max_running_tasks`，写入 `settings.json`）。
+- **运行配置**：主 Chat/Agent **仅**使用 **`CALYPSOAI_*`** 与 **`DEFAULT_PROVIDER`**，**不读取** **`Guardrail_PoC_*`**。Dataset 向导可填写 Project / Provider / API Key（写入任务状态）；若留空，则依次尝试 **`Guardrail_PoC_*`**（若配置了）再回退到 **`CALYPSOAI_PROJECT_ID` / `DEFAULT_PROVIDER` / `CALYPSOAI_TOKEN` / `CALYPSOAI_URL`**。单机 Guardrail 超时默认 **`GUARDRAIL_TIMEOUT_SECONDS`**；全局「最多并行 running/queued 数据集任务数」由 **admin** 在 Settings 配置（`dataset_max_running_tasks`，写入 `settings.json`）。
 
 ### OOB 模式下 NGINX 配置简要说明
 

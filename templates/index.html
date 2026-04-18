@@ -140,190 +140,221 @@
         </div>
 
         <!-- SETTINGS VIEW -->
-        <div class="panel" id="settingsView" style="display:none;">
-          <div class="settingRow">
-            <div class="settingText">
-              <div class="settingTitle">Multi-turn Detection (Sliding Window)</div>
-              <div class="settingDesc">
-                Provides stronger protection through multi-turn security analysis, which may use more resources than standard scanning.
+        <div class="panel settingsPage" id="settingsView" style="display:none;">
+
+          <section class="settingsSection" aria-labelledby="settingsHdrGuardrail">
+            <header class="settingsSectionHeader">
+              <h2 class="settingsSectionTitle" id="settingsHdrGuardrail">F5 Guardrail 与防护行为</h2>
+              <p class="settingsSectionMeta">与 F5 路径、多轮检测、调试及拦截提示相关的选项 · Guardrail routing, scanning, debug logging, and block UX</p>
+            </header>
+            <div class="settingsSectionBody">
+              <div class="settingRow">
+                <div class="settingText">
+                  <div class="settingTitle">Multi-turn Detection (Sliding Window)</div>
+                  <div class="settingDesc">
+                    Provides stronger protection through multi-turn security analysis, which may use more resources than standard scanning.
+                  </div>
+                </div>
+                <label class="switch" title="Enable/disable multi-turn detection">
+                  <input type="checkbox" id="toggleMultiTurn" />
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="settingRow">
+                <div class="settingText">
+                  <div class="settingTitle">Agent Skill Orchestration (F5 Guardrail Only)</div>
+                  <div class="settingDesc">
+                    Enables ReAct-style tool orchestration for F5 Guardrail path only. Local engines remain unchanged.
+                  </div>
+                </div>
+                <label class="switch" title="Enable/disable agent skill orchestration">
+                  <input type="checkbox" id="toggleAgentSkill" />
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="settingRow">
+                <div class="settingText">
+                  <div class="settingTitle">Only use F5 Guardrail</div>
+                  <div class="settingDesc">
+                    When enabled, requests are sent only to F5 Guardrail without invoking local engines such as Pattern/Heuristic/Toxic-BERT/LLM Guard; When disabled, all engines are involved in the processing.
+                  </div>
+                </div>
+                <label class="switch" title="仅启用 F5 Guardrail，不调用本地引擎">
+                  <input type="checkbox" id="toggleF5GuardrailOnly" />
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="settingRow">
+                <div class="settingText">
+                  <div class="settingTitle">Record Raw Guardrail JSON</div>
+                  <div class="settingDesc">
+                    Store the original F5 Guardrail JSON response into the backend directory for debugging only. Disable by default 。
+                  </div>
+                </div>
+                <label class="switch" title="Enable/disable raw Guardrail JSON logging">
+                  <input type="checkbox" id="toggleGuardrailDebug" />
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <div class="sliderBlock" id="customBlockedMessageSetting">
+                <label>Custom Blocked Message</label>
+                <textarea id="customBlockedMessageInput"
+                  style="width:100%;height:96px;border-radius:12px;border:1px solid #e5e7eb;padding:10px;"
+                  placeholder="The requested Prompt was rejected by F5 AI Guardrail because it violated the company's AI security policy."></textarea>
+                <div class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;">
+                  仅对当前用户生效：用于替换 Prompt/Response Rejected 气泡的正文内容。<br>
+                  Per-user only: replaces the body content shown in Prompt/Response Rejected bubbles.
+                </div>
+                <div style="margin-top:8px;">
+                  <button id="btnResetBlockedMessage" type="button" style="padding:6px 10px;border-radius:10px;border:1px solid #f59e0b;background:#fffbeb;color:#92400e;font-weight:700;cursor:pointer;">
+                    恢复默认 · Reset Default
+                  </button>
+                </div>
               </div>
             </div>
+          </section>
 
-            <label class="switch" title="Enable/disable multi-turn detection">
-              <input type="checkbox" id="toggleMultiTurn" />
-              <span class="slider"></span>
-            </label>
-          </div>
-          <hr style="margin:16px 0; border:0; border-top:1px solid #e5e7eb;">
+          <section class="settingsSection" aria-labelledby="settingsHdrModel">
+            <header class="settingsSectionHeader">
+              <h2 class="settingsSectionTitle" id="settingsHdrModel">模型、Agent 与企业知识</h2>
+              <p class="settingsSectionMeta">主对话使用的 Provider、企业 KB、Agent 步数及双项目路由（部分项仅管理员可改）· LLM provider, KB, agent limits, routing</p>
+            </header>
+            <div class="settingsSectionBody">
+              <div class="sliderBlock">
+                <label>LLM Provider (F5/Calypso)</label>
+                <select id="providerSelect" style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;">
+                  <option value="">使用服务器默认 (DEFAULT_PROVIDER)</option>
+                </select>
+                <div class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;">The Provider used in the main Chat/Agent/Inline mode. PROVIDER_OPTIONS needs to be configured in the .env file to display the drop-down list.</div>
+              </div>
 
-          <div class="settingRow">
-            <div class="settingText">
-              <div class="settingTitle">Agent Skill Orchestration (F5 Guardrail Only)</div>
-              <div class="settingDesc">
-                Enables ReAct-style tool orchestration for F5 Guardrail path only. Local engines remain unchanged.
+              <div class="sliderBlock">
+                <label>Enterprise KB Directory</label>
+                <input id="kbDirInput" type="text" placeholder="./enterprise_kb"
+                  style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;">
+              </div>
+
+              <div class="sliderBlock">
+                <label>Agent Max Steps</label>
+                <input type="range" id="agentMaxStepsSlider" min="1" max="8" step="1">
+                <span id="agentMaxStepsVal" class="sliderVal"></span>
+              </div>
+
+              <div class="settingRow">
+                <div class="settingText">
+                  <div class="settingTitle">Enable Dual Project Routing By Enterprise Skill</div>
+                  <div class="settingDesc">
+                    Admin only. ON: Enterprise KB Skill ON uses SECOND project/token; OFF: always use primary project.
+                  </div>
+                  <div id="dualProjectRoutingStatus" class="settingDesc" style="margin-top:4px;font-size:12px;color:#6b7280;">
+                    Checking second project env...
+                  </div>
+                </div>
+                <label class="switch" title="Admin only: toggle dual project routing">
+                  <input type="checkbox" id="toggleDualProjectRouting" />
+                  <span class="slider"></span>
+                </label>
               </div>
             </div>
+          </section>
 
-            <label class="switch" title="Enable/disable agent skill orchestration">
-              <input type="checkbox" id="toggleAgentSkill" />
-              <span class="slider"></span>
-            </label>
-          </div>
-          <hr style="margin:16px 0; border:0; border-top:1px solid #e5e7eb;">
+          <section class="settingsSection" aria-labelledby="settingsHdrAdmin">
+            <header class="settingsSectionHeader">
+              <h2 class="settingsSectionTitle" id="settingsHdrAdmin">Dataset 与系统（管理员）</h2>
+              <p class="settingsSectionMeta">全局 Dataset 配额、上传限制及系统时区；影响所有用户 · Dataset quotas, uploads, timezone</p>
+            </header>
+            <div class="settingsSectionBody">
+              <div class="sliderBlock">
+                <label>Dataset 全局最大并行任务数（Admin）</label>
+                <input id="datasetMaxRunningTasksInput" type="number" min="1" max="100"
+                  style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;">
+                <div class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;">
+                  超过该阈值时，所有用户将禁止创建新的 Dataset 任务（默认 3）。
+                </div>
+              </div>
 
-          <div class="settingRow">
-            <div class="settingText">
-              <div class="settingTitle">Only use F5 Guardrail</div>
-              <div class="settingDesc">
-                When enabled, requests are sent only to F5 Guardrail without invoking local engines such as Pattern/Heuristic/Toxic-BERT/LLM Guard; When disabled, all engines are involved in the processing.
+              <div class="sliderBlock">
+                <label>Dataset 单文件上传上限（MB，Admin）</label>
+                <input id="datasetMaxUploadMbInput" type="number" min="1" max="500" step="1"
+                  style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;">
+                <div class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;">
+                  Step 1 上传原始数据文件时的最大体积；默认 20 MB（范围 1–500）。
+                  <span class="zh">Max upload size for Dataset Step 1 raw file; default 20 MB (1–500).</span>
+                </div>
+              </div>
+
+              <div class="sliderBlock">
+                <label>Dataset Step2 并发数上限（Admin）</label>
+                <input id="datasetMaxConcurrencyInput" type="number" min="1" max="50" step="1"
+                  style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;">
+                <div class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;">
+                  用户在 Dataset Step 2 填写的「并发数」不得超过该值；默认 3（Admin 可调范围 1–50）。
+                  <span class="zh">Caps per-task concurrency in Dataset Step 2; default 3 (1–50).</span>
+                </div>
+              </div>
+
+              <div class="sliderBlock">
+                <label>系统时区（Admin）</label>
+                <select id="appTimezoneSelect" style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;"></select>
+                <div class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;">
+                  采用固定 UTC 偏移（不含夏令时）。该设置会影响用户活动统计、Dataset 任务时间以及 result 文件时间戳等系统时间显示/写入。
+                </div>
+              </div>
+
+              <div id="adminOnlySettingsHint" class="settingDesc" style="margin-top:2px;font-size:12px;color:#6b7280;display:none;">
+                Enterprise KB Directory, Agent Max Steps, Dataset admin limits (parallel jobs, upload size, concurrency cap), and Dual Project Routing are read-only for non-admin accounts.
               </div>
             </div>
+          </section>
 
-            <label class="switch" title="仅启用 F5 Guardrail，不调用本地引擎">
-              <input type="checkbox" id="toggleF5GuardrailOnly" />
-              <span class="slider"></span>
-            </label>
-          </div>
-          <hr style="margin:16px 0; border:0; border-top:1px solid #e5e7eb;">
-
-          <div class="settingRow">
-            <div class="settingText">
-              <div class="settingTitle">Record Raw Guardrail JSON</div>
-              <div class="settingDesc">
-                Store the original F5 Guardrail JSON response into the backend directory for debugging only. Disable by default 。
+          <section class="settingsSection" aria-labelledby="settingsHdrEngines">
+            <header class="settingsSectionHeader">
+              <h2 class="settingsSectionTitle" id="settingsHdrEngines">本地引擎与阈值</h2>
+              <p class="settingsSectionMeta">在未启用「仅 F5 Guardrail」时参与的本地检测与灵敏度 · Pattern list and engine thresholds when local stack is active</p>
+            </header>
+            <div class="settingsSectionBody">
+              <div class="settingRow">
+                <div class="settingText">
+                  <div class="settingTitle">Pattern Manager</div>
+                  <div class="settingDesc">Format: keyword:score</div>
+                </div>
               </div>
-            </div>
 
-            <label class="switch" title="Enable/disable raw Guardrail JSON logging">
-              <input type="checkbox" id="toggleGuardrailDebug" />
-              <span class="slider"></span>
-            </label>
-          </div>
-          <hr style="margin:16px 0; border:0; border-top:1px solid #e5e7eb;">
+              <textarea id="patternBox"
+                style="width:100%;height:140px;border-radius:14px;border:1px solid #e5e7eb;padding:10px;"></textarea>
 
-          <div class="sliderBlock" id="customBlockedMessageSetting" style="margin-top:12px;">
-            <label>Custom Blocked Message</label>
-            <textarea id="customBlockedMessageInput"
-              style="width:100%;height:96px;border-radius:12px;border:1px solid #e5e7eb;padding:10px;"
-              placeholder="The requested Prompt was rejected by F5 AI Guardrail because it violated the company's AI security policy."></textarea>
-            <div class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;">
-              仅对当前用户生效：用于替换 Prompt/Response Rejected 气泡的正文内容。<br>
-              Per-user only: replaces the body content shown in Prompt/Response Rejected bubbles.
-            </div>
-            <div style="margin-top:8px;">
-              <button id="btnResetBlockedMessage" type="button" style="padding:6px 10px;border-radius:10px;border:1px solid #f59e0b;background:#fffbeb;color:#92400e;font-weight:700;cursor:pointer;">
-                恢复默认 · Reset Default
-              </button>
-            </div>
-          </div>
-
-          <hr style="margin:16px 0; border:0; border-top:1px solid #e5e7eb;">
-
-          <div class="sliderBlock" style="margin-top:12px;">
-            <label>LLM Provider (F5/Calypso)</label>
-            <select id="providerSelect" style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;">
-              <option value="">使用服务器默认 (DEFAULT_PROVIDER)</option>
-            </select>
-            <div class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;">The Provider used in the main Chat/Agent/Inline mode. PROVIDER_OPTIONS needs to be configured in the .env file to display the drop-down list.</div>
-          </div>
-
-          <div class="sliderBlock" style="margin-top:12px;">
-            <label>Enterprise KB Directory</label>
-            <input id="kbDirInput" type="text" placeholder="./enterprise_kb"
-              style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;">
-          </div>
-
-          <div class="sliderBlock" style="margin-top:12px;">
-            <label>Dataset 全局最大并行任务数（Admin）</label>
-            <input id="datasetMaxRunningTasksInput" type="number" min="1" max="100"
-              style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;">
-            <div class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;">
-              超过该阈值时，所有用户将禁止创建新的 Dataset 任务（默认 3）。
-            </div>
-          </div>
-
-          <div class="sliderBlock" style="margin-top:12px;">
-            <label>Dataset 单文件上传上限（MB，Admin）</label>
-            <input id="datasetMaxUploadMbInput" type="number" min="1" max="500" step="1"
-              style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;">
-            <div class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;">
-              Step 1 上传原始数据文件时的最大体积；默认 20 MB（范围 1–500）。
-              <span class="zh">Max upload size for Dataset Step 1 raw file; default 20 MB (1–500).</span>
-            </div>
-          </div>
-
-          <div class="sliderBlock" style="margin-top:12px;">
-            <label>系统时区（Admin）</label>
-            <select id="appTimezoneSelect" style="width:100%;padding:10px;border-radius:12px;border:1px solid #e5e7eb;"></select>
-            <div class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;">
-              采用固定 UTC 偏移（不含夏令时）。该设置会影响用户活动统计、Dataset 任务时间以及 result 文件时间戳等系统时间显示/写入。
-            </div>
-          </div>
-
-          <div class="sliderBlock">
-            <label>Agent Max Steps</label>
-            <input type="range" id="agentMaxStepsSlider" min="1" max="8" step="1">
-            <span id="agentMaxStepsVal" class="sliderVal"></span>
-          </div>
-          <div class="settingRow" style="margin-top:12px;">
-            <div class="settingText">
-              <div class="settingTitle">Enable Dual Project Routing By Enterprise Skill</div>
-              <div class="settingDesc">
-                Admin only. ON: Enterprise KB Skill ON uses SECOND project/token; OFF: always use primary project.
+              <div class="settingRow">
+                <div class="settingText">
+                  <div class="settingTitle">Thresholds</div>
+                </div>
               </div>
-              <div id="dualProjectRoutingStatus" class="settingDesc" style="margin-top:4px;font-size:12px;color:#6b7280;">
-                Checking second project env...
+
+              <div class="sliderBlock">
+                <label>Heuristic</label>
+                <input type="range" id="heuristicSlider" min="1" max="30">
+                <span id="heuristicVal" class="sliderVal"></span>
               </div>
+
+              <div class="sliderBlock">
+                <label>Toxic</label>
+                <input type="range" id="toxSlider" min="0.05" max="0.95" step="0.05">
+                <span id="toxVal" class="sliderVal"></span>
+              </div>
+
+              <div class="sliderBlock">
+                <label>LLM Guard</label>
+                <input type="range" id="piSlider" min="0.05" max="0.95" step="0.05">
+                <span id="piVal" class="sliderVal"></span>
+              </div>
+
+              <button id="btnSaveSettings" class="settingsSaveBtn">Save Setting</button>
             </div>
-            <label class="switch" title="Admin only: toggle dual project routing">
-              <input type="checkbox" id="toggleDualProjectRouting" />
-              <span class="slider"></span>
-            </label>
-          </div>
-          <div id="adminOnlySettingsHint" class="settingDesc" style="margin-top:6px;font-size:12px;color:#6b7280;display:none;">
-            Enterprise KB Directory, Agent Max Steps, Dataset admin limits (parallel jobs, upload size), and Dual Project Routing are read-only for non-admin accounts.
-          </div>
+          </section>
 
-          <hr style="margin:16px 0; border:0; border-top:1px solid #e5e7eb;">
-
-	  <div class="settingRow">
-   	    <div class="settingText">
-    	      <div class="settingTitle">Pattern Manager</div>
-    	      <div class="settingDesc">Format: keyword:score</div>
-  	    </div>
-	  </div>
-
-	  <textarea id="patternBox"
-  	    style="width:100%;height:140px;border-radius:14px;border:1px solid #e5e7eb;padding:10px;"></textarea>
-
-	  <hr style="margin:16px 0; border:0; border-top:1px solid #e5e7eb;">
-
-	  <div class="settingRow">
-  	    <div class="settingText">
-    	      <div class="settingTitle">Thresholds</div>
-  	    </div>
-	  </div>
-          
-	  <div class="sliderBlock">
-  	    <label>Heuristic</label>
-  	    <input type="range" id="heuristicSlider" min="1" max="30">
-  	    <span id="heuristicVal" class="sliderVal"></span>
-	  </div>
-
-	  <div class="sliderBlock">
-  	    <label>Toxic</label>
-  	    <input type="range" id="toxSlider" min="0.05" max="0.95" step="0.05">
-  	    <span id="toxVal" class="sliderVal"></span>
-	  </div>
-
-	  <div class="sliderBlock">
-  	    <label>LLM Guard</label>
-  	    <input type="range" id="piSlider" min="0.05" max="0.95" step="0.05">
-  	    <span id="piVal" class="sliderVal"></span>
-	  </div>
-
-	  <button id="btnSaveSettings" class="settingsSaveBtn">Save Setting</button>
-          
         </div>
 
         <!-- TEST GUIDE VIEW -->
@@ -804,6 +835,14 @@
                     <span class="datasetTaskNameLenHint">最多 80 个字符 <span class="zh">/ Max 80 characters</span></span>
                   </div>
                 </div>
+                <div class="datasetRow datasetFormRow datasetTestModeRow">
+                  <div class="datasetFieldLabel">测试类型 / Test Type</div>
+                  <label class="datasetModeOption"><input type="radio" name="datasetTestMode" value="block_rate" checked /> 拦截率测试 <span class="zh">/ Blocking-rate Test</span></label>
+                  <label class="datasetModeOption"><input type="radio" name="datasetTestMode" value="false_block_rate" /> 误拦率测试 <span class="zh">/ False-block-rate Test</span></label>
+                  <div class="datasetHint datasetModeExplain">
+                    拦截率测试：数据集 prompt 应为期望被阻断；误拦率测试：数据集 prompt 应为期望通过。<span class="zh">Blocking-rate mode expects prompts to be blocked; False-block-rate mode expects prompts to pass.</span>
+                  </div>
+                </div>
                 <div class="datasetFileUploadRow">
                   <input type="file" id="datasetFileInput" accept=".csv,.xlsx,.xls" />
                   <button type="button" id="datasetUploadBtn" class="datasetUploadBtnPrimary">上传文件 / Upload</button>
@@ -836,10 +875,11 @@
                   <label class="datasetFieldLabel">Provider <input type="text" id="datasetProvider" value="" placeholder="" autocomplete="off" /></label>
                 </div>
                 <div class="datasetRow datasetFormRow">
-                  <label class="datasetFieldLabel">并发数 / Concurrency <input type="number" id="datasetConcurrency" min="1" max="10" value="1" /></label>
-                  <label class="datasetFieldLabel">Guardrail 超时(秒) / Guardrail Timeout (s) <input type="number" id="datasetGuardrailTimeout" min="1" max="120" step="1" value="20" title="单行 Guardrail 调用超时 / Per-call timeout stored in task state as guardrail_timeout_seconds" /></label>
+                  <label class="datasetFieldLabel">并发数 / Concurrency <input type="number" id="datasetConcurrency" min="1" max="3" value="1" /></label>
                   <label class="datasetFieldLabel">批次间隔(秒) / Batch Interval (s) <input type="number" id="datasetInterval" min="0" max="30" step="0.5" value="1" /></label>
+                  <label class="datasetFieldLabel">Guardrail 超时(秒) / Guardrail Timeout (s) <input type="number" id="datasetGuardrailTimeout" min="1" max="120" step="1" value="20" title="单行 Guardrail 调用超时 / Per-call timeout stored in task state as guardrail_timeout_seconds" /></label>
                 </div>
+                <p id="datasetConcurrencyOverMaxHint" class="datasetFieldErr" style="display:none;margin:6px 0 0 0;" role="alert"></p>
                 <div class="datasetRow datasetFormRow">
                   <label class="datasetFieldLabel"><input type="checkbox" id="datasetRecordFailedScanners" /> 是否在测试结果中记录阻挡的scanner名称 / Record blocked scanner names in result</label>
                 </div>
@@ -861,6 +901,10 @@
 
               <div class="datasetStepPage" id="datasetStep4">
                 <h4>Step 4 测试进行中 <span class="zh">/ Running</span></h4>
+                <div id="datasetStep4RunningHint" class="datasetRunningNotice" role="status">
+                  任务正在进行中，您可以切换到其它任务或关闭页面，稍后回看或在历史任务中查看。
+                  <span class="zh">The task is running. You may switch to another task or close this page — check back later or open it from History.</span>
+                </div>
                 <div id="datasetStatusText" class="datasetHint">尚无任务状态 / No task status yet</div>
                 <div class="datasetProgress"><div id="datasetProgressBar"></div></div>
                 <div class="datasetRow">
@@ -881,7 +925,7 @@
                   <div class="datasetResultTitle">Dataset Test Final Report</div>
                   <div class="datasetResultSub" id="datasetResultSub">等待测试完成后展示最终统计 / Final stats will appear after completion</div>
                   <div class="datasetKpiMain">
-                    <div class="datasetKpiMainLabel">Block Rate</div>
+                    <div class="datasetKpiMainLabel" id="datasetKpiMainLabel">Block Rate</div>
                     <div class="datasetKpiMainValue" id="datasetKpiBlockRate">0.00%</div>
                   </div>
                   <div id="datasetStats" class="datasetStats datasetStats--hero"></div>

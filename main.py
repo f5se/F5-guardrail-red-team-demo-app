@@ -83,21 +83,40 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # -----------------------------
 # ENV
 # -----------------------------
-def _env_first(*keys: str) -> str:
-    """Return first non-empty env/.env value by key order."""
-    for k in keys:
-        v = (os.getenv(k) or _read_env_literal_value(k) or "").strip()
-        if v:
-            return v
-    return ""
+def _read_single_env(key: str) -> str:
+    """Read one key from OS env or literal .env file (startup-only)."""
+    return (os.getenv(key) or _read_env_literal_value(key) or "").strip()
 
 
 CALYPSOAI_URL = (os.getenv("CALYPSOAI_URL") or _read_env_literal_value("CALYPSOAI_URL")).strip()
-CALYPSOAI_TOKEN = _env_first("Guardrail_PoC_Token", "CALYPSOAI_TOKEN")
-CALYPSOAI_PROJECT_ID = _env_first("Guardrail_PoC_Project", "CALYPSOAI_PROJECT_ID")  # your requirement
+# 主 Chat / Agent / Inline Guardrail：仅用 CALYPSOAI_* 与 DEFAULT_PROVIDER（不受 Guardrail_PoC_* 影响）
+CALYPSOAI_TOKEN = _read_single_env("CALYPSOAI_TOKEN")
+CALYPSOAI_PROJECT_ID = _read_single_env("CALYPSOAI_PROJECT_ID")
 CALYPSOAI_TOKEN_SECOND_PROJECT = (os.getenv("CALYPSOAI_TOKEN_SECOND_PROJECT") or _read_env_literal_value("CALYPSOAI_TOKEN_SECOND_PROJECT")).strip()
 CALYPSOAI_PROJECT_ID_SECOND = (os.getenv("CALYPSOAI_PROJECT_ID_SECOND") or _read_env_literal_value("CALYPSOAI_PROJECT_ID_SECOND")).strip()
-DEFAULT_PROVIDER = _env_first("Guardrail_PoC_Provider", "DEFAULT_PROVIDER")
+DEFAULT_PROVIDER = _read_single_env("DEFAULT_PROVIDER")
+
+# Dataset Test：可选专用 PoC（未配置时在任务向导中回退到 CALYPSOAI_PROJECT_ID / DEFAULT_PROVIDER / CALYPSOAI_TOKEN）
+GUARDRAIL_POC_TOKEN = _read_single_env("Guardrail_PoC_Token")
+GUARDRAIL_POC_PROJECT_ID = _read_single_env("Guardrail_PoC_Project")
+GUARDRAIL_POC_PROVIDER = _read_single_env("Guardrail_PoC_Provider")
+GUARDRAIL_POC_CALYPSO_URL = _read_single_env("Guardrail_PoC_Calypso_URL").rstrip("/")
+
+
+def _dataset_env_project_id() -> str:
+    return GUARDRAIL_POC_PROJECT_ID or CALYPSOAI_PROJECT_ID
+
+
+def _dataset_env_provider_name() -> str:
+    return (GUARDRAIL_POC_PROVIDER or DEFAULT_PROVIDER or "").strip()
+
+
+def _dataset_env_api_key() -> str:
+    return GUARDRAIL_POC_TOKEN or CALYPSOAI_TOKEN
+
+
+def _dataset_env_calypso_url() -> str:
+    return (GUARDRAIL_POC_CALYPSO_URL or CALYPSOAI_URL or "").strip().rstrip("/")
 # Hugging Face：用于模型下载，可提升速率并避免匿名 API 限制。在 .env 中设置 HF_TOKEN=hf_xxx
 HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE_HUB_TOKEN")
 
@@ -566,6 +585,7 @@ DEFAULT_SETTINGS = {
     "dual_project_routing_enabled": False,  # admin 全局开关：Enterprise Skill ON 时走第二个 project
     "dataset_max_running_tasks": 3,  # admin 全局阈值：所有用户并行 running/queued 总任务数
     "dataset_max_upload_mb": 20,  # admin：Dataset Step1 上传原始文件大小上限（MB）
+    "dataset_max_concurrency": 3,  # admin：Dataset Step2 并发数上限（用户输入不可超过）
     "app_timezone": "Asia/Shanghai",  # admin 全局时区
 }
 NEW_USER_PATTERNS_FALLBACK = "ignore:3\nsystem:3\nprompt:2\n忽略:3\n系统提示词:3\n忘记:2\n角色:4\n"
@@ -1131,6 +1151,7 @@ def get_runtime_settings(raw: dict) -> dict:
         "dataset_max_upload_mb": to_int(
             _coerce_mb_setting(raw.get("dataset_max_upload_mb", 20), 20), 20, 1, 500
         ),
+        "dataset_max_concurrency": to_int(raw.get("dataset_max_concurrency", 3), 3, 1, 50),
         "app_timezone": _normalize_app_timezone_name(raw.get("app_timezone", DEFAULT_APP_TIMEZONE)),
     }
 
@@ -1164,6 +1185,12 @@ def _dataset_max_file_size_bytes() -> int:
     runtime = get_runtime_settings(raw)
     mb = int(runtime.get("dataset_max_upload_mb") or 20)
     return max(1, mb) * 1024 * 1024
+
+
+def _dataset_max_concurrency_allowed() -> int:
+    raw = get_effective_raw_settings(None)
+    runtime = get_runtime_settings(raw)
+    return max(1, int(runtime.get("dataset_max_concurrency") or 3))
 
 
 def _normalize_guardrail_result_payload(raw) -> dict:
@@ -2542,6 +2569,7 @@ async def get_settings(request: Request):
     out = dict(get_effective_raw_settings(username))
     rt = get_runtime_settings(out)
     out["dataset_max_upload_mb"] = rt["dataset_max_upload_mb"]
+    out["dataset_max_concurrency"] = rt["dataset_max_concurrency"]
     out["provider_options"] = _get_provider_options()
     out["effective_provider"] = (str(out.get("default_provider", "") or "").strip() or (DEFAULT_PROVIDER or "").strip())
     out["username"] = username
@@ -2563,6 +2591,7 @@ async def post_settings(request: Request, payload: dict = Body(default=None)):
         "dual_project_routing_enabled",
         "dataset_max_running_tasks",
         "dataset_max_upload_mb",
+        "dataset_max_concurrency",
         "app_timezone",
     }
     if username != "admin":
@@ -2570,7 +2599,7 @@ async def post_settings(request: Request, payload: dict = Body(default=None)):
         if forbidden:
             raise HTTPException(
                 status_code=403,
-                detail="only admin can modify kb_dir, agent_max_steps, dual_project_routing_enabled, dataset_max_running_tasks, dataset_max_upload_mb, or app_timezone",
+                detail="only admin can modify kb_dir, agent_max_steps, dual_project_routing_enabled, dataset_max_running_tasks, dataset_max_upload_mb, dataset_max_concurrency, or app_timezone",
             )
     structured = load_structured_settings()
     if username not in structured["user_settings"]:
@@ -2832,7 +2861,8 @@ DATASET_RESULT_DIR = os.path.join(BASE_DIR, "poc", "result")
 DATASET_STATE_DIR = os.path.join(BASE_DIR, "poc", "state")
 DATASET_LOCK = threading.Lock()
 DATASET_ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
-DATASET_MAX_CONCURRENCY = 10
+DATASET_TEST_MODE_BLOCK_RATE = "block_rate"
+DATASET_TEST_MODE_FALSE_BLOCK_RATE = "false_block_rate"
 DATASET_MAX_INTERVAL_SECONDS = 30.0
 DATASET_MAX_RETRY = 2
 DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS = 20.0
@@ -2866,6 +2896,7 @@ class DatasetTaskConfigureIn(BaseModel):
     interval_seconds: float = 1.0
     guardrail_timeout_seconds: float = DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS
     record_failed_scanner_names: bool = False
+    test_mode: str = DATASET_TEST_MODE_BLOCK_RATE
 
 
 class DatasetTaskActionIn(BaseModel):
@@ -2973,7 +3004,30 @@ def _dataset_validate_access(task: dict, username: str):
         raise HTTPException(status_code=403, detail="forbidden")
 
 
+def _dataset_normalize_test_mode(v) -> str:
+    mode = str(v or "").strip().lower()
+    if mode == DATASET_TEST_MODE_FALSE_BLOCK_RATE:
+        return DATASET_TEST_MODE_FALSE_BLOCK_RATE
+    return DATASET_TEST_MODE_BLOCK_RATE
+
+
+def _dataset_result_label_for_guardrail_outcome(state: dict, status_text: str) -> str:
+    """
+    Human-readable label column for result CSV. Counts/statistics use guardrail_status only.
+
+    Blocking-rate mode: prompts should be blocked → rejected is expected, ok is unexpected.
+    False-block-rate mode: prompts should pass → ok is expected, rejected is unexpected (false block).
+    """
+    mode = _dataset_normalize_test_mode(state.get("test_mode"))
+    is_rejected = status_text == "rejected"
+    if mode == DATASET_TEST_MODE_FALSE_BLOCK_RATE:
+        return "Blocked(Unexpected)" if is_rejected else "Passed(Expected)"
+    return "Blocked(Expected)" if is_rejected else "Passed(Unexpected)"
+
+
 def _dataset_to_status_payload(state: dict) -> dict:
+    max_c_allowed = _dataset_max_concurrency_allowed()
+    test_mode = _dataset_normalize_test_mode(state.get("test_mode"))
     total = int(state.get("effective_rows") or 0)
     done = int(state.get("processed_count") or 0)
     pct = round((done / total) * 100.0, 2) if total > 0 else 0.0
@@ -2982,7 +3036,7 @@ def _dataset_to_status_payload(state: dict) -> dict:
     if total > 0 and done > 0 and recent:
         avg = sum(float(x) for x in recent) / max(1, len(recent))
         remaining = max(0, total - done)
-        c = max(1, int(state.get("concurrency_per_batch") or 1))
+        c = max(1, min(int(state.get("concurrency_per_batch") or 1), max_c_allowed))
         eta = round((remaining * avg) / c, 1)
     pc0 = int(state.get("prompt_column") or 0)
     raw_path = str(state.get("source_file_path") or "").strip()
@@ -2994,6 +3048,7 @@ def _dataset_to_status_payload(state: dict) -> dict:
         "task_name": str(state.get("task_name") or "").strip(),
         "status": state.get("status"),
         "phase": state.get("phase"),
+        "test_mode": test_mode,
         "source_file_exists": source_file_exists,
         "result_file_exists": result_file_exists,
         "progress_percent": pct,
@@ -3025,6 +3080,7 @@ def _dataset_to_status_payload(state: dict) -> dict:
             120.0,
         ),
         "record_failed_scanner_names": bool(state.get("record_failed_scanner_names", False)),
+        "max_concurrency_allowed": max_c_allowed,
         "retry_in_progress": bool(state.get("retry_in_progress", False)),
         "retry_progress": (
             {"current": int((state.get("retry_progress") or {}).get("current") or 0), "total": int((state.get("retry_progress") or {}).get("total") or 0)}
@@ -3186,8 +3242,8 @@ def _dataset_prompt_for_row_index(state: dict, rows_data: List[list], row_index:
 async def _dataset_process_row(state: dict, prompt_text: str, row_index: int, send_kwargs: dict, timeout_seconds: float) -> dict:
     task_id = state["task_id"]
     runtime = DATASET_TASK_RUNTIME_KEYS.get(task_id) or {}
-    api_key = runtime.get("api_key") or CALYPSOAI_TOKEN
-    cai_client = CalypsoAI(url=CALYPSOAI_URL, token=api_key)
+    api_key = runtime.get("api_key") or _dataset_env_api_key()
+    cai_client = CalypsoAI(url=_dataset_env_calypso_url(), token=api_key)
     begin = time.perf_counter()
     last_err = ""
     for attempt in range(DATASET_MAX_RETRY + 1):
@@ -3207,7 +3263,7 @@ async def _dataset_process_row(state: dict, prompt_text: str, row_index: int, se
                     "latency_ms": latency_ms,
                     "ts": _dataset_now_iso(),
                 }
-            label = "Blocked(Expected)" if status_text == "rejected" else "Passed(Unexpected)"
+            label = _dataset_result_label_for_guardrail_outcome(state, status_text)
             guardrail_status = "rejected" if status_text == "rejected" else "ok"
             failed_scanners = []
             if bool(state.get("record_failed_scanner_names", False)):
@@ -3300,7 +3356,7 @@ async def _dataset_retry_error_rows_task(task_id: str):
 
         rows_data = _dataset_read_all_rows(state["source_file_path"])
         provider_name = str(state.get("provider_name") or "").strip()
-        project_id = str(state.get("project_id") or "").strip() or CALYPSOAI_PROJECT_ID
+        project_id = str(state.get("project_id") or "").strip() or _dataset_env_project_id()
         timeout_seconds = float(state.get("guardrail_timeout_seconds") or DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS)
         verbose_enabled = bool(state.get("record_failed_scanner_names", False))
         send_kwargs = build_send_kwargs(project_id=project_id, verbose=verbose_enabled, provider_override=provider_name or None)
@@ -3314,7 +3370,8 @@ async def _dataset_retry_error_rows_task(task_id: str):
                 s["retry_progress"] = {"current": 0, "total": total}
                 _dataset_save_state(s)
 
-        c = max(1, min(int(state.get("concurrency_per_batch") or 1), DATASET_MAX_CONCURRENCY))
+        cap_c = _dataset_max_concurrency_allowed()
+        c = max(1, min(int(state.get("concurrency_per_batch") or 1), cap_c))
         interval_seconds = max(0.0, min(float(state.get("interval_seconds") or 1.0), DATASET_MAX_INTERVAL_SECONDS))
 
         for batch_start in range(0, len(error_indices), c):
@@ -3411,7 +3468,7 @@ async def _dataset_run_task(task_id: str):
         last = int(state.get("last_processed_row") or 0)
     selected = [(i, p) for (i, p) in selected if i > last]
     provider_name = str(state.get("provider_name") or "").strip()
-    project_id = str(state.get("project_id") or "").strip() or CALYPSOAI_PROJECT_ID
+    project_id = str(state.get("project_id") or "").strip() or _dataset_env_project_id()
     timeout_seconds = float(state.get("guardrail_timeout_seconds") or DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS)
     verbose_enabled = bool(state.get("record_failed_scanner_names", False))
     send_kwargs = build_send_kwargs(project_id=project_id, verbose=verbose_enabled, provider_override=provider_name or None)
@@ -3438,7 +3495,8 @@ async def _dataset_run_task(task_id: str):
     except Exception:
         seen_row_indexes = set()
 
-    c = max(1, min(int(state.get("concurrency_per_batch") or 1), DATASET_MAX_CONCURRENCY))
+    cap_c = _dataset_max_concurrency_allowed()
+    c = max(1, min(int(state.get("concurrency_per_batch") or 1), cap_c))
     interval_seconds = max(0.0, min(float(state.get("interval_seconds") or 1.0), DATASET_MAX_INTERVAL_SECONDS))
     for i in range(0, len(selected), c):
         with DATASET_LOCK:
@@ -3540,6 +3598,7 @@ async def dataset_test_startup_recover():
 async def api_dataset_test_upload(
     request: Request,
     task_name: str = Form(...),
+    test_mode: str = Form(DATASET_TEST_MODE_BLOCK_RATE),
     file: UploadFile = File(...),
 ):
     username = require_user(request)
@@ -3580,6 +3639,7 @@ async def api_dataset_test_upload(
         "updated_at": _dataset_now_iso(),
         "status": "draft",
         "phase": "step1_uploaded",
+        "test_mode": _dataset_normalize_test_mode(test_mode),
         "source_file_path": raw_path,
         "source_original_name": original,
         "result_file_path": _dataset_result_path(task_id),
@@ -3589,8 +3649,8 @@ async def api_dataset_test_upload(
         "row_end": len(rows),
         "total_rows": len(rows),
         "effective_rows": max(0, len(rows) - 1),
-        "project_id": CALYPSOAI_PROJECT_ID,
-        "provider_name": (DEFAULT_PROVIDER or "").strip(),
+        "project_id": _dataset_env_project_id(),
+        "provider_name": _dataset_env_provider_name(),
         "api_key_source": "env",
         "api_key_masked": "***",
         "concurrency_per_batch": 1,
@@ -3614,6 +3674,7 @@ async def api_dataset_test_upload(
         {
             "task_id": task_id,
             "task_name": task_name_clean,
+            "test_mode": state.get("test_mode"),
             "preview_rows": preview,
             "total_rows": len(rows),
             "max_columns": max_cols,
@@ -3670,16 +3731,25 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
         effective_rows = max(0, row_end - row_start + 1)
         if effective_rows <= 0:
             raise HTTPException(status_code=400, detail="no rows selected")
-        resolved_project_id = str(payload.project_id or "").strip() or CALYPSOAI_PROJECT_ID
-        resolved_provider_name = str(payload.provider_name or "").strip() or (DEFAULT_PROVIDER or "").strip()
+        resolved_project_id = str(payload.project_id or "").strip() or _dataset_env_project_id()
+        resolved_provider_name = str(payload.provider_name or "").strip() or _dataset_env_provider_name()
         provided_key = str(payload.api_key or "").strip()
-        resolved_api_key = provided_key or CALYPSOAI_TOKEN
+        resolved_api_key = provided_key or _dataset_env_api_key()
         if not resolved_project_id:
-            raise HTTPException(status_code=400, detail="缺少 Project ID：请填写或在 .env 中配置 Guardrail_PoC_Project / CALYPSOAI_PROJECT_ID")
+            raise HTTPException(
+                status_code=400,
+                detail="缺少 Project ID：请在向导中填写，或在 .env 中配置 CALYPSOAI_PROJECT_ID（Dataset 可选 Guardrail_PoC_Project）",
+            )
         if not resolved_provider_name:
-            raise HTTPException(status_code=400, detail="缺少 Provider：请填写或在 .env 中配置 Guardrail_PoC_Provider / DEFAULT_PROVIDER")
+            raise HTTPException(
+                status_code=400,
+                detail="缺少 Provider：请在向导中填写，或在 .env 中配置 DEFAULT_PROVIDER（Dataset 可选 Guardrail_PoC_Provider）",
+            )
         if not resolved_api_key:
-            raise HTTPException(status_code=400, detail="缺少 API Key：请填写或在 .env 中配置 Guardrail_PoC_Token / CALYPSOAI_TOKEN")
+            raise HTTPException(
+                status_code=400,
+                detail="缺少 API Key：请在向导中填写，或在 .env 中配置 CALYPSOAI_TOKEN（Dataset 可选 Guardrail_PoC_Token）",
+            )
         if orig_status not in ("completed",):
             state["phase"] = "step2_configured"
         state["prompt_column"] = int(payload.prompt_column) - 1
@@ -3697,7 +3767,14 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
             state["api_key_masked"] = "***"
             DATASET_TASK_RUNTIME_KEYS.pop(state["task_id"], None)
         state["provider_name"] = resolved_provider_name
-        state["concurrency_per_batch"] = max(1, min(int(payload.concurrency_per_batch or 1), DATASET_MAX_CONCURRENCY))
+        cap_c = _dataset_max_concurrency_allowed()
+        req_c = int(payload.concurrency_per_batch or 1)
+        if req_c < 1 or req_c > cap_c:
+            raise HTTPException(
+                status_code=400,
+                detail=f"concurrency_per_batch must be between 1 and {cap_c} (server limit)",
+            )
+        state["concurrency_per_batch"] = req_c
         state["interval_seconds"] = max(0.0, min(float(payload.interval_seconds or 1.0), DATASET_MAX_INTERVAL_SECONDS))
         state["guardrail_timeout_seconds"] = to_float(
             payload.guardrail_timeout_seconds,
@@ -3706,6 +3783,7 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
             120.0,
         )
         state["record_failed_scanner_names"] = bool(payload.record_failed_scanner_names)
+        state["test_mode"] = _dataset_normalize_test_mode(payload.test_mode)
         _dataset_save_state(state)
     return JSONResponse({"status": "ok", "task": _dataset_to_status_payload(state)})
 
@@ -3954,6 +4032,7 @@ async def api_dataset_test_history(
                 errs = int(state.get("error_count") or 0)
                 denom = block + passed + errs
                 payload["block_rate"] = round((block / denom) * 100.0, 2) if denom else 0.0
+                payload["test_mode"] = _dataset_normalize_test_mode(state.get("test_mode"))
                 items.append(payload)
         except Exception:
             continue

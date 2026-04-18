@@ -51,6 +51,7 @@ const datasetUploadBtn = document.getElementById("datasetUploadBtn");
 const datasetUploadMeta = document.getElementById("datasetUploadMeta");
 const datasetTaskNameInput = document.getElementById("datasetTaskNameInput");
 const datasetTaskNameBanner = document.getElementById("datasetTaskNameBanner");
+const datasetTestModeRadios = Array.from(document.querySelectorAll("input[name='datasetTestMode']"));
 const datasetPromptColumn = document.getElementById("datasetPromptColumn");
 const datasetHasHeader = document.getElementById("datasetHasHeader");
 const datasetRowStart = document.getElementById("datasetRowStart");
@@ -84,6 +85,7 @@ const datasetHistoryTableWrap = document.getElementById("datasetHistoryTableWrap
 const datasetHistoryPager = document.getElementById("datasetHistoryPager");
 const datasetMaxRunningTasksInputEl = document.getElementById("datasetMaxRunningTasksInput");
 const datasetMaxUploadMbInputEl = document.getElementById("datasetMaxUploadMbInput");
+const datasetMaxConcurrencyInputEl = document.getElementById("datasetMaxConcurrencyInput");
 const appTimezoneSelectEl = document.getElementById("appTimezoneSelect");
 const attackPresets = Array.isArray(window.ATTACK_PRESETS) ? window.ATTACK_PRESETS : [];
 const guardrailIntegrationPresets = Array.isArray(window.GUARDRAIL_INTEGRATION_PRESETS) ? window.GUARDRAIL_INTEGRATION_PRESETS : [];
@@ -653,7 +655,58 @@ function buildUtcOffsetTimezoneOptions(){
   }
 }
 
-/** MB 上限：与后端 1–500 一致；用 round 避免 parseInt 把小数截成比预期小 1（如 27.9→27）。 */
+/** Admin 设定的 Dataset Step2 并发上限；同步到输入框 max，并把当前值压到上限内（仅当来源为服务端刷新时）。 */
+function datasetApplyConcurrencyUiMax(cap){
+  let m = Math.round(Number(cap));
+  if (!Number.isFinite(m) || m < 1) m = 3;
+  m = Math.min(50, Math.max(1, m));
+  if (!datasetConcurrency) return m;
+  datasetConcurrency.max = String(m);
+  const cur = Number(datasetConcurrency.value || 1);
+  if (cur > m) datasetConcurrency.value = String(m);
+  datasetUpdateConcurrencyOverMaxHint();
+  return m;
+}
+
+function datasetGetConcurrencyCap(){
+  const m = Number(datasetConcurrency?.max || "3");
+  return Number.isFinite(m) && m >= 1 ? m : 3;
+}
+
+function datasetGetConcurrencyInputValue(){
+  const raw = String(datasetConcurrency?.value ?? "").trim();
+  if (raw === "") return NaN;
+  const v = Number(raw);
+  return Number.isFinite(v) ? v : NaN;
+}
+
+function datasetUpdateConcurrencyOverMaxHint(){
+  const el = document.getElementById("datasetConcurrencyOverMaxHint");
+  if (!el || !datasetConcurrency) return;
+  const cap = datasetGetConcurrencyCap();
+  const v = datasetGetConcurrencyInputValue();
+  if (!Number.isFinite(v)) {
+    el.style.display = "none";
+    el.textContent = "";
+    return;
+  }
+  if (v > cap) {
+    el.style.display = "block";
+    el.textContent = "并发数不能大于 " + cap + "（服务器允许的最大值，由管理员在 Settings 中配置）。"
+      + " Value cannot exceed " + cap + " (admin-configured limit in Settings).";
+  } else {
+    el.style.display = "none";
+    el.textContent = "";
+  }
+}
+
+function datasetIsConcurrencyOverMax(){
+  const cap = datasetGetConcurrencyCap();
+  const v = datasetGetConcurrencyInputValue();
+  if (!Number.isFinite(v)) return false;
+  return v > cap;
+}
+
 function clampDatasetUploadMbUi(v, fallback = 20){
   const t = String(v ?? "").trim();
   if (t === "") return fallback;
@@ -669,6 +722,43 @@ function updateDatasetUploadMaxMbHint(mb){
   const en = document.getElementById("datasetUploadMaxMbEn");
   if (cn) cn.textContent = String(safe);
   if (en) en.textContent = String(safe);
+}
+
+function datasetNormalizeTestMode(v){
+  const mode = String(v || "").trim().toLowerCase();
+  return mode === "false_block_rate" ? "false_block_rate" : "block_rate";
+}
+
+function datasetGetSelectedTestMode(){
+  const picked = datasetTestModeRadios.find((r) => r.checked);
+  return datasetNormalizeTestMode(picked?.value);
+}
+
+function datasetSetSelectedTestMode(mode){
+  const normalized = datasetNormalizeTestMode(mode);
+  datasetTestModeRadios.forEach((r) => {
+    r.checked = r.value === normalized;
+  });
+}
+
+function datasetGetModeMeta(mode){
+  const m = datasetNormalizeTestMode(mode);
+  if (m === "false_block_rate") {
+    return {
+      modeLabel: "误拦率测试 / False-block-rate Test",
+      statsBlocked: "Blocked(Unexpected)",
+      statsPassed: "Passed(Expected)",
+      kpiLabel: "误拦率 / False Block Rate",
+      rateName: "误拦率 / False Block Rate"
+    };
+  }
+  return {
+    modeLabel: "拦截率测试 / Blocking-rate Test",
+    statsBlocked: "Blocked(Expected)",
+    statsPassed: "Passed(Unexpected)",
+    kpiLabel: "拦截率 / Block Rate",
+    rateName: "拦截率 / Block Rate"
+  };
 }
 
 function setAdminOnlySettingsAccess(username){
@@ -695,6 +785,10 @@ function setAdminOnlySettingsAccess(username){
   if (datasetMaxUploadMbInputEl) {
     datasetMaxUploadMbInputEl.disabled = disabled;
     datasetMaxUploadMbInputEl.title = disabled ? reason : "";
+  }
+  if (datasetMaxConcurrencyInputEl) {
+    datasetMaxConcurrencyInputEl.disabled = disabled;
+    datasetMaxConcurrencyInputEl.title = disabled ? reason : "";
   }
   if (appTimezoneSelectEl) {
     appTimezoneSelectEl.disabled = disabled;
@@ -2362,6 +2456,12 @@ async function loadSettings(){
       datasetMaxUploadMbInputEl.value = String(clampDatasetUploadMbUi(s.dataset_max_upload_mb, 20));
     }
     updateDatasetUploadMaxMbHint(s.dataset_max_upload_mb);
+    if (datasetMaxConcurrencyInputEl) {
+      let nc = Math.round(Number(s.dataset_max_concurrency));
+      if (!Number.isFinite(nc) || nc < 1) nc = 3;
+      datasetMaxConcurrencyInputEl.value = String(Math.min(50, Math.max(1, nc)));
+    }
+    datasetApplyConcurrencyUiMax(s.dataset_max_concurrency ?? 3);
     configuredAppTimezone = String(s.app_timezone || "UTC+08:00").trim() || "UTC+08:00";
     if (appTimezoneSelectEl) {
       buildUtcOffsetTimezoneOptions();
@@ -2435,6 +2535,9 @@ async function saveSettings(showToast = true){
     payload.dual_project_routing_enabled = !!toggleDualProjectRoutingEl?.checked;
     payload.dataset_max_running_tasks = document.getElementById("datasetMaxRunningTasksInput")?.value || 3;
     payload.dataset_max_upload_mb = clampDatasetUploadMbUi(datasetMaxUploadMbInputEl?.value, 20);
+    let nconc = Math.round(Number(datasetMaxConcurrencyInputEl?.value));
+    if (!Number.isFinite(nconc) || nconc < 1) nconc = 3;
+    payload.dataset_max_concurrency = Math.min(50, Math.max(1, nconc));
     payload.app_timezone = (appTimezoneSelectEl?.value || "UTC+08:00").trim();
   }
   const res = await authFetch("/api/settings", {
@@ -4377,6 +4480,7 @@ function datasetResetNewTaskForm(){
   datasetTaskSnapshot = {};
   datasetLastPreviewRows = [];
   if (datasetTaskNameInput) datasetTaskNameInput.value = "";
+  datasetSetSelectedTestMode("block_rate");
   if (datasetFileInput) datasetFileInput.value = "";
   if (datasetPromptColumn) datasetPromptColumn.value = "1";
   if (datasetHasHeader) datasetHasHeader.checked = true;
@@ -4486,6 +4590,7 @@ async function datasetFetchPreviewRows(){
 
 function datasetApplyTaskToForm(task){
   if (!task || typeof task !== "object") return;
+  datasetSetSelectedTestMode(task.test_mode);
   if (datasetTaskNameInput && String(task.task_name || "").trim()) {
     datasetTaskNameInput.value = String(task.task_name || "").trim();
   }
@@ -4504,8 +4609,15 @@ function datasetApplyTaskToForm(task){
   if (datasetProvider && String(task.provider_name || "").trim()) {
     datasetProvider.value = String(task.provider_name || "").trim();
   }
+  if (task.max_concurrency_allowed != null && task.max_concurrency_allowed !== undefined) {
+    datasetApplyConcurrencyUiMax(task.max_concurrency_allowed);
+  }
   if (datasetConcurrency && task.concurrency_per_batch != null) {
-    datasetConcurrency.value = String(task.concurrency_per_batch);
+    let v = Number(task.concurrency_per_batch);
+    const cap = Number(datasetConcurrency.max || "3") || 3;
+    if (!Number.isFinite(v) || v < 1) v = 1;
+    if (v > cap) v = cap;
+    datasetConcurrency.value = String(v);
   }
   if (datasetGuardrailTimeout != null && task.guardrail_timeout_seconds != null && task.guardrail_timeout_seconds !== undefined) {
     datasetGuardrailTimeout.value = String(task.guardrail_timeout_seconds);
@@ -4518,6 +4630,7 @@ function datasetApplyTaskToForm(task){
   if (datasetRecordFailedScanners) {
     datasetRecordFailedScanners.checked = !!task.record_failed_scanner_names;
   }
+  datasetUpdateConcurrencyOverMaxHint();
   if (datasetLastPreviewRows.length) datasetRenderPreview(datasetLastPreviewRows);
 }
 
@@ -4585,9 +4698,11 @@ function datasetBuildSummary(){
   const apiNote = String(datasetTaskSnapshot.api_key_source || "") === "userProvided"
     ? datasetSummaryKV("API Key", "已使用自定义 Key（出于安全不回显，留空则继续沿用已保存密钥） / Custom key is set (masked for security).")
     : datasetSummaryKV("API Key", "使用系统缺省（.env） / Using server default (.env)");
+  const modeMeta = datasetGetModeMeta(datasetGetSelectedTestMode());
   const html = [
     datasetSummaryKV("任务名称 / Task Name", datasetGetTaskName(datasetTaskSnapshot) || "未填写 / Not set"),
     datasetSummaryKV("任务ID / Task ID", datasetTaskId || "未创建 / Not created"),
+    datasetSummaryKV("测试类型 / Test Type", modeMeta.modeLabel),
     datasetSummaryKV("Prompt列(1基) / Prompt Col(1-based)", String(datasetPromptColumn?.value || "1")),
     datasetSummaryKV("第一行是标题 / Header Row", datasetHasHeader?.checked ? "是 / Yes" : "否 / No"),
     datasetSummaryKV("测试行范围 / Row Range", String(datasetRowStart?.value || "-") + " ~ " + String(datasetRowEnd?.value || "-")),
@@ -4674,6 +4789,7 @@ async function datasetUpload(){
   }
   const fd = new FormData();
   fd.append("task_name", taskName);
+  fd.append("test_mode", datasetGetSelectedTestMode());
   fd.append("file", datasetFileInput.files[0]);
   const resp = await authFetch("/api/dataset-test/upload", { method: "POST", body: fd });
   const data = await resp.json();
@@ -4703,6 +4819,20 @@ async function datasetSaveConfig(){
     showSyncNotice("服务器上未找到原始数据文件，请回到 Step 1 重新上传后再保存配置。 / Source file missing on server.", "error");
     return;
   }
+  datasetUpdateConcurrencyOverMaxHint();
+  if (datasetIsConcurrencyOverMax()) {
+    const cap = datasetGetConcurrencyCap();
+    showSyncNotice(
+      "并发数不能超过 " + cap + "（管理员设置的上限）。请改成不超过 " + cap + " 后再保存。\n"
+      + "Concurrency cannot exceed " + cap + " (admin limit). Please enter a value ≤ " + cap + " and save again.",
+      "error"
+    );
+    return;
+  }
+  const concCap = datasetGetConcurrencyCap();
+  let concVal = Number(datasetConcurrency?.value || 1);
+  if (!Number.isFinite(concVal) || concVal < 1) concVal = 1;
+  if (concVal > concCap) concVal = concCap;
   const payload = {
     task_id: datasetTaskId,
     prompt_column: Number(datasetPromptColumn?.value || 1),
@@ -4712,10 +4842,11 @@ async function datasetSaveConfig(){
     project_id: String(datasetProjectId?.value || "").trim() || null,
     api_key: String(datasetApiKey?.value || "").trim() || null,
     provider_name: String(datasetProvider?.value || "").trim() || null,
-    concurrency_per_batch: Number(datasetConcurrency?.value || 1),
+    concurrency_per_batch: concVal,
     interval_seconds: Number(datasetInterval?.value || 1),
     guardrail_timeout_seconds: Number(datasetGuardrailTimeout?.value ?? 20),
-    record_failed_scanner_names: !!datasetRecordFailedScanners?.checked
+    record_failed_scanner_names: !!datasetRecordFailedScanners?.checked,
+    test_mode: datasetGetSelectedTestMode()
   };
   const resp = await authFetch("/api/dataset-test/configure", {
     method: "POST",
@@ -4738,6 +4869,16 @@ async function datasetSaveConfigIfAllowed(){
     showSyncNotice("原始数据文件缺失，请先在 Step 1 重新上传。 / Source file is missing.", "error");
     return false;
   }
+  datasetUpdateConcurrencyOverMaxHint();
+  if (datasetIsConcurrencyOverMax()) {
+    const cap = datasetGetConcurrencyCap();
+    showSyncNotice(
+      "并发数不能超过 " + cap + "（管理员设置的上限）。请修改后再继续。\n"
+      + "Concurrency cannot exceed " + cap + " (admin limit). Please correct before continuing.",
+      "error"
+    );
+    return false;
+  }
   const st = String(datasetTaskSnapshot.status || "");
   if (st === "running" || st === "paused") {
     return true;
@@ -4752,6 +4893,10 @@ async function datasetSaveConfigIfAllowed(){
 function datasetRenderStatus(task){
   if (!task || typeof task !== "object") return;
   datasetTaskSnapshot = task;
+  if (task.max_concurrency_allowed != null && task.max_concurrency_allowed !== undefined) {
+    datasetApplyConcurrencyUiMax(task.max_concurrency_allowed);
+  }
+  const modeMeta = datasetGetModeMeta(task.test_mode);
   datasetRenderTaskNameBanner(task);
   const isCompleted = String(task.status || "") === "completed";
   const isPaused = datasetIsPaused(task);
@@ -4764,8 +4909,8 @@ function datasetRenderStatus(task){
   if (datasetProgressBar) datasetProgressBar.style.width = String(task.progress_percent || 0) + "%";
   if (datasetStats) {
     datasetStats.innerHTML = [
-      "Blocked(Expected): " + String(task.blocked_count || 0),
-      "Passed(Unexpected): " + String(task.passed_count || 0),
+      modeMeta.statsBlocked + ": " + String(task.blocked_count || 0),
+      modeMeta.statsPassed + ": " + String(task.passed_count || 0),
       "Error: " + String(task.error_count || 0)
     ].map((s) => "<span>" + escapeHtml(s) + "</span>").join("");
   }
@@ -4773,12 +4918,14 @@ function datasetRenderStatus(task){
   const passed = Number(task.passed_count || 0);
   const total = blocked + passed;
   const blockRate = total > 0 ? ((blocked / total) * 100.0) : 0;
+  const kpiLabel = document.getElementById("datasetKpiMainLabel");
+  if (kpiLabel) kpiLabel.textContent = modeMeta.kpiLabel;
   const kpi = document.getElementById("datasetKpiBlockRate");
   if (kpi) kpi.textContent = blockRate.toFixed(2) + "%";
   const resultSub = document.getElementById("datasetResultSub");
   if (resultSub) {
     const p = String(task.progress_percent || 0);
-    resultSub.textContent = "当前状态 / Status: " + String(task.status || "-") + " · 完成进度 / Progress " + p + "%";
+    resultSub.textContent = "当前状态 / Status: " + String(task.status || "-") + " · 测试类型 / Type: " + modeMeta.modeLabel + " · 完成进度 / Progress " + p + "%";
   }
   if (datasetCancelBtn) {
     const st = String(task.status || "").toLowerCase();
@@ -5164,20 +5311,30 @@ async function loadDatasetHistory(){
     const ownerCell = isAdminUser
       ? ("<td>" + escapeHtml(String(x.owner || "")) + "</td>")
       : "";
-    return "<tr>"
+    const modeMeta = datasetGetModeMeta(x.test_mode);
+    const modeCell = "<td>" + escapeHtml(modeMeta.modeLabel) + "</td>";
+    const blockedN = Number(x.blocked_count || 0);
+    const passedN = Number(x.passed_count || 0);
+    const errNForRate = Number(x.error_count || 0);
+    const denom = blockedN + passedN + errNForRate;
+    const primaryRate = denom > 0 ? ((blockedN / denom) * 100.0) : 0;
+    const rowModeClass =
+      datasetNormalizeTestMode(x.test_mode) === "false_block_rate" ? "datasetHistoryRow--falseBlock" : "";
+    return "<tr" + (rowModeClass ? " class='" + rowModeClass + "'" : "") + ">"
       + "<td class='datasetHistorySelectCell'><input type='checkbox' class='datasetHistoryChk' data-task-id='" + escapeHtml(id) + "' /></td>"
       + ownerCell
       + "<td>" + escapeHtml(String(x.task_name || "")) + "</td>"
+      + modeCell
       + "<td>" + escapeHtml(datasetFormatBeijingTime(String(x.task_time || ""))) + "</td>"
       + "<td><span class='" + statusClass + "'>" + escapeHtml(status || "unknown") + "</span> " + retryTag + escapeHtml(progressText) + "</td>"
       + "<td>" + escapeHtml(String(x.blocked_count || 0)) + "/" + escapeHtml(String(x.passed_count || 0)) + "/" + escapeHtml(String(x.error_count || 0)) + "</td>"
-      + "<td>" + escapeHtml(String(x.block_rate || 0)) + "%</td>"
+      + "<td>" + escapeHtml(modeMeta.rateName) + ": " + escapeHtml(primaryRate.toFixed(2)) + "%</td>"
       + "<td><div class='datasetDownloadLinks'>" + rawLink + resultLink + "</div></td>"
       + "<td><div class='datasetHistoryActions'><button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--view datasetJumpBtn'>查看 / View</button>" + actionBtn + "</div></td>"
       + "</tr>";
   }).join("");
   const ownerHeader = isAdminUser ? "<th>Owner</th>" : "";
-  datasetHistoryTableWrap.innerHTML = "<div class='datasetHistoryTableWrap'><table class='datasetHistoryTable'><thead><tr><th class='datasetHistorySelectCell'><input type='checkbox' id='datasetHistoryCheckAll' /></th>" + ownerHeader + "<th>任务名称 / Task Name</th><th>时间 / Time</th><th>状态 / Status</th><th>Blocked / Passed / Error<br><span class=\"zh\">阻断 / 通过 / 错误</span></th><th>Block率 / Block Rate</th><th>下载 / Download</th><th>操作 / Action</th></tr></thead><tbody>"
+  datasetHistoryTableWrap.innerHTML = "<div class='datasetHistoryTableWrap'><table class='datasetHistoryTable'><thead><tr><th class='datasetHistorySelectCell'><input type='checkbox' id='datasetHistoryCheckAll' /></th>" + ownerHeader + "<th>任务名称 / Task Name</th><th>测试类型 / Test Type</th><th>时间 / Time</th><th>状态 / Status</th><th>Blocked / Passed / Error<br><span class=\"zh\">阻断 / 通过 / 错误</span></th><th>主指标 / Primary Metric</th><th>下载 / Download</th><th>操作 / Action</th></tr></thead><tbody>"
     + rows + "</tbody></table></div>";
   if (datasetHistoryPager) {
     const prevDisabled = datasetHistoryPage <= 1 ? " disabled" : "";
@@ -5337,6 +5494,14 @@ datasetHistoryBatchDeleteBtn?.addEventListener("click", async () => {
     showSyncNotice("批量删除失败 / Batch delete failed: " + (e?.message || String(e)), "error");
   }
 });
+datasetConcurrency?.addEventListener("input", datasetUpdateConcurrencyOverMaxHint);
+datasetConcurrency?.addEventListener("change", datasetUpdateConcurrencyOverMaxHint);
+datasetTestModeRadios.forEach((r) => {
+  r.addEventListener("change", () => {
+    datasetBuildSummary();
+  });
+});
+
 document.getElementById("datasetStep1NextBtn")?.addEventListener("click", () => {
   if (!datasetTaskId) {
     showSyncNotice("请先在 Step 1 上传数据文件。 / Upload a file in Step 1 first.", "error");
