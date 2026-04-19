@@ -4240,6 +4240,15 @@ async def api_dataset_test_history(
     return JSONResponse({"status": "ok", "items": items, "total": total, "offset": offset, "limit": limit})
 
 
+@app.post("/api/dataset-test/index/rebuild")
+async def api_dataset_test_index_rebuild(request: Request):
+    username = require_user(request)
+    if str(username or "").strip().lower() != "admin":
+        raise HTTPException(status_code=403, detail="admin only")
+    _dataset_rebuild_index()
+    return JSONResponse({"status": "ok"})
+
+
 @app.get("/api/dataset-test/{task_id}/download/raw")
 async def api_dataset_test_download_raw(request: Request, task_id: str):
     username = require_user(request)

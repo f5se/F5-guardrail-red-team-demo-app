@@ -79,6 +79,7 @@ const datasetRetryErrorsBtn = document.getElementById("datasetRetryErrorsBtn");
 const datasetRetryProgressWrap = document.getElementById("datasetRetryProgressWrap");
 const datasetRetryProgressText = document.getElementById("datasetRetryProgressText");
 const datasetRetryProgressInner = document.getElementById("datasetRetryProgressInner");
+const datasetForceRebuildIndexBtn = document.getElementById("datasetForceRebuildIndexBtn");
 const datasetHistoryRefreshBtn = document.getElementById("datasetHistoryRefreshBtn");
 const datasetHistoryBatchDeleteBtn = document.getElementById("datasetHistoryBatchDeleteBtn");
 const datasetHistoryPageSize = document.getElementById("datasetHistoryPageSize");
@@ -929,6 +930,9 @@ function setAdminOnlySettingsAccess(username){
   }
   if (btnUserActivityEl) {
     btnUserActivityEl.style.display = isAdminUser ? "" : "none";
+  }
+  if (datasetForceRebuildIndexBtn) {
+    datasetForceRebuildIndexBtn.style.display = isAdminUser ? "" : "none";
   }
   if (!isAdminUser && activeView === "USER_ACTIVITY") {
     setActiveView("CHAT");
@@ -5754,6 +5758,28 @@ datasetPauseBtn?.addEventListener("click", () => datasetPause().catch((e) => sho
 datasetResumeBtn?.addEventListener("click", () => datasetResume().catch((e) => showSyncNotice("恢复失败 / Resume failed: " + (e?.message || String(e)), "error")));
 datasetRefreshStatusBtn?.addEventListener("click", () => datasetRefreshStatus().catch((e) => showSyncNotice("刷新失败 / Refresh failed: " + (e?.message || String(e)), "error")));
 datasetRetryErrorsBtn?.addEventListener("click", () => datasetRetryErrors().catch((e) => showSyncNotice("补测启动失败 / Retry failed: " + (e?.message || String(e)), "error")));
+datasetForceRebuildIndexBtn?.addEventListener("click", async () => {
+  try {
+    if (!isAdminUser) {
+      showSyncNotice("仅 admin 可执行 / Admin only", "error");
+      return;
+    }
+    const ok = window.confirm("将强制重建 Dataset 索引，是否继续？ / Force rebuild dataset index now?");
+    if (!ok) return;
+    datasetForceRebuildIndexBtn.disabled = true;
+    const resp = await authFetch("/api/dataset-test/index/rebuild", { method: "POST" });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.detail || ("HTTP " + resp.status));
+    showSyncNotice("索引已重建 / Index rebuilt", "success");
+    await loadDatasetHistory();
+    datasetRefreshRunningTasksBar().catch(() => {});
+    datasetRefreshCapacity().catch(() => {});
+  } catch (e) {
+    showSyncNotice("重建索引失败 / Rebuild index failed: " + (e?.message || String(e)), "error");
+  } finally {
+    datasetForceRebuildIndexBtn.disabled = false;
+  }
+});
 datasetHistoryRefreshBtn?.addEventListener("click", () => loadDatasetHistory().catch((e) => showSyncNotice("历史读取失败 / Failed to load history: " + (e?.message || String(e)), "error")));
 datasetHistoryPageSize?.addEventListener("change", () => {
   datasetHistoryPageSizeValue = Math.max(1, Number(datasetHistoryPageSize.value || 15));
