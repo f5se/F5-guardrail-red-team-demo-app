@@ -3860,3 +3860,6 @@ code{
 .datasetRetryProgressTrack{height:10px;background:rgba(148,163,184,.35);border-radius:999px;overflow:hidden;margin-top:6px}
 .datasetRetryProgressInner{height:100%;width:0;background:linear-gradient(90deg,#38bdf8,#6366f1);transition:width .28s ease}
 .datasetRetryTag{display:inline-flex;align-items:center;margin-left:4px;padding:2px 8px;border-radius:999px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;font-size:10px;font-weight:700}
+.datasetHistoryCountsCell{white-space:normal}
+.datasetHistoryCountsMain{font-weight:700;color:#1f2937;line-height:1.25}
+.datasetHistoryCountsTotal{margin-top:2px;font-size:11px;color:#667085;line-height:1.25}

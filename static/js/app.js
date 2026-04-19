@@ -5568,8 +5568,7 @@ async function loadDatasetHistory(){
     const modeCell = "<td>" + escapeHtml(modeMeta.modeLabel) + "</td>";
     const publicCell = "<td>" + escapeHtml(x.is_public ? "是 / Yes" : "否 / No") + "</td>";
     const totalRowsN = Number(x.total_rows);
-    const totalRowsCell =
-      "<td>" + escapeHtml(Number.isFinite(totalRowsN) && totalRowsN > 0 ? String(totalRowsN) : "—") + "</td>";
+    const totalRowsText = Number.isFinite(totalRowsN) && totalRowsN > 0 ? String(totalRowsN) : "—";
     const blockedN = Number(x.blocked_count || 0);
     const passedN = Number(x.passed_count || 0);
     const errNForRate = Number(x.error_count || 0);
@@ -5584,17 +5583,16 @@ async function loadDatasetHistory(){
       + "<td>" + escapeHtml(String(x.task_name || "")) + "</td>"
       + modeCell
       + publicCell
-      + totalRowsCell
       + "<td>" + escapeHtml(datasetFormatBeijingTime(String(x.task_time || ""))) + "</td>"
       + "<td><span class='" + statusClass + "'>" + escapeHtml(status || "unknown") + "</span> " + retryTag + escapeHtml(progressText) + "</td>"
-      + "<td>" + escapeHtml(String(x.blocked_count || 0)) + "/" + escapeHtml(String(x.passed_count || 0)) + "/" + escapeHtml(String(x.error_count || 0)) + "</td>"
+      + "<td class='datasetHistoryCountsCell'><div class='datasetHistoryCountsMain'>" + escapeHtml(String(x.blocked_count || 0)) + "/" + escapeHtml(String(x.passed_count || 0)) + "/" + escapeHtml(String(x.error_count || 0)) + "</div><div class='datasetHistoryCountsTotal'>总行数 / Total: " + escapeHtml(totalRowsText) + "</div></td>"
       + "<td>" + escapeHtml(modeMeta.rateName) + ": " + escapeHtml(primaryRate.toFixed(2)) + "%</td>"
       + "<td><div class='datasetDownloadLinks'>" + rawLink + resultLink + "</div></td>"
       + "<td><div class='datasetHistoryActions'><button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--view datasetJumpBtn'>查看 / View</button>" + actionBtn + "</div></td>"
       + "</tr>";
   }).join("");
   const ownerHeader = isAdminUser ? "<th>Owner</th>" : "";
-  datasetHistoryTableWrap.innerHTML = "<div class='datasetHistoryTableWrap'><table class='datasetHistoryTable'><thead><tr><th class='datasetHistorySelectCell'><input type='checkbox' id='datasetHistoryCheckAll' /></th>" + ownerHeader + "<th>任务名称 / Task Name</th><th>测试类型 / Test Type</th><th>公开 / Public</th><th>数据集总行数 / Total Rows (file)</th><th>时间 / Time</th><th>状态 / Status</th><th>Blocked / Passed / Error<br><span class=\"zh\">阻断 / 通过 / 错误</span></th><th>主指标 / Primary Metric</th><th>下载 / Download</th><th>操作 / Action</th></tr></thead><tbody>"
+  datasetHistoryTableWrap.innerHTML = "<div class='datasetHistoryTableWrap'><table class='datasetHistoryTable'><thead><tr><th class='datasetHistorySelectCell'><input type='checkbox' id='datasetHistoryCheckAll' /></th>" + ownerHeader + "<th>Task Name</th><th>Test Type</th><th>Public</th><th>Time</th><th>Status</th><th>Blocked / Passed / Error<br><span>Total Rows</span></th><th>Primary Metric</th><th>Download</th><th>Action</th></tr></thead><tbody>"
     + rows + "</tbody></table></div>";
   if (datasetHistoryPager) {
     const prevDisabled = datasetHistoryPage <= 1 ? " disabled" : "";
