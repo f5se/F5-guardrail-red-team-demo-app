@@ -52,6 +52,7 @@ const datasetUploadMeta = document.getElementById("datasetUploadMeta");
 const datasetTaskNameInput = document.getElementById("datasetTaskNameInput");
 const datasetTaskNameBanner = document.getElementById("datasetTaskNameBanner");
 const datasetTestModeRadios = Array.from(document.querySelectorAll("input[name='datasetTestMode']"));
+const datasetPublicRadios = Array.from(document.querySelectorAll("input[name='datasetIsPublic']"));
 const datasetPromptColumn = document.getElementById("datasetPromptColumn");
 const datasetHasHeader = document.getElementById("datasetHasHeader");
 const datasetRowStart = document.getElementById("datasetRowStart");
@@ -98,6 +99,7 @@ let datasetCurrentStep = 1;
 let datasetLastPreviewRows = [];
 let datasetTaskSnapshot = {};
 let datasetHistoryItems = [];
+let datasetHistoryTotalCount = 0;
 let datasetHistoryPage = 1;
 let datasetHistoryPageSizeValue = 15;
 let datasetCapacityState = { allow_create_new_task: true, running_count: 0, max_running: 3 };
@@ -106,6 +108,8 @@ let datasetUploadBusy = false;
 const DATASET_UPLOAD_STEP1_COOLDOWN_MS = 2200;
 let datasetUploadCooldownUntil = 0;
 let datasetUploadCooldownTimer = null;
+/** 正在查看他人公开的 Dataset 任务（仅浏览 / 下载） */
+let datasetViewerReadOnly = false;
 let datasetCancellingTaskIds = new Set();
 let datasetWasRetryingUi = false;
 let configuredAppTimezone = "UTC+08:00";
@@ -756,6 +760,85 @@ function datasetSetSelectedTestMode(mode){
   datasetTestModeRadios.forEach((r) => {
     r.checked = r.value === normalized;
   });
+}
+
+function datasetGetIsPublic(){
+  const picked = datasetPublicRadios.find((r) => r.checked);
+  return picked != null && String(picked.value || "") === "1";
+}
+
+function datasetSetIsPublic(isPub){
+  datasetPublicRadios.forEach((r) => {
+    r.checked = String(r.value || "") === (isPub ? "1" : "0");
+  });
+}
+
+/** 当前任务为他人创建且已公开：仅可浏览，不可改配或操作运行 */
+function datasetIsViewingOthersPublicTask(){
+  if (isAdminUser) return false;
+  const t = datasetTaskSnapshot;
+  if (!t || !t.is_public) return false;
+  const o = String(t.owner || "").trim();
+  const u = String(activeSettingsUsername || "").trim();
+  if (!u) return false;
+  return o !== u;
+}
+
+function datasetUpdateDatasetReadOnlyUi(task){
+  const snap = task && typeof task === "object" ? task : datasetTaskSnapshot;
+  const ro = datasetIsViewingOthersPublicTask();
+  datasetViewerReadOnly = !!ro;
+  const banner = document.getElementById("datasetReadOnlyBanner");
+  if (banner) {
+    if (ro) {
+      banner.style.display = "";
+      banner.textContent =
+        "您正在查看其他用户公开的 Dataset 任务：仅可浏览步骤与下载文件，不可修改配置或操作运行。"
+        + " / Viewing another user's public task: browse and download only.";
+    } else {
+      banner.style.display = "none";
+      banner.textContent = "";
+    }
+  }
+  const lockHint =
+    "测试已开始或补测进行中时不可修改 / Cannot change after start or during retry.";
+  const names = [
+    datasetTaskNameInput,
+    datasetFileInput,
+    datasetPromptColumn,
+    datasetHasHeader,
+    datasetRowStart,
+    datasetRowEnd,
+    datasetProjectId,
+    datasetApiKey,
+    datasetProvider,
+    datasetConcurrency,
+    datasetGuardrailTimeout,
+    datasetInterval,
+    datasetRecordFailedScanners,
+  ];
+  names.forEach((el) => {
+    if (!el) return;
+    el.disabled = !!ro;
+  });
+  const modeEditable = datasetIsTestModeEditable(snap);
+  datasetTestModeRadios.forEach((r) => {
+    r.disabled = !!ro || !modeEditable;
+    if (!ro) r.title = modeEditable ? "" : lockHint;
+    else r.title = "";
+  });
+  datasetPublicRadios.forEach((r) => {
+    r.disabled = !!ro || !modeEditable;
+    if (!ro) r.title = modeEditable ? "" : lockHint;
+    else r.title = "";
+  });
+  datasetSyncUploadBtn();
+  if (ro) {
+    ["datasetStep2NextBtn", "datasetStartBtn", "datasetCancelBtn", "datasetPauseBtn", "datasetResumeBtn", "datasetRetryErrorsBtn"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = true;
+    });
+  }
 }
 
 function datasetIsTestModeEditable(task){
@@ -4392,7 +4475,7 @@ function datasetSyncUploadBtn(){
   if (!datasetUploadBtn) return;
   const capOk = datasetCapacityState.allow_create_new_task;
   const inCooldown = Date.now() < datasetUploadCooldownUntil;
-  datasetUploadBtn.disabled = datasetUploadBusy || !capOk || inCooldown;
+  datasetUploadBtn.disabled = datasetViewerReadOnly || datasetUploadBusy || !capOk || inCooldown;
   if (datasetUploadBusy) {
     datasetUploadBtn.textContent = "上传中 / Uploading...";
     datasetUploadBtn.setAttribute("aria-busy", "true");
@@ -4567,6 +4650,7 @@ function datasetResetNewTaskForm(){
   datasetLastPreviewRows = [];
   if (datasetTaskNameInput) datasetTaskNameInput.value = "";
   datasetClearTestModeSelection();
+  datasetSetIsPublic(false);
   if (datasetFileInput) datasetFileInput.value = "";
   if (datasetPromptColumn) datasetPromptColumn.value = "1";
   if (datasetHasHeader) datasetHasHeader.checked = true;
@@ -4594,6 +4678,7 @@ function datasetResetNewTaskForm(){
   datasetWasRetryingUi = false;
   datasetSetUploadBusy(false);
   datasetClearUploadCooldown();
+  datasetViewerReadOnly = false;
   datasetRenderCapacityNotice(datasetCapacityState);
   datasetGotoStep(1);
   datasetUpdateStep1FromTask(datasetTaskSnapshot);
@@ -4667,6 +4752,7 @@ function datasetUpdateStep1FromTask(task){
   const modeOk = datasetHasExplicitTestModeSelection();
   if (step1Next) step1Next.disabled = !tid || !exists || !modeOk;
   datasetUpdateTestModeLockUi(t);
+  datasetUpdateDatasetReadOnlyUi(t);
 }
 
 async function datasetFetchPreviewRows(){
@@ -4682,6 +4768,7 @@ async function datasetFetchPreviewRows(){
 function datasetApplyTaskToForm(task){
   if (!task || typeof task !== "object") return;
   datasetSetSelectedTestMode(task.test_mode);
+  datasetSetIsPublic(!!task.is_public);
   if (datasetTaskNameInput && String(task.task_name || "").trim()) {
     datasetTaskNameInput.value = String(task.task_name || "").trim();
   }
@@ -4791,10 +4878,12 @@ function datasetBuildSummary(){
     : datasetSummaryKV("API Key", "使用系统缺省（.env） / Using server default (.env)");
   const exMode = datasetGetExplicitTestMode();
   const typeSummary = exMode ? datasetGetModeMeta(exMode).modeLabel : "未选择 / Not selected";
+  const pubLine = datasetGetIsPublic() ? "是 · 所有登录用户可见 / Yes (all users)" : "否 · 仅本人与管理员 / No (owner & admin)";
   const html = [
     datasetSummaryKV("任务名称 / Task Name", datasetGetTaskName(datasetTaskSnapshot) || "未填写 / Not set"),
     datasetSummaryKV("任务ID / Task ID", datasetTaskId || "未创建 / Not created"),
     datasetSummaryKV("测试类型 / Test Type", typeSummary),
+    datasetSummaryKV("History 公开 / Public in History", pubLine),
     datasetSummaryKV("Prompt列(1基) / Prompt Col(1-based)", String(datasetPromptColumn?.value || "1")),
     datasetSummaryKV("第一行是标题 / Header Row", datasetHasHeader?.checked ? "是 / Yes" : "否 / No"),
     datasetSummaryKV("测试行范围 / Row Range", String(datasetRowStart?.value || "-") + " ~ " + String(datasetRowEnd?.value || "-")),
@@ -4894,6 +4983,7 @@ async function datasetUpload(){
     const fd = new FormData();
     fd.append("task_name", taskName);
     fd.append("test_mode", tm);
+    fd.append("is_public", datasetGetIsPublic() ? "1" : "0");
     fd.append("file", datasetFileInput.files[0]);
     const resp = await authFetch("/api/dataset-test/upload", { method: "POST", body: fd });
     const data = await resp.json();
@@ -4922,6 +5012,10 @@ async function datasetUpload(){
 async function datasetSaveConfig(){
   if (!datasetTaskId) {
     showSyncNotice("请先在 Step 1 上传数据文件。 / Upload a file in Step 1 first.", "error");
+    return;
+  }
+  if (datasetIsViewingOthersPublicTask()) {
+    showSyncNotice("只读公开任务，无法保存配置。 / Read-only: cannot save config for this public task.", "error");
     return;
   }
   if (!datasetTaskSnapshot.source_file_exists) {
@@ -4960,7 +5054,8 @@ async function datasetSaveConfig(){
     interval_seconds: Number(datasetInterval?.value || 1),
     guardrail_timeout_seconds: Number(datasetGuardrailTimeout?.value ?? 20),
     record_failed_scanner_names: !!datasetRecordFailedScanners?.checked,
-    test_mode: tm
+    test_mode: tm,
+    is_public: datasetGetIsPublic(),
   };
   const resp = await authFetch("/api/dataset-test/configure", {
     method: "POST",
@@ -4977,6 +5072,10 @@ async function datasetSaveConfig(){
 async function datasetSaveConfigIfAllowed(){
   if (!datasetTaskId) {
     showSyncNotice("请先在 Step 1 上传数据文件。 / Upload a file in Step 1 first.", "error");
+    return false;
+  }
+  if (datasetIsViewingOthersPublicTask()) {
+    showSyncNotice("只读公开任务，无法保存配置。 / Read-only: cannot save config.", "info", 2200);
     return false;
   }
   if (!datasetTaskSnapshot.source_file_exists) {
@@ -5132,6 +5231,10 @@ function datasetRefreshPollingFromSnapshot(){
 
 async function datasetRetryErrors(){
   if (!datasetTaskId) return;
+  if (datasetIsViewingOthersPublicTask()) {
+    showSyncNotice("只读公开任务，不可补测。 / Read-only public task cannot retry errors.", "info", 2000);
+    return;
+  }
   await datasetRefreshStatus().catch(() => {});
   if (String(datasetTaskSnapshot.status || "") !== "completed") {
     showSyncNotice("仅已完成任务可补测。 / Only completed tasks can retry.", "info", 2200);
@@ -5181,6 +5284,10 @@ async function datasetStart(){
     showSyncNotice("请先在 Step 1 上传数据文件。 / Upload a file in Step 1 first.", "error");
     return;
   }
+  if (datasetIsViewingOthersPublicTask()) {
+    showSyncNotice("只读公开任务，不可启动测试。 / Read-only public task cannot be started.", "info", 2200);
+    return;
+  }
   await datasetRefreshStatus().catch(() => {});
   if (!datasetTaskSnapshot.source_file_exists) {
     showSyncNotice("原始数据文件缺失，无法启动测试。请回到 Step 1 重新上传。 / Source file missing, cannot start.", "error");
@@ -5219,6 +5326,10 @@ async function datasetStart(){
 
 async function datasetCancel(){
   if (!datasetTaskId) return;
+  if (datasetIsViewingOthersPublicTask()) {
+    showSyncNotice("只读公开任务，不可取消。 / Read-only public task cannot be cancelled.", "info", 2000);
+    return;
+  }
   await datasetRefreshStatus().catch(() => {});
   if (String(datasetTaskSnapshot.status || "") === "completed") {
     showSyncNotice("任务已完成，不可取消。 / Task completed, cannot cancel.", "info", 2200);
@@ -5253,6 +5364,10 @@ async function datasetCancel(){
 
 async function datasetPause(){
   if (!datasetTaskId) return;
+  if (datasetIsViewingOthersPublicTask()) {
+    showSyncNotice("只读公开任务，不可暂停。 / Read-only public task cannot be paused.", "info", 2000);
+    return;
+  }
   const resp = await authFetch("/api/dataset-test/pause", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -5266,6 +5381,10 @@ async function datasetPause(){
 
 async function datasetResume(){
   if (!datasetTaskId) return;
+  if (datasetIsViewingOthersPublicTask()) {
+    showSyncNotice("只读公开任务，不可恢复运行。 / Read-only public task cannot be resumed.", "info", 2000);
+    return;
+  }
   const resp = await authFetch("/api/dataset-test/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -5367,16 +5486,33 @@ function datasetStopPolling(){
 
 async function loadDatasetHistory(){
   if (!datasetHistoryTableWrap) return;
-  const resp = await authFetch("/api/dataset-test/history?limit=200", { cache: "no-store" });
+  if (datasetHistoryPager) datasetHistoryPager.innerHTML = "";
+  datasetHistoryTableWrap.innerHTML =
+    "<div class=\"datasetHistoryLoading\" role=\"status\" aria-live=\"polite\">"
+    + "<span class=\"datasetHistoryLoadingSpinner\" aria-hidden=\"true\"></span>"
+    + "<span>正在加载历史任务… / Loading history…</span>"
+    + "</div>";
+  try {
+  const pageSize = Math.max(1, Number(datasetHistoryPageSizeValue || 15));
+  const offset = (Math.max(1, datasetHistoryPage) - 1) * pageSize;
+  const qs = new URLSearchParams({ limit: String(pageSize), offset: String(offset) });
+  const resp = await authFetch("/api/dataset-test/history?" + qs.toString(), { cache: "no-store" });
   const data = await resp.json();
   if (!resp.ok) throw new Error(data?.detail || ("HTTP " + resp.status));
+  const total = Number(data.total);
+  datasetHistoryTotalCount = Number.isFinite(total) && total >= 0 ? total : 0;
+  const totalPages = Math.max(1, Math.ceil(datasetHistoryTotalCount / pageSize));
+  if (datasetHistoryPage > totalPages) {
+    datasetHistoryPage = totalPages;
+    return await loadDatasetHistory();
+  }
   datasetHistoryItems = Array.isArray(data.items) ? data.items : [];
-  const pageSize = Math.max(1, Number(datasetHistoryPageSizeValue || 15));
-  const totalPages = Math.max(1, Math.ceil(datasetHistoryItems.length / pageSize));
-  datasetHistoryPage = Math.min(Math.max(1, datasetHistoryPage), totalPages);
-  const startIdx = (datasetHistoryPage - 1) * pageSize;
-  const items = datasetHistoryItems.slice(startIdx, startIdx + pageSize);
-  if (!datasetHistoryItems.length) {
+  const items = datasetHistoryItems;
+  if (!datasetHistoryTotalCount && !items.length && offset > 0) {
+    datasetHistoryPage = 1;
+    return await loadDatasetHistory();
+  }
+  if (!datasetHistoryTotalCount && !items.length) {
     datasetHistoryTableWrap.innerHTML = "<div class='datasetHint'>暂无历史任务 / No history tasks</div>";
     if (datasetHistoryPager) datasetHistoryPager.innerHTML = "";
     return;
@@ -5394,9 +5530,12 @@ async function loadDatasetHistory(){
     const resultExists = !!x.result_file_exists;
     const statusClass = "datasetStatusPill datasetStatus-" + escapeHtml(stLower || "unknown");
     const retryIng = !!x.retry_in_progress;
+    const viewerOnly = !!x.is_public && !isAdminUser && String(x.owner || "").trim() !== String(activeSettingsUsername || "").trim();
     let actionBtn = "";
     const cancelling = datasetCancellingTaskIds.has(id);
-    if (isRunningLike) {
+    if (viewerOnly) {
+      actionBtn = "";
+    } else if (isRunningLike) {
       actionBtn = "<button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--pause datasetPauseHistoryBtn'>暂停 / Pause</button>"
         + "<button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--cancel datasetCancelHistoryBtn'" + (cancelling ? " disabled" : "") + ">" + (cancelling ? "取消中 / Cancelling" : "取消任务 / Cancel Task") + "</button>";
     } else if (isPaused) {
@@ -5427,6 +5566,7 @@ async function loadDatasetHistory(){
       : "";
     const modeMeta = datasetGetModeMeta(x.test_mode);
     const modeCell = "<td>" + escapeHtml(modeMeta.modeLabel) + "</td>";
+    const publicCell = "<td>" + escapeHtml(x.is_public ? "是 / Yes" : "否 / No") + "</td>";
     const totalRowsN = Number(x.total_rows);
     const totalRowsCell =
       "<td>" + escapeHtml(Number.isFinite(totalRowsN) && totalRowsN > 0 ? String(totalRowsN) : "—") + "</td>";
@@ -5437,11 +5577,13 @@ async function loadDatasetHistory(){
     const primaryRate = denom > 0 ? ((blockedN / denom) * 100.0) : 0;
     const rowModeClass =
       datasetNormalizeTestMode(x.test_mode) === "false_block_rate" ? "datasetHistoryRow--falseBlock" : "";
+    const chkAttr = viewerOnly ? " disabled" : "";
     return "<tr" + (rowModeClass ? " class='" + rowModeClass + "'" : "") + ">"
-      + "<td class='datasetHistorySelectCell'><input type='checkbox' class='datasetHistoryChk' data-task-id='" + escapeHtml(id) + "' /></td>"
+      + "<td class='datasetHistorySelectCell'><input type='checkbox' class='datasetHistoryChk'" + chkAttr + " data-task-id='" + escapeHtml(id) + "' /></td>"
       + ownerCell
       + "<td>" + escapeHtml(String(x.task_name || "")) + "</td>"
       + modeCell
+      + publicCell
       + totalRowsCell
       + "<td>" + escapeHtml(datasetFormatBeijingTime(String(x.task_time || ""))) + "</td>"
       + "<td><span class='" + statusClass + "'>" + escapeHtml(status || "unknown") + "</span> " + retryTag + escapeHtml(progressText) + "</td>"
@@ -5452,24 +5594,51 @@ async function loadDatasetHistory(){
       + "</tr>";
   }).join("");
   const ownerHeader = isAdminUser ? "<th>Owner</th>" : "";
-  datasetHistoryTableWrap.innerHTML = "<div class='datasetHistoryTableWrap'><table class='datasetHistoryTable'><thead><tr><th class='datasetHistorySelectCell'><input type='checkbox' id='datasetHistoryCheckAll' /></th>" + ownerHeader + "<th>任务名称 / Task Name</th><th>测试类型 / Test Type</th><th>数据集总行数 / Total Rows (file)</th><th>时间 / Time</th><th>状态 / Status</th><th>Blocked / Passed / Error<br><span class=\"zh\">阻断 / 通过 / 错误</span></th><th>主指标 / Primary Metric</th><th>下载 / Download</th><th>操作 / Action</th></tr></thead><tbody>"
+  datasetHistoryTableWrap.innerHTML = "<div class='datasetHistoryTableWrap'><table class='datasetHistoryTable'><thead><tr><th class='datasetHistorySelectCell'><input type='checkbox' id='datasetHistoryCheckAll' /></th>" + ownerHeader + "<th>任务名称 / Task Name</th><th>测试类型 / Test Type</th><th>公开 / Public</th><th>数据集总行数 / Total Rows (file)</th><th>时间 / Time</th><th>状态 / Status</th><th>Blocked / Passed / Error<br><span class=\"zh\">阻断 / 通过 / 错误</span></th><th>主指标 / Primary Metric</th><th>下载 / Download</th><th>操作 / Action</th></tr></thead><tbody>"
     + rows + "</tbody></table></div>";
   if (datasetHistoryPager) {
     const prevDisabled = datasetHistoryPage <= 1 ? " disabled" : "";
     const nextDisabled = datasetHistoryPage >= totalPages ? " disabled" : "";
     datasetHistoryPager.innerHTML =
       "<button type='button' class='datasetPagerBtn' id='datasetHistoryPrev'" + prevDisabled + ">上一页 / Prev</button>"
-      + "<span class='datasetPagerInfo'>第 " + String(datasetHistoryPage) + " / " + String(totalPages) + " 页，共 " + String(datasetHistoryItems.length) + " 条 / Page " + String(datasetHistoryPage) + " of " + String(totalPages) + ", total " + String(datasetHistoryItems.length) + "</span>"
-      + "<button type='button' class='datasetPagerBtn' id='datasetHistoryNext'" + nextDisabled + ">下一页 / Next</button>";
+      + "<span class='datasetPagerInfo'>第 " + String(datasetHistoryPage) + " / " + String(totalPages) + " 页，共 " + String(datasetHistoryTotalCount) + " 条 / Page " + String(datasetHistoryPage) + " of " + String(totalPages) + ", total " + String(datasetHistoryTotalCount) + "</span>"
+      + "<button type='button' class='datasetPagerBtn' id='datasetHistoryNext'" + nextDisabled + ">下一页 / Next</button>"
+      + "<span class='datasetPagerJump' role='group' aria-label='跳转页码 / Jump to page'>"
+      + "<label class='datasetPagerJumpLabel' for='datasetHistoryPageInput'>跳转 / Page</label>"
+      + "<input type='number' class='datasetPagerJumpInput' id='datasetHistoryPageInput' min='1' max='" + String(totalPages) + "' step='1' value='" + String(datasetHistoryPage) + "' inputmode='numeric' autocomplete='off' />"
+      + "<button type='button' class='datasetPagerBtn datasetPagerBtn--jump' id='datasetHistoryGoPageBtn'>跳转 / Go</button>"
+      + "</span>";
+    const histErr = (e) => showSyncNotice("历史读取失败 / Failed to load history: " + (e?.message || String(e)), "error");
     datasetHistoryPager.querySelector("#datasetHistoryPrev")?.addEventListener("click", () => {
       if (datasetHistoryPage <= 1) return;
       datasetHistoryPage -= 1;
-      loadDatasetHistory().catch((e) => showSyncNotice("历史读取失败 / Failed to load history: " + (e?.message || String(e)), "error"));
+      loadDatasetHistory().catch(histErr);
     });
     datasetHistoryPager.querySelector("#datasetHistoryNext")?.addEventListener("click", () => {
       if (datasetHistoryPage >= totalPages) return;
       datasetHistoryPage += 1;
-      loadDatasetHistory().catch((e) => showSyncNotice("历史读取失败 / Failed to load history: " + (e?.message || String(e)), "error"));
+      loadDatasetHistory().catch(histErr);
+    });
+    const pageInput = datasetHistoryPager.querySelector("#datasetHistoryPageInput");
+    const applyJump = () => {
+      if (!pageInput) return;
+      let n = parseInt(String(pageInput.value || "").trim(), 10);
+      if (!Number.isFinite(n)) {
+        pageInput.value = String(datasetHistoryPage);
+        return;
+      }
+      n = Math.max(1, Math.min(totalPages, Math.floor(n)));
+      pageInput.value = String(n);
+      if (n === datasetHistoryPage) return;
+      datasetHistoryPage = n;
+      loadDatasetHistory().catch(histErr);
+    };
+    datasetHistoryPager.querySelector("#datasetHistoryGoPageBtn")?.addEventListener("click", applyJump);
+    pageInput?.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        applyJump();
+      }
     });
   }
   const checkAll = datasetHistoryTableWrap.querySelector("#datasetHistoryCheckAll");
@@ -5564,6 +5733,12 @@ async function loadDatasetHistory(){
     });
   });
   datasetRefreshRunningTasksBar().catch(() => {});
+  } catch (e) {
+    datasetHistoryTableWrap.innerHTML =
+      "<div class=\"datasetHint\">加载失败，请稍后重试或点击「刷新历史」。 / Failed to load history. Retry or click Refresh.</div>";
+    if (datasetHistoryPager) datasetHistoryPager.innerHTML = "";
+    throw e;
+  }
 }
 
 datasetTabNew?.addEventListener("click", () => {
@@ -5615,6 +5790,12 @@ datasetHistoryBatchDeleteBtn?.addEventListener("click", async () => {
 datasetConcurrency?.addEventListener("input", datasetUpdateConcurrencyOverMaxHint);
 datasetConcurrency?.addEventListener("change", datasetUpdateConcurrencyOverMaxHint);
 datasetTestModeRadios.forEach((r) => {
+  r.addEventListener("change", () => {
+    datasetUpdateStep1FromTask(datasetTaskSnapshot);
+    datasetBuildSummary();
+  });
+});
+datasetPublicRadios.forEach((r) => {
   r.addEventListener("change", () => {
     datasetUpdateStep1FromTask(datasetTaskSnapshot);
     datasetBuildSummary();

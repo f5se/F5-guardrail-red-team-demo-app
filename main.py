@@ -1156,21 +1156,32 @@ def get_runtime_settings(raw: dict) -> dict:
     }
 
 
-def _dataset_count_running_like_tasks() -> int:
+def _dataset_ensure_index_populated():
+    """If index is empty but state files exist (e.g. index deleted), rebuild once from disk."""
     _dataset_ensure_dirs()
+    idx = _dataset_load_index()
+    tm = idx.get("tasks") if isinstance(idx.get("tasks"), dict) else {}
+    if len(tm) > 0:
+        return
+    try:
+        n_disk = sum(1 for e in os.scandir(DATASET_STATE_DIR) if e.name.endswith(".json"))
+    except FileNotFoundError:
+        n_disk = 0
+    if n_disk > 0:
+        _dataset_rebuild_index()
+
+
+def _dataset_count_running_like_tasks() -> int:
+    _dataset_ensure_index_populated()
+    idx = _dataset_load_index()
+    tasks = idx.get("tasks") if isinstance(idx.get("tasks"), dict) else {}
     cnt = 0
-    for name in os.listdir(DATASET_STATE_DIR):
-        if not name.endswith(".json"):
+    for rec in tasks.values():
+        if not isinstance(rec, dict):
             continue
-        p = os.path.join(DATASET_STATE_DIR, name)
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                state = json.load(f)
-            st = str((state or {}).get("status") or "").lower()
-            if st in ("running", "queued"):
-                cnt += 1
-        except Exception:
-            continue
+        st = str(rec.get("status") or "").lower()
+        if st in ("running", "queued"):
+            cnt += 1
     return cnt
 
 
@@ -2859,7 +2870,29 @@ async def get_user_activity(
 DATASET_RAW_DIR = os.path.join(BASE_DIR, "poc", "raw")
 DATASET_RESULT_DIR = os.path.join(BASE_DIR, "poc", "result")
 DATASET_STATE_DIR = os.path.join(BASE_DIR, "poc", "state")
-DATASET_LOCK = threading.Lock()
+DATASET_INDEX_PATH = os.path.join(BASE_DIR, "poc", "dataset_tasks_index.json")
+DATASET_LOCK = threading.RLock()
+
+# Minimal snapshot keys for dataset_tasks_index.json (history list + capacity + running-bar poll).
+# Task execution, configure, preview, downloads, GET /status read poc/state/*.json — not the index.
+DATASET_INDEX_MINIMAL_KEYS = (
+    "task_id",
+    "task_name",
+    "owner",
+    "created_at",
+    "status",
+    "test_mode",
+    "is_public",
+    "source_file_path",
+    "result_file_path",
+    "total_rows",
+    "effective_rows",
+    "processed_count",
+    "blocked_count",
+    "passed_count",
+    "error_count",
+    "retry_in_progress",
+)
 DATASET_ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 DATASET_TEST_MODE_BLOCK_RATE = "block_rate"
 DATASET_TEST_MODE_FALSE_BLOCK_RATE = "false_block_rate"
@@ -2897,6 +2930,7 @@ class DatasetTaskConfigureIn(BaseModel):
     guardrail_timeout_seconds: float = DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS
     record_failed_scanner_names: bool = False
     test_mode: Optional[str] = None
+    is_public: Optional[bool] = None
 
 
 class DatasetTaskActionIn(BaseModel):
@@ -2941,6 +2975,92 @@ def _dataset_atomic_json_write(path: str, data: dict):
     os.replace(tmp, path)
 
 
+def _dataset_index_record_from_state(state: dict) -> dict:
+    rec = {}
+    for k in DATASET_INDEX_MINIMAL_KEYS:
+        if k in state:
+            rec[k] = state[k]
+    tid = str(state.get("task_id") or "").strip()
+    if tid:
+        rec["task_id"] = tid
+    return rec
+
+
+def _dataset_load_index() -> dict:
+    """Return parsed index dict with keys version + tasks (task_id -> minimal snapshot). Missing/corrupt -> empty."""
+    try:
+        if not os.path.isfile(DATASET_INDEX_PATH):
+            return {"version": 1, "tasks": {}}
+        with open(DATASET_INDEX_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {"version": 1, "tasks": {}}
+        tasks = data.get("tasks")
+        if not isinstance(tasks, dict):
+            tasks = {}
+        data["tasks"] = tasks
+        data.setdefault("version", 1)
+        return data
+    except Exception:
+        return {"version": 1, "tasks": {}}
+
+
+def _dataset_write_index(idx: dict):
+    payload = {"version": int(idx.get("version") or 1), "tasks": idx.get("tasks") if isinstance(idx.get("tasks"), dict) else {}}
+    _dataset_atomic_json_write(DATASET_INDEX_PATH, payload)
+
+
+def _dataset_index_upsert(state: dict):
+    tid = str(state.get("task_id") or "").strip()
+    if not tid:
+        return
+    rec = _dataset_index_record_from_state(state)
+    with DATASET_LOCK:
+        idx = _dataset_load_index()
+        idx.setdefault("version", 1)
+        tasks = idx.setdefault("tasks", {})
+        tasks[tid] = rec
+        _dataset_write_index(idx)
+
+
+def _dataset_index_remove(task_id: str):
+    tid = str(task_id or "").strip()
+    if not tid:
+        return
+    with DATASET_LOCK:
+        idx = _dataset_load_index()
+        tasks = idx.get("tasks")
+        if isinstance(tasks, dict) and tid in tasks:
+            del tasks[tid]
+            _dataset_write_index(idx)
+
+
+def _dataset_rebuild_index():
+    """Scan state JSON files and rebuild the task index (startup alignment / manual repair)."""
+    _dataset_ensure_dirs()
+    merged: Dict[str, dict] = {}
+    try:
+        dir_entries = list(os.scandir(DATASET_STATE_DIR))
+    except FileNotFoundError:
+        dir_entries = []
+    for entry in dir_entries:
+        if not entry.name.endswith(".json"):
+            continue
+        try:
+            with open(entry.path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            if not isinstance(state, dict):
+                continue
+            tid = str(state.get("task_id") or "").strip()
+            if not tid:
+                continue
+            merged[tid] = _dataset_index_record_from_state(state)
+        except Exception:
+            continue
+    with DATASET_LOCK:
+        _dataset_write_index({"version": 1, "tasks": merged})
+
+
 def _dataset_load_state(task_id: str) -> Optional[dict]:
     p = _dataset_state_path(task_id)
     if not os.path.exists(p):
@@ -2958,6 +3078,7 @@ def _dataset_load_state(task_id: str) -> Optional[dict]:
 def _dataset_save_state(state: dict):
     state["updated_at"] = _dataset_now_iso()
     _dataset_atomic_json_write(_dataset_state_path(state["task_id"]), state)
+    _dataset_index_upsert(state)
 
 
 def _dataset_sanitize_filename(name: str) -> str:
@@ -2998,10 +3119,37 @@ def _dataset_read_all_rows(path: str) -> List[List[str]]:
 
 
 def _dataset_validate_access(task: dict, username: str):
+    """Mutating operations: owner or admin only."""
     if not task:
         raise HTTPException(status_code=404, detail="task not found")
     if task.get("owner") != username and username.strip().lower() != "admin":
         raise HTTPException(status_code=403, detail="forbidden")
+
+
+def _dataset_task_is_public(task: Optional[dict]) -> bool:
+    if not task:
+        return False
+    v = task.get("is_public")
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _dataset_validate_read_access(task: dict, username: str):
+    """Status/preview/downloads: owner, admin, or anyone if task is_public."""
+    if not task:
+        raise HTTPException(status_code=404, detail="task not found")
+    if username.strip().lower() == "admin":
+        return
+    if task.get("owner") == username:
+        return
+    if _dataset_task_is_public(task):
+        return
+    raise HTTPException(status_code=403, detail="forbidden")
+
+
+def _dataset_parse_form_bool(v) -> bool:
+    return str(v or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _dataset_normalize_test_mode(v) -> str:
@@ -3072,6 +3220,8 @@ def _dataset_to_status_payload(state: dict) -> dict:
         "result_file_name": os.path.basename(str(state.get("result_file_path") or "")),
         "source_original_name": state.get("source_original_name") or "",
         "updated_at": state.get("updated_at"),
+        "is_public": _dataset_task_is_public(state),
+        "owner": str(state.get("owner") or "").strip(),
         # UI restore / summary（不含 API Key 明文）
         "total_rows": int(state.get("total_rows") or 0),
         "prompt_column_1based": max(1, pc0 + 1),
@@ -3098,6 +3248,42 @@ def _dataset_to_status_payload(state: dict) -> dict:
             if isinstance(state.get("retry_progress"), dict)
             else None
         ),
+    }
+
+
+def _dataset_to_history_list_payload(rec: dict) -> dict:
+    """Items for GET /history and running-bar polling only; built from index snapshots + cheap stat()."""
+    raw_path = str(rec.get("source_file_path") or "").strip()
+    result_path = str(rec.get("result_file_path") or "").strip()
+    source_file_exists = bool(raw_path and os.path.isfile(raw_path))
+    result_file_exists = bool(result_path and os.path.isfile(result_path))
+    test_mode = _dataset_normalize_test_mode(rec.get("test_mode"))
+    block = int(rec.get("blocked_count") or 0)
+    passed = int(rec.get("passed_count") or 0)
+    errs = int(rec.get("error_count") or 0)
+    denom = block + passed + errs
+    block_rate = round((block / denom) * 100.0, 2) if denom else 0.0
+    ca = rec.get("created_at")
+    return {
+        "task_id": rec.get("task_id"),
+        "task_name": str(rec.get("task_name") or "").strip(),
+        "status": rec.get("status"),
+        "test_mode": test_mode,
+        "source_file_exists": source_file_exists,
+        "result_file_exists": result_file_exists,
+        "processed_count": int(rec.get("processed_count") or 0),
+        "effective_rows": int(rec.get("effective_rows") or 0),
+        "blocked_count": block,
+        "passed_count": passed,
+        "error_count": errs,
+        "result_file_name": os.path.basename(str(rec.get("result_file_path") or "")),
+        "is_public": _dataset_task_is_public(rec),
+        "owner": str(rec.get("owner") or "").strip(),
+        "total_rows": int(rec.get("total_rows") or 0),
+        "retry_in_progress": bool(rec.get("retry_in_progress", False)),
+        "created_at": ca,
+        "task_time": ca,
+        "block_rate": block_rate,
     }
 
 
@@ -3584,6 +3770,10 @@ def _dataset_schedule_task(task_id: str):
 async def dataset_test_startup_recover():
     _dataset_ensure_dirs()
     try:
+        _dataset_rebuild_index()
+    except Exception as e:
+        print(f"[DatasetTest] index rebuild failed: {e}")
+    try:
         for name in os.listdir(DATASET_STATE_DIR):
             if not name.endswith(".json"):
                 continue
@@ -3610,6 +3800,7 @@ async def api_dataset_test_upload(
     request: Request,
     task_name: str = Form(...),
     test_mode: str = Form(""),
+    is_public: str = Form(""),
     file: UploadFile = File(...),
 ):
     username = require_user(request)
@@ -3651,6 +3842,7 @@ async def api_dataset_test_upload(
         "status": "draft",
         "phase": "step1_uploaded",
         "test_mode": _dataset_require_explicit_test_mode(test_mode),
+        "is_public": _dataset_parse_form_bool(is_public),
         "source_file_path": raw_path,
         "source_original_name": original,
         "result_file_path": _dataset_result_path(task_id),
@@ -3686,6 +3878,7 @@ async def api_dataset_test_upload(
             "task_id": task_id,
             "task_name": task_name_clean,
             "test_mode": state.get("test_mode"),
+            "is_public": bool(state.get("is_public")),
             "preview_rows": preview,
             "total_rows": len(rows),
             "max_columns": max_cols,
@@ -3797,6 +3990,8 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
         state["record_failed_scanner_names"] = bool(payload.record_failed_scanner_names)
         if orig_status == "draft":
             state["test_mode"] = _dataset_require_explicit_test_mode(payload.test_mode)
+            if payload.is_public is not None:
+                state["is_public"] = bool(payload.is_public)
         _dataset_save_state(state)
     return JSONResponse({"status": "ok", "task": _dataset_to_status_payload(state)})
 
@@ -3909,6 +4104,7 @@ async def api_dataset_test_delete(request: Request, payload: DatasetTaskDeleteIn
             pass
         except Exception:
             pass
+    _dataset_index_remove(payload.task_id)
     return JSONResponse({"status": "ok"})
 
 
@@ -3950,6 +4146,7 @@ async def api_dataset_test_delete_batch(request: Request, payload: DatasetTaskBa
                     pass
                 except Exception:
                     pass
+            _dataset_index_remove(tid)
             deleted.append(tid)
         except HTTPException:
             raise
@@ -3972,15 +4169,16 @@ async def api_dataset_test_status(request: Request, task_id: str):
     username = require_user(request)
     with DATASET_LOCK:
         state = _dataset_load_state(task_id)
-    _dataset_validate_access(state, username)
+    _dataset_validate_read_access(state, username)
     retry_completed_signal = False
+    owner_ok = username.strip().lower() == "admin" or (isinstance(state, dict) and state.get("owner") == username)
     with DATASET_LOCK:
         state2 = _dataset_load_state(task_id)
-        if isinstance(state2, dict) and state2.get("retry_completed_pending"):
+        if owner_ok and isinstance(state2, dict) and state2.get("retry_completed_pending"):
             retry_completed_signal = True
             state2.pop("retry_completed_pending", None)
             _dataset_save_state(state2)
-        if isinstance(state2, dict) and _dataset_maybe_resync_counts_from_result_file(state2):
+        if owner_ok and isinstance(state2, dict) and _dataset_maybe_resync_counts_from_result_file(state2):
             _dataset_save_state(state2)
         payload = _dataset_to_status_payload(state2 or {})
     if retry_completed_signal:
@@ -3994,7 +4192,7 @@ async def api_dataset_test_preview(request: Request, task_id: str):
     username = require_user(request)
     with DATASET_LOCK:
         state = _dataset_load_state(task_id)
-    _dataset_validate_access(state, username)
+    _dataset_validate_read_access(state, username)
     _dataset_require_source_file(state)
     rows = _dataset_read_all_rows(state["source_file_path"])
     max_cols = max((len(r) for r in rows), default=0)
@@ -4012,45 +4210,34 @@ async def api_dataset_test_preview(request: Request, task_id: str):
 async def api_dataset_test_history(
     request: Request,
     limit: int = Query(default=30, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
 ):
+    """
+    List from dataset_tasks_index.json only (no per-task state file read): minimal snapshots are
+    stored in the index; this handler permission-filters, sorts by created_at, paginates, then builds
+    each row with _dataset_to_history_list_payload (not _dataset_to_status_payload). Wizard/status
+    and task execution still use poc/state/*.json via other routes and are unaffected.
+    Startup rebuild + _dataset_save_state keep the index in sync with state files.
+    Does not resync counts from result CSV here — resync runs on GET /status for owners/admins.
+    """
     username = require_user(request)
-    _dataset_ensure_dirs()
-    items = []
-    for name in os.listdir(DATASET_STATE_DIR):
-        if not name.endswith(".json"):
+    _dataset_ensure_index_populated()
+    idx = _dataset_load_index()
+    tasks_map = idx.get("tasks") if isinstance(idx.get("tasks"), dict) else {}
+    visible: List[dict] = []
+    for snapshot in tasks_map.values():
+        if not isinstance(snapshot, dict):
             continue
-        p = os.path.join(DATASET_STATE_DIR, name)
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                state = json.load(f)
-            if not isinstance(state, dict):
+        owner = snapshot.get("owner")
+        if owner != username and username.strip().lower() != "admin":
+            if not _dataset_task_is_public(snapshot):
                 continue
-            owner = state.get("owner")
-            if owner != username and username.strip().lower() != "admin":
-                continue
-            with DATASET_LOCK:
-                tid = str(state.get("task_id") or "").strip()
-                if tid:
-                    fresh = _dataset_load_state(tid)
-                    if isinstance(fresh, dict):
-                        state = fresh
-                        if _dataset_maybe_resync_counts_from_result_file(state):
-                            _dataset_save_state(state)
-                payload = _dataset_to_status_payload(state)
-                payload["created_at"] = state.get("created_at")
-                payload["owner"] = owner
-                payload["task_time"] = state.get("created_at")
-                block = int(state.get("blocked_count") or 0)
-                passed = int(state.get("passed_count") or 0)
-                errs = int(state.get("error_count") or 0)
-                denom = block + passed + errs
-                payload["block_rate"] = round((block / denom) * 100.0, 2) if denom else 0.0
-                payload["test_mode"] = _dataset_normalize_test_mode(state.get("test_mode"))
-                items.append(payload)
-        except Exception:
-            continue
-    items.sort(key=lambda x: str(x.get("created_at") or ""), reverse=True)
-    return JSONResponse({"status": "ok", "items": items[:limit]})
+        visible.append(snapshot)
+    visible.sort(key=lambda s: str(s.get("created_at") or ""), reverse=True)
+    total = len(visible)
+    page_snapshots = visible[offset : offset + limit]
+    items = [_dataset_to_history_list_payload(s) for s in page_snapshots]
+    return JSONResponse({"status": "ok", "items": items, "total": total, "offset": offset, "limit": limit})
 
 
 @app.get("/api/dataset-test/{task_id}/download/raw")
@@ -4058,7 +4245,7 @@ async def api_dataset_test_download_raw(request: Request, task_id: str):
     username = require_user(request)
     with DATASET_LOCK:
         state = _dataset_load_state(task_id)
-    _dataset_validate_access(state, username)
+    _dataset_validate_read_access(state, username)
     path = state.get("source_file_path") or ""
     if not path.startswith(DATASET_RAW_DIR + os.sep):
         raise HTTPException(status_code=403, detail="invalid file path")
@@ -4072,7 +4259,7 @@ async def api_dataset_test_download_result(request: Request, task_id: str):
     username = require_user(request)
     with DATASET_LOCK:
         state = _dataset_load_state(task_id)
-    _dataset_validate_access(state, username)
+    _dataset_validate_read_access(state, username)
     path = state.get("result_file_path") or ""
     if not path.startswith(DATASET_RESULT_DIR + os.sep):
         raise HTTPException(status_code=403, detail="invalid file path")

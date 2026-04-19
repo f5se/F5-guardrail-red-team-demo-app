@@ -826,6 +826,7 @@
             <button type="button" id="datasetTabHistory" class="datasetTab">History <span class="zh">历史任务</span></button>
           </div>
           <div id="datasetCapacityNotice" class="datasetCapacityNotice" style="display:none;"></div>
+          <div id="datasetReadOnlyBanner" class="datasetReadOnlyBanner" style="display:none;" role="status"></div>
           <div id="datasetRunningTasksBar" class="datasetRunningTasksBar" style="display:none;"></div>
           <div id="datasetNewPane">
             <div class="datasetWizard">
@@ -854,6 +855,18 @@
                   </div>
                   <div class="datasetHint datasetModeExplain">
                     拦截率测试：数据集 prompt 应为期望被阻断；误拦率测试：数据集 prompt 应为期望通过。<span class="zh">Blocking-rate mode expects prompts to be blocked; False-block-rate mode expects prompts to pass.</span>
+                  </div>
+                </div>
+                <div class="datasetRow datasetFormRow datasetPublicPanel datasetTestModeRow" id="datasetPublicPanel">
+                  <div class="datasetTestModePanelIntro">
+                    <span class="datasetFieldLabel datasetTestModeHeading">History 可见范围 / Visibility in History</span>
+                  </div>
+                  <div class="datasetTestModeChoices">
+                    <label class="datasetModeOption"><input type="radio" name="datasetIsPublic" value="0" checked /> 否 · 仅本人与管理员可在 History 中查看 <span class="zh">/ No — only you & admin</span></label>
+                    <label class="datasetModeOption"><input type="radio" name="datasetIsPublic" value="1" /> 是 · 任意登录用户均可查看（仅浏览与下载） <span class="zh">/ Yes — any logged-in user can view (browse & download)</span></label>
+                  </div>
+                  <div class="datasetHint datasetModeExplain">
+                    公开任务不可被他人删除、取消或修改配置。<span class="zh">Others cannot delete, cancel, or reconfigure your public tasks.</span>
                   </div>
                 </div>
                 <div class="datasetRow datasetFormRow datasetTaskNameField">
