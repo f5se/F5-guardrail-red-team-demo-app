@@ -17,6 +17,9 @@
 
   --toggleOff:#cbd5e1;
   --toggleOn:#22c55e;
+
+  /* 主内容区高度：扣除顶栏、wrap 边距、面包屑与页脚等 */
+  --main-area-vh-offset:188px;
 }
 *{box-sizing:border-box}
 body{
@@ -25,6 +28,8 @@ body{
   background:var(--bg);
   color:var(--text);
   min-height:100vh;
+  display:flex;
+  flex-direction:column;
 }
 .topbar{
   background:var(--brand);
@@ -47,10 +52,84 @@ body{
 .topbarTitle{
   line-height:1.2;
 }
+.topbarGithub{
+  margin-left:auto;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:#fff;
+  flex-shrink:0;
+  opacity:.92;
+  line-height:0;
+  border-radius:8px;
+  padding:6px;
+  margin-right:-4px;
+  transition:opacity .15s ease, background .15s ease;
+}
+.topbarGithub:hover{
+  opacity:1;
+  background:rgba(255,255,255,.12);
+}
+.topbarGithub:focus-visible{
+  outline:2px solid rgba(255,255,255,.85);
+  outline-offset:2px;
+}
+.topbarGithub svg{
+  width:22px;
+  height:22px;
+  display:block;
+}
 .wrap{
+  flex:1;
+  width:100%;
   max-width:1400px;
   margin:18px auto;
   padding:0 14px;
+}
+.siteFooter{
+  flex-shrink:0;
+  margin-top:auto;
+  border-top:1px solid var(--border);
+  background:linear-gradient(180deg, rgba(255,255,255,.92) 0%, #eef2ff 100%);
+  color:var(--muted);
+  font-size:12.5px;
+  line-height:1.5;
+  letter-spacing:.02em;
+}
+.siteFooterInner{
+  max-width:1400px;
+  margin:0 auto;
+  padding:14px 18px 18px;
+  text-align:center;
+}
+.siteFooterTagline{
+  margin:0 0 6px;
+  font-weight:600;
+  color:#475569;
+  font-size:12.5px;
+  letter-spacing:.02em;
+}
+@media (max-width:720px){
+  .siteFooterTagline{
+    font-size:11.5px;
+    letter-spacing:.01em;
+    line-height:1.45;
+  }
+}
+.siteFooterUrl{
+  display:inline-block;
+  margin:0;
+}
+.siteFooterUrl a{
+  color:var(--brand);
+  font-weight:600;
+  text-decoration:none;
+  border-bottom:1px solid rgba(47,91,231,.25);
+  transition:color .15s ease, border-color .15s ease;
+}
+.siteFooterUrl a:hover{
+  color:#1d4ed8;
+  border-bottom-color:rgba(29,78,216,.45);
 }
 .layout{
   display:grid;
@@ -60,12 +139,12 @@ body{
 }
 .layout.layout--agentic-security{
   align-items:stretch;
-  min-height: calc(100vh - 130px);
+  min-height: calc(100vh - var(--main-area-vh-offset));
 }
 .layout.layout--with-guardrail{
   grid-template-columns: 260px minmax(0, 2.2fr) minmax(0, 1.3fr);
-  height: calc(100vh - 130px);
-  max-height: calc(100vh - 130px);
+  height: calc(100vh - var(--main-area-vh-offset));
+  max-height: calc(100vh - var(--main-area-vh-offset));
   align-items: stretch;
 }
 .layout.layout--with-guardrail > *{
