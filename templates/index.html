@@ -828,21 +828,18 @@
 
               <div class="datasetStepPage is-active" id="datasetStep1">
                 <h4>Step 1 上传与数据准备 <span class="zh">/ Upload & Data Preparation</span></h4>
+                <p class="datasetTestModeLead">
+                  请先选择评测模式，再填写任务名称并上传数据；正式开跑或补测期间不可更改。<span class="zh">Choose the evaluation mode before naming and uploading; cannot change after the run starts or during retry.</span>
+                </p>
                 <div class="datasetRow datasetFormRow datasetTestModePanel datasetTestModeRow" id="datasetTestModePanel">
                   <div class="datasetTestModePanelIntro">
                     <span class="datasetTestModeBadge">必选 · Required</span>
                     <span class="datasetFieldLabel datasetTestModeHeading">测试类型 / Test Type</span>
                   </div>
-                  <p class="datasetTestModeLead">
-                    请先选择评测模式，再填写任务名称并上传数据；正式开跑或补测期间不可更改。<span class="zh">Choose the evaluation mode before naming and uploading; cannot change after the run starts or during retry.</span>
-                  </p>
                   <div class="datasetTestModeChoices">
                     <label class="datasetModeOption"><input type="radio" name="datasetTestMode" value="block_rate" /> 拦截率测试 <span class="zh">/ Blocking-rate Test</span></label>
                     <label class="datasetModeOption"><input type="radio" name="datasetTestMode" value="false_block_rate" /> 误拦率测试 <span class="zh">/ False-block-rate Test</span></label>
                   </div>
-                  <p id="datasetTestModeWarn" class="datasetFieldErr datasetTestModeWarn" style="display:none;" role="alert">
-                    请选择「拦截率」或「误拦率」之一后再继续。<span class="zh">Pick Blocking-rate or False-block-rate before continuing.</span>
-                  </p>
                   <div class="datasetHint datasetModeExplain">
                     拦截率测试：数据集 prompt 应为期望被阻断；误拦率测试：数据集 prompt 应为期望通过。<span class="zh">Blocking-rate mode expects prompts to be blocked; False-block-rate mode expects prompts to pass.</span>
                   </div>
@@ -889,6 +886,7 @@
                   <label class="datasetFieldLabel">并发数 / Concurrency <input type="number" id="datasetConcurrency" min="1" max="3" value="1" /></label>
                   <label class="datasetFieldLabel">批次间隔(秒) / Batch Interval (s) <input type="number" id="datasetInterval" min="0" max="30" step="0.5" value="1" /></label>
                   <label class="datasetFieldLabel">Guardrail 超时(秒) / Guardrail Timeout (s) <input type="number" id="datasetGuardrailTimeout" min="1" max="120" step="1" value="20" title="单行 Guardrail 调用超时 / Per-call timeout stored in task state as guardrail_timeout_seconds" /></label>
+                  <p class="datasetStepHint">如任务有需补测情况，补测前可根据需要修改此处相关参数，并点击下一步保存。<span class="zh">If the task needs to be retested, modify the relevant parameters here as needed, and click Next to save.</span></p>
                 </div>
                 <p id="datasetConcurrencyOverMaxHint" class="datasetFieldErr" style="display:none;margin:6px 0 0 0;" role="alert"></p>
                 <div class="datasetRow datasetFormRow">
