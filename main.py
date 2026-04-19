@@ -3732,6 +3732,7 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
         if payload.prompt_column > max_cols:
             raise HTTPException(status_code=400, detail=f"prompt_column exceeds max columns: {max_cols}")
         total_rows = len(rows)
+        state["total_rows"] = total_rows
         row_start = int(payload.row_start or 1)
         row_end = int(payload.row_end or total_rows)
         header_offset = 1 if payload.has_header else 0
