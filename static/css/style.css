@@ -3763,12 +3763,40 @@ code{
 .datasetFileUploadRow input[type="file"]::file-selector-button:hover{background:linear-gradient(180deg,#eff6ff 0%,#dbeafe 100%);border-color:#60a5fa}
 .datasetUploadBtnPrimary{height:38px;padding:0 16px;border-radius:999px!important;border:1px solid #bfdbfe!important;background:linear-gradient(180deg,#ffffff 0%,#eff6ff 100%)!important;color:#1d4ed8!important;box-shadow:0 4px 10px rgba(29,78,216,.12)!important;font-weight:700;letter-spacing:.1px}
 .datasetUploadBtnPrimary:hover{background:linear-gradient(180deg,#f8fbff 0%,#e0edff 100%)!important;border-color:#93c5fd!important;box-shadow:0 6px 12px rgba(29,78,216,.16)!important;transform:none}
+.datasetQuickTipWrap{position:relative;display:inline-flex}
+.datasetQuickTipWrap[data-tip]:not([data-tip=""])::after{
+  content:attr(data-tip);
+  position:absolute;
+  left:0;
+  bottom:calc(100% + 6px);
+  max-width:340px;
+  padding:6px 8px;
+  border-radius:6px;
+  background:rgba(15,23,42,0.96);
+  color:#f8fafc;
+  font-size:11px;
+  line-height:1.35;
+  white-space:normal;
+  box-shadow:0 6px 18px rgba(2,6,23,0.28);
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+  transform:translateY(2px);
+  transition:opacity .08s ease, transform .08s ease, visibility .08s ease;
+  z-index:30;
+}
+.datasetQuickTipWrap[data-tip]:not([data-tip=""]):hover::after{
+  opacity:1;
+  visibility:visible;
+  transform:translateY(0);
+}
 .datasetUploadMetaCard{margin-top:8px;padding:10px 12px;border-radius:12px;border:1px solid #dbeafe;background:#eff6ff;color:#1e3a8a;font-size:13px;line-height:1.5}
 .datasetRow button,.datasetNavRow button{height:36px;border:1px solid #1d4ed8;background:#1d4ed8;color:#fff;border-radius:10px;padding:0 12px;cursor:pointer}
 .datasetRow button:disabled,.datasetNavRow button:disabled{opacity:.6;cursor:not-allowed}
 .datasetGhostBtn{background:#fff!important;color:#1d4ed8!important}
 .datasetNavRow{display:flex;gap:10px;justify-content:flex-end;margin-top:12px}
 .datasetHint{font-size:13px;color:#475467}
+.datasetRowRangeHint{width:100%;margin-top:2px}
 .datasetFieldErr{font-size:12px;color:#b91c1c;line-height:1.45}
 .datasetFileUploadRow .datasetUploadFormatHint{width:100%;flex-basis:100%;margin:0;line-height:1.45}
 .datasetStepHint{margin:0 0 10px 0;font-size:13px;color:#64748b;line-height:1.5}
@@ -3860,6 +3888,40 @@ code{
 .datasetRetryProgressTrack{height:10px;background:rgba(148,163,184,.35);border-radius:999px;overflow:hidden;margin-top:6px}
 .datasetRetryProgressInner{height:100%;width:0;background:linear-gradient(90deg,#38bdf8,#6366f1);transition:width .28s ease}
 .datasetRetryTag{display:inline-flex;align-items:center;margin-left:4px;padding:2px 8px;border-radius:999px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;font-size:10px;font-weight:700}
+.datasetNotAllTestedTag{display:inline-flex;align-items:center;margin-left:4px;padding:1px 7px;border-radius:999px;border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;font-size:10px;font-weight:700}
+.datasetExtendWrap{display:flex;flex-direction:column;gap:10px;margin-top:16px;padding:14px 16px;border-radius:12px;border:1px dashed #bfdbfe;background:linear-gradient(180deg,#f8fbff 0%,#eff6ff 100%)}
+.datasetExtendTitle{font-weight:700;color:#1d4ed8;font-size:14px}
+.datasetExtendSummary{font-size:12.5px;color:#334155;line-height:1.55}
+.datasetExtendSummary code{background:rgba(148,163,184,.22);border-radius:4px;padding:0 4px}
+#datasetExtendBtn{height:38px;padding:0 16px;border-radius:10px;border:1px solid #2563eb;background:linear-gradient(180deg,#eff6ff 0%,#dbeafe 100%);color:#1e3a8a;font-weight:700;cursor:pointer;align-self:flex-start}
+#datasetExtendBtn:disabled{opacity:.6;cursor:not-allowed}
 .datasetHistoryCountsCell{white-space:normal}
 .datasetHistoryCountsMain{font-weight:700;color:#1f2937;line-height:1.25}
 .datasetHistoryCountsTotal{margin-top:2px;font-size:11px;color:#667085;line-height:1.25}
+.datasetHistoryCountsSeg{position:relative;display:inline-block;margin-top:2px;font-size:11px;color:#475569;line-height:1.25;cursor:help}
+.datasetHistoryCountsSeg::after{
+  content:attr(data-tip);
+  position:absolute;
+  left:0;
+  bottom:calc(100% + 6px);
+  max-width:320px;
+  padding:6px 8px;
+  border-radius:6px;
+  background:rgba(15,23,42,0.96);
+  color:#f8fafc;
+  font-size:11px;
+  line-height:1.35;
+  white-space:normal;
+  box-shadow:0 6px 18px rgba(2,6,23,0.28);
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+  transform:translateY(2px);
+  transition:opacity .08s ease, transform .08s ease, visibility .08s ease;
+  z-index:30;
+}
+.datasetHistoryCountsSeg:hover::after{
+  opacity:1;
+  visibility:visible;
+  transform:translateY(0);
+}

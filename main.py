@@ -2892,6 +2892,10 @@ DATASET_INDEX_MINIMAL_KEYS = (
     "passed_count",
     "error_count",
     "retry_in_progress",
+    # Planned test ranges for this task. Stored in the index so the
+    # history page can tell which slices of a large dataset the task
+    # has already asked to cover, without loading individual state files.
+    "range_segments",
 )
 DATASET_ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 DATASET_TEST_MODE_BLOCK_RATE = "block_rate"
@@ -2944,6 +2948,12 @@ class DatasetTaskDeleteIn(BaseModel):
 
 class DatasetTaskBatchDeleteIn(BaseModel):
     task_ids: List[str]
+
+
+class DatasetTaskExtendRangeIn(BaseModel):
+    task_id: str
+    row_start: int
+    row_end: int
 
 
 def _dataset_ensure_dirs():
@@ -3248,6 +3258,17 @@ def _dataset_to_status_payload(state: dict) -> dict:
             if isinstance(state.get("retry_progress"), dict)
             else None
         ),
+        "range_segments": _dataset_effective_segments(state),
+        "segments_union_size": _dataset_segments_union_size(state.get("range_segments") or []) or _dataset_segments_union_size(_dataset_effective_segments(state)),
+        "run_kind": str(state.get("run_kind") or ""),
+        "current_run_range": (
+            {
+                "start": int((state.get("current_run_range") or {}).get("start") or 0),
+                "end": int((state.get("current_run_range") or {}).get("end") or 0),
+            }
+            if isinstance(state.get("current_run_range"), dict)
+            else None
+        ),
     }
 
 
@@ -3264,6 +3285,9 @@ def _dataset_to_history_list_payload(rec: dict) -> dict:
     denom = block + passed + errs
     block_rate = round((block / denom) * 100.0, 2) if denom else 0.0
     ca = rec.get("created_at")
+    segs_raw = rec.get("range_segments")
+    segs_norm = _dataset_normalize_segments(segs_raw) if isinstance(segs_raw, list) else []
+    segs_union = _dataset_segments_union_size(segs_norm)
     return {
         "task_id": rec.get("task_id"),
         "task_name": str(rec.get("task_name") or "").strip(),
@@ -3284,6 +3308,8 @@ def _dataset_to_history_list_payload(rec: dict) -> dict:
         "created_at": ca,
         "task_time": ca,
         "block_rate": block_rate,
+        "range_segments": segs_norm,
+        "segments_union_size": segs_union,
     }
 
 
@@ -3379,6 +3405,85 @@ def _dataset_write_result_csv_atomic(result_path: str, rows_by_index: Dict[int, 
             raw = rows_by_index.get(idx) or {}
             writer.writerow(_dataset_result_row_to_strings(raw))
     os.replace(tmp_path, result_path)
+
+
+def _dataset_normalize_segments(segs) -> List[Dict[str, int]]:
+    """Merge overlapping/adjacent segments into a sorted, disjoint list of {start, end}."""
+    if not isinstance(segs, list):
+        return []
+    raw: List[Tuple[int, int]] = []
+    for s in segs:
+        if not isinstance(s, dict):
+            continue
+        try:
+            a = int(s.get("start") or 0)
+            b = int(s.get("end") or 0)
+        except Exception:
+            continue
+        if a <= 0 or b <= 0 or b < a:
+            continue
+        raw.append((a, b))
+    if not raw:
+        return []
+    raw.sort()
+    merged: List[List[int]] = [list(raw[0])]
+    for a, b in raw[1:]:
+        if a <= merged[-1][1] + 1:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    return [{"start": a, "end": b} for a, b in merged]
+
+
+def _dataset_segments_union_size(segs) -> int:
+    total = 0
+    for s in _dataset_normalize_segments(segs):
+        total += int(s["end"]) - int(s["start"]) + 1
+    return max(0, total)
+
+
+def _dataset_range_is_subset_of_segments(rs: int, re_: int, segs) -> bool:
+    """Return True if [rs, re_] is fully covered by the union of `segs`.
+
+    Uses a linear sweep over the normalized (sorted, disjoint) segments
+    instead of expanding indices into a set, so it stays O(#segments)
+    even for very large row ranges.
+    """
+    try:
+        rs = int(rs)
+        re_ = int(re_)
+    except Exception:
+        return False
+    if rs <= 0 or re_ < rs:
+        return False
+    cursor = rs
+    for s in _dataset_normalize_segments(segs):
+        a = int(s["start"])
+        b = int(s["end"])
+        if a > cursor:
+            return False
+        if b >= re_:
+            return True
+        if b + 1 > cursor:
+            cursor = b + 1
+    return False
+
+
+def _dataset_effective_segments(state: dict) -> List[Dict[str, int]]:
+    """Return normalized segments; fall back to legacy row_start/row_end for old tasks."""
+    segs = state.get("range_segments")
+    if isinstance(segs, list) and segs:
+        n = _dataset_normalize_segments(segs)
+        if n:
+            return n
+    try:
+        rs = int(state.get("row_start") or 0)
+        re_ = int(state.get("row_end") or 0)
+    except Exception:
+        return []
+    if rs > 0 and re_ >= rs:
+        return [{"start": rs, "end": re_}]
+    return []
 
 
 def _dataset_apply_counts_from_rows_map(state: dict, rows_by_index: Dict[int, dict]) -> None:
@@ -3648,22 +3753,36 @@ async def _dataset_run_task(task_id: str):
     rows = _dataset_read_all_rows(state["source_file_path"])
     has_header = bool(state.get("has_header"))
     prompt_col = int(state.get("prompt_column") or 0)
-    row_start = int(state.get("row_start") or 1)
-    row_end = int(state.get("row_end") or len(rows))
     data_start = 2 if has_header else 1
-    row_start = max(row_start, data_start)
-    row_end = min(row_end, len(rows))
+    # Build target row_index set from range_segments (fall back to legacy
+    # row_start/row_end for old tasks). This replaces the old
+    # last_processed_row based filter so non-contiguous extend ranges
+    # work correctly — already-tested rows are filtered later by
+    # comparing against rows already present in result.csv.
+    segments = _dataset_effective_segments(state)
+    target_indices: List[int] = []
+    seen_targets: set = set()
+    for seg in segments:
+        try:
+            s_i = max(int(seg.get("start") or 0), data_start)
+            e_i = min(int(seg.get("end") or 0), len(rows))
+        except Exception:
+            continue
+        if e_i < s_i:
+            continue
+        for idx in range(s_i, e_i + 1):
+            if idx in seen_targets:
+                continue
+            seen_targets.add(idx)
+            target_indices.append(idx)
+    target_indices.sort()
     selected: List[Tuple[int, str]] = []
-    for idx in range(row_start, row_end + 1):
+    for idx in target_indices:
         row = rows[idx - 1] if idx - 1 < len(rows) else []
         value = ""
         if 0 <= prompt_col < len(row):
             value = str(row[prompt_col] or "")
         selected.append((idx, value))
-    with DATASET_LOCK:
-        state = _dataset_load_state(task_id) or state
-        last = int(state.get("last_processed_row") or 0)
-    selected = [(i, p) for (i, p) in selected if i > last]
     provider_name = str(state.get("provider_name") or "").strip()
     project_id = str(state.get("project_id") or "").strip() or _dataset_env_project_id()
     timeout_seconds = float(state.get("guardrail_timeout_seconds") or DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS)
@@ -3691,6 +3810,11 @@ async def _dataset_run_task(task_id: str):
                     continue
     except Exception:
         seen_row_indexes = set()
+
+    # Skip rows whose row_index already has an entry in result.csv:
+    # this implements the "extend = skip already-tested rows" rule
+    # (also avoids redundant Guardrail calls on pause/resume recovery).
+    selected = [(i, p) for (i, p) in selected if i not in seen_row_indexes]
 
     cap_c = _dataset_max_concurrency_allowed()
     c = max(1, min(int(state.get("concurrency_per_batch") or 1), cap_c))
@@ -3870,6 +3994,9 @@ async def api_dataset_test_upload(
         "recent_latencies": [],
         "retry_in_progress": False,
         "retry_progress": None,
+        "range_segments": [],
+        "run_kind": "",
+        "current_run_range": None,
     }
     with DATASET_LOCK:
         _dataset_save_state(state)
@@ -3961,7 +4088,21 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
         state["has_header"] = bool(payload.has_header)
         state["row_start"] = row_start
         state["row_end"] = row_end
-        state["effective_rows"] = effective_rows
+        # Keep range_segments in sync while the task has not been run yet
+        # (draft) or when no segments have been recorded before. For
+        # completed/cancelled/failed tasks, preserve existing segments so
+        # previously-run ranges are not silently dropped when the owner
+        # edits Step 2 parameters before retry/extend.
+        needs_seg_sync = orig_status == "draft" or not state.get("range_segments")
+        if needs_seg_sync:
+            state["range_segments"] = [{"start": row_start, "end": row_end}]
+        # effective_rows must reflect the union of all planned segments so
+        # the progress denominator stays correct after an extend. If the
+        # task has multi-segment history we MUST NOT shrink effective_rows
+        # back to (row_end - row_start + 1).
+        segs_after = state.get("range_segments") or [{"start": row_start, "end": row_end}]
+        union_size = _dataset_segments_union_size(segs_after)
+        state["effective_rows"] = union_size if union_size > 0 else effective_rows
         state["project_id"] = resolved_project_id
         if provided_key:
             state["api_key_source"] = "userProvided"
@@ -4077,6 +4218,109 @@ async def api_dataset_test_retry_errors(request: Request, payload: DatasetTaskAc
         _dataset_save_state(state)
         out = _dataset_to_status_payload(state)
     _dataset_schedule_retry_task(payload.task_id)
+    return JSONResponse({"status": "ok", "task": out})
+
+
+@app.post("/api/dataset-test/extend-range")
+async def api_dataset_test_extend_range(request: Request, payload: DatasetTaskExtendRangeIn):
+    """Append a new row range to an existing task and schedule a run on it.
+
+    Design notes:
+      * Only completed/cancelled/failed tasks can be extended (mutually
+        exclusive with active main run and with error-retry).
+      * The new range is merged into range_segments as the canonical
+        union; effective_rows becomes the union size so progress
+        denominator reflects "all rows planned for this task".
+      * Rows whose row_index is already present in result.csv are
+        skipped at execution time (no overwrite) — see _dataset_run_task.
+    """
+    username = require_user(request)
+    with DATASET_LOCK:
+        state = _dataset_load_state(payload.task_id)
+        _dataset_validate_access(state, username)
+        st = str(state.get("status") or "")
+        if st not in ("completed", "cancelled", "failed"):
+            raise HTTPException(
+                status_code=400,
+                detail="仅已完成/已取消/失败任务可追加测试范围 / Only completed, cancelled or failed tasks can extend range",
+            )
+        if state.get("retry_in_progress"):
+            raise HTTPException(status_code=400, detail="补测进行中，无法追加 / Cannot extend while retry is in progress")
+        main_t = DATASET_RUNNING_TASKS.get(payload.task_id)
+        if main_t and not main_t.done():
+            raise HTTPException(status_code=400, detail="任务运行中，无法追加 / Task is running")
+        rt = DATASET_RETRY_TASKS.get(payload.task_id)
+        if rt and not rt.done():
+            raise HTTPException(status_code=400, detail="补测进行中，无法追加 / Cannot extend while retry is in progress")
+        _dataset_require_source_file(state)
+        rows = _dataset_read_all_rows(state["source_file_path"])
+        total_rows = len(rows)
+        has_header = bool(state.get("has_header", True))
+        header_offset = 1 if has_header else 0
+        try:
+            rs = int(payload.row_start or 0)
+            re_ = int(payload.row_end or 0)
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid row range")
+        rs = max(1 + header_offset, rs)
+        re_ = min(total_rows, re_)
+        if rs <= 0 or re_ < rs:
+            raise HTTPException(status_code=400, detail="invalid row range")
+        existing = _dataset_effective_segments(state)
+        merged = _dataset_normalize_segments(existing + [{"start": rs, "end": re_}])
+        if not merged:
+            raise HTTPException(status_code=400, detail="no valid segments")
+        # Preflight: if the new range is already fully covered by declared
+        # segments AND every row in it is already present in result.csv,
+        # running the task would be a no-op. Short-circuit with a clear
+        # message instead of spawning a task that immediately completes.
+        if _dataset_range_is_subset_of_segments(rs, re_, existing):
+            required = re_ - rs + 1
+            found = 0
+            result_path = str(state.get("result_file_path") or "").strip()
+            if result_path and os.path.isfile(result_path):
+                try:
+                    with open(result_path, "r", encoding="utf-8-sig", newline="") as f:
+                        reader = csv.reader(f)
+                        header = next(reader, None)
+                        idx_col = 0
+                        if header and "row_index" in header:
+                            idx_col = header.index("row_index")
+                        seen_in_range: set = set()
+                        for row in reader:
+                            if not row or idx_col >= len(row):
+                                continue
+                            try:
+                                ridx = int(str(row[idx_col]).strip())
+                            except Exception:
+                                continue
+                            if rs <= ridx <= re_ and ridx not in seen_in_range:
+                                seen_in_range.add(ridx)
+                                found = len(seen_in_range)
+                                if found >= required:
+                                    break
+                except Exception:
+                    pass
+            if found >= required:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "选定区间已全部测过，没有新行会被执行；如需重跑请删除该任务后重建 "
+                        "/ Selected range is already fully covered; nothing to test."
+                    ),
+                )
+        state["range_segments"] = merged
+        state["effective_rows"] = _dataset_segments_union_size(merged)
+        state["total_rows"] = total_rows
+        state["run_kind"] = "extend"
+        state["current_run_range"] = {"start": rs, "end": re_}
+        state["status"] = "queued"
+        state["phase"] = "step4_running"
+        state["stop_requested"] = False
+        state.pop("retry_completed_pending", None)
+        _dataset_save_state(state)
+        out = _dataset_to_status_payload(state)
+    _dataset_schedule_task(payload.task_id)
     return JSONResponse({"status": "ok", "task": out})
 
 

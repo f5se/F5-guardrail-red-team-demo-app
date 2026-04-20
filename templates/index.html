@@ -878,7 +878,9 @@
                 </div>
                 <div class="datasetFileUploadRow">
                   <input type="file" id="datasetFileInput" accept=".csv,.xlsx,.xls" />
-                  <button type="button" id="datasetUploadBtn" class="datasetUploadBtnPrimary">上传文件 / Upload</button>
+                  <span id="datasetUploadBtnTipWrap" class="datasetQuickTipWrap">
+                    <button type="button" id="datasetUploadBtn" class="datasetUploadBtnPrimary">上传文件 / Upload</button>
+                  </span>
                   <p class="datasetHint datasetUploadFormatHint">
                     允许上传：.csv、.xlsx；.xls 请先另存为 .xlsx。单文件不超过 <span id="datasetUploadMaxMbCn">20</span> MB。<span class="zh">Allowed: .csv, .xlsx; legacy .xls must be converted to .xlsx. Max <span id="datasetUploadMaxMbEn">20</span> MB per file.</span>
                   </p>
@@ -891,6 +893,7 @@
                 <div class="datasetRow datasetFormRow">
                   <label class="datasetFieldLabel">起始行 / Start Row <input type="number" id="datasetRowStart" min="1" value="2" /></label>
                   <label class="datasetFieldLabel">结束行 / End Row <input type="number" id="datasetRowEnd" min="1" value="2" /></label>
+                  <div id="datasetRowRangeHint" class="datasetHint datasetRowRangeHint"></div>
                 </div>
                 <div class="datasetHint">以下为前5行预览 / Preview of first 5 rows</div>
                 <div id="datasetPreviewWrap" class="datasetPreviewWrap"></div>
@@ -973,6 +976,19 @@
                   <div id="datasetRetryProgressWrap" class="datasetRetryProgressWrap" style="display:none;">
                     <div id="datasetRetryProgressText" class="datasetRetryProgressText"></div>
                     <div class="datasetRetryProgressTrack"><div id="datasetRetryProgressInner" class="datasetRetryProgressInner"></div></div>
+                  </div>
+                </div>
+                <div id="datasetExtendWrap" class="datasetExtendWrap" style="display:none;">
+                  <div class="datasetExtendTitle">追加测试范围 <span class="zh">/ Extend Test Range</span></div>
+                  <div id="datasetExtendSummary" class="datasetExtendSummary"></div>
+                  <div class="datasetRow datasetFormRow">
+                    <label class="datasetFieldLabel">追加起始行 / Extend Start Row <input type="number" id="datasetExtendRowStart" min="1" value="1" /></label>
+                    <label class="datasetFieldLabel">追加结束行 / Extend End Row <input type="number" id="datasetExtendRowEnd" min="1" value="1" /></label>
+                    <button type="button" id="datasetExtendBtn">追加测试该区间 / Extend Test</button>
+                  </div>
+                  <div class="datasetHint">
+                    已存在于结果中的 row_index 会自动跳过；追加批次沿用当前 Step 2 参数（若已修改，请先在 Step 2 点「下一步」保存）。
+                    <span class="zh">Rows already present in result.csv are skipped; extend uses the current Step 2 settings (save them first on Step 2 if modified).</span>
                   </div>
                 </div>
                 <div class="datasetNavRow">
