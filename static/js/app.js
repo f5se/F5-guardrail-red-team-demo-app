@@ -5795,7 +5795,7 @@ async function loadDatasetHistory(){
           ? "<button type='button' disabled class='datasetActionBtn datasetActionBtn--retry datasetRetryHistoryBtnDisabled'>补测中 / Retrying</button>"
           : "<button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--retry datasetRetryHistoryBtn'>补测错误项 / Retry errors</button>";
       }
-      actionBtn = retryHtml + "<button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--delete datasetDeleteHistoryBtn'>删除 / Delete</button>";
+      actionBtn = retryHtml + "<button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--delete datasetDeleteHistoryBtn'>删除/Del</button>";
     }
     const retryTag = retryIng ? "<span class='datasetRetryTag'>补测中 / Retrying</span> " : "";
     const segUnionN = Number(x.segments_union_size || x.effective_rows || 0);
@@ -5869,7 +5869,7 @@ async function loadDatasetHistory(){
       + "<td class='datasetHistoryCountsCell'><div class='datasetHistoryCountsMain'>" + escapeHtml(String(x.blocked_count || 0)) + "/" + escapeHtml(String(x.passed_count || 0)) + "/" + escapeHtml(String(x.error_count || 0)) + "</div><div class='datasetHistoryCountsTotal'>总行数 / Total: " + escapeHtml(totalRowsText) + "</div>" + segmentCellHtml + "</td>"
       + "<td>" + escapeHtml(modeMeta.rateName) + ": " + escapeHtml(primaryRate.toFixed(2)) + "%</td>"
       + "<td><div class='datasetDownloadLinks'>" + rawLink + resultLink + "</div></td>"
-      + "<td><div class='datasetHistoryActions'><button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--view datasetJumpBtn'>查看 / View</button>" + actionBtn + "</div></td>"
+      + "<td><div class='datasetHistoryActions'><button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--view datasetJumpBtn'>查看/View</button>" + actionBtn + "</div></td>"
       + "</tr>";
   }).join("");
   const ownerHeader = isAdminUser ? "<th>Owner</th>" : "";
