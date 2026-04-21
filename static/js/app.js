@@ -5350,7 +5350,7 @@ function datasetSuggestNextExtendRange(task){
   const hasHeader = !!task?.has_header;
   const dataStart = hasHeader ? 2 : 1;
   if (total > 0 && dataStart > total) return null;
-  const merged = datasetNormalizeSegmentsForExtend(task?.range_segments, dataStart, total);
+  const merged = datasetNormalizeSegmentsForExtend(task?.tested_segments || task?.range_segments, dataStart, total);
   const chunk = 1000;
   if (!merged.length) {
     const start0 = dataStart;
@@ -5390,18 +5390,22 @@ function datasetUpdateExtendStep5UI(task){
     return;
   }
   datasetExtendWrap.style.display = "";
-  const segs = Array.isArray(task?.range_segments) ? task.range_segments : [];
+  const declaredSegs = Array.isArray(task?.range_segments) ? task.range_segments : [];
+  const testedSegs = Array.isArray(task?.tested_segments) ? task.tested_segments : declaredSegs;
   const unionSize = Number(task?.segments_union_size || task?.effective_rows || 0);
+  const testedUnion = Number(task?.tested_union_size || 0);
   const processed = Number(task?.processed_count || 0);
   const totalRows = Number(task?.total_rows || 0);
   if (datasetExtendSummary) {
-    const parts = [
-      "文件总行数 / File rows: <code>" + escapeHtml(String(totalRows || "—")) + "</code>",
-      "已声明区间 / Declared segments: <code>" + escapeHtml(datasetFormatSegmentsText(segs)) + "</code>",
-      "并集行数 / Union size: <code>" + escapeHtml(String(unionSize)) + "</code>",
-      "已完成 / Done: <code>" + escapeHtml(String(processed)) + "</code>",
+    const rows = [
+      "<div>文件总行数 / File rows: <code>" + escapeHtml(String(totalRows || "—")) + "</code></div>",
+      "<div>已测试区间 / Tested segments: <code>" + escapeHtml(datasetFormatSegmentsText(testedSegs)) + "</code></div>",
+      "<div class='datasetExtendSummaryMuted'>已声明区间 / Declared segments: <code>" + escapeHtml(datasetFormatSegmentsText(declaredSegs)) + "</code></div>",
+      "<div>已测试行数 / Tested rows: <code>" + escapeHtml(String(testedUnion)) + "</code></div>",
+      "<div class='datasetExtendSummaryMuted'>声明并集 / Declared union: <code>" + escapeHtml(String(unionSize)) + "</code>（仅历史参考 / for history reference）</div>",
+      "<div>已完成 / Done: <code>" + escapeHtml(String(processed)) + "</code></div>",
     ];
-    datasetExtendSummary.innerHTML = parts.map((p) => "<div>" + p + "</div>").join("");
+    datasetExtendSummary.innerHTML = rows.join("");
   }
   if (suggestion && datasetExtendRowStart && datasetExtendRowEnd) {
     const curStart = Number(datasetExtendRowStart.value || 0);
@@ -5798,7 +5802,7 @@ async function loadDatasetHistory(){
       actionBtn = retryHtml + "<button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--delete datasetDeleteHistoryBtn'>Delete</button>";
     }
     const retryTag = retryIng ? "<span class='datasetRetryTag'>补测中 / Retrying</span> " : "";
-    const segUnionN = Number(x.segments_union_size || x.effective_rows || 0);
+    const segUnionN = Number(x.tested_union_size || x.segments_union_size || x.effective_rows || 0);
     const totalRowsNForExt = Number(x.total_rows || 0);
     const fullCoverageThreshold = totalRowsNForExt > 0 ? Math.max(1, totalRowsNForExt - 1) : 0;
     const canShowNotAllTested =
@@ -5830,7 +5834,7 @@ async function loadDatasetHistory(){
     // Planned test segments: useful for partially-tested large datasets
     // (e.g. first 1000 rows of 70000). Hide when a single segment spans
     // the entire file (the common single-shot case) to keep the row terse.
-    const segsArr = Array.isArray(x.range_segments) ? x.range_segments : [];
+    const segsArr = Array.isArray(x.tested_segments) && x.tested_segments.length ? x.tested_segments : (Array.isArray(x.range_segments) ? x.range_segments : []);
     let segmentCellHtml = "";
     if (segsArr.length > 0) {
       const only = segsArr.length === 1 ? segsArr[0] : null;
@@ -5841,11 +5845,11 @@ async function loadDatasetHistory(){
         const shownSegs = segsArr.slice(0, maxShown)
           .map((s) => String(s.start) + "–" + String(s.end)).join(", ");
         const moreSuffix = segsArr.length > maxShown ? " +" + String(segsArr.length - maxShown) : "";
-        const unionN = Number(x.segments_union_size || x.effective_rows || 0);
+        const unionN = Number(x.tested_union_size || x.segments_union_size || x.effective_rows || 0);
         const proc = Number(x.processed_count || 0);
-        const titleText = "已声明测试区间（分母为并集） / Planned segments (denominator = union)";
+        const titleText = "已测试区间（基于 result.csv） / Tested segments (from result.csv)";
         segmentCellHtml = "<div class='datasetHistoryCountsSeg' data-tip='" + escapeHtml(titleText) + "'>"
-          + "区间 / Segments: " + escapeHtml(shownSegs + moreSuffix)
+          + "已测区间 / Tested: " + escapeHtml(shownSegs + moreSuffix)
           + "（" + escapeHtml(String(proc) + "/" + String(unionN)) + "）"
           + "</div>";
       }

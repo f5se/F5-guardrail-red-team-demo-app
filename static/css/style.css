@@ -3892,6 +3892,7 @@ code{
 .datasetExtendWrap{display:flex;flex-direction:column;gap:10px;margin-top:16px;padding:14px 16px;border-radius:12px;border:1px dashed #bfdbfe;background:linear-gradient(180deg,#f8fbff 0%,#eff6ff 100%)}
 .datasetExtendTitle{font-weight:700;color:#1d4ed8;font-size:14px}
 .datasetExtendSummary{font-size:12.5px;color:#334155;line-height:1.55}
+.datasetExtendSummaryMuted{color:#64748b}
 .datasetExtendSummary code{background:rgba(148,163,184,.22);border-radius:4px;padding:0 4px}
 #datasetExtendBtn{height:38px;padding:0 16px;border-radius:10px;border:1px solid #2563eb;background:linear-gradient(180deg,#eff6ff 0%,#dbeafe 100%);color:#1e3a8a;font-weight:700;cursor:pointer;align-self:flex-start}
 #datasetExtendBtn:disabled{opacity:.6;cursor:not-allowed}

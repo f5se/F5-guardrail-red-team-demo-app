@@ -2896,6 +2896,7 @@ DATASET_INDEX_MINIMAL_KEYS = (
     # history page can tell which slices of a large dataset the task
     # has already asked to cover, without loading individual state files.
     "range_segments",
+    "tested_segments",
 )
 DATASET_ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 DATASET_TEST_MODE_BLOCK_RATE = "block_rate"
@@ -3198,7 +3199,12 @@ def _dataset_to_status_payload(state: dict) -> dict:
     max_c_allowed = _dataset_max_concurrency_allowed()
     test_mode = _dataset_normalize_test_mode(state.get("test_mode"))
     total = int(state.get("effective_rows") or 0)
+    run_kind = str(state.get("run_kind") or "")
+    if run_kind == "extend" and str(state.get("status") or "").lower() in ("queued", "running", "paused"):
+        total = int(state.get("current_run_union_size") or 0) or total
     done = int(state.get("processed_count") or 0)
+    if run_kind == "extend" and str(state.get("status") or "").lower() in ("queued", "running", "paused"):
+        done = int(state.get("current_run_processed_count") or 0)
     pct = round((done / total) * 100.0, 2) if total > 0 else 0.0
     recent = state.get("recent_latencies") or []
     eta = None
@@ -3260,7 +3266,7 @@ def _dataset_to_status_payload(state: dict) -> dict:
         ),
         "range_segments": _dataset_effective_segments(state),
         "segments_union_size": _dataset_segments_union_size(state.get("range_segments") or []) or _dataset_segments_union_size(_dataset_effective_segments(state)),
-        "run_kind": str(state.get("run_kind") or ""),
+        "run_kind": run_kind,
         "current_run_range": (
             {
                 "start": int((state.get("current_run_range") or {}).get("start") or 0),
@@ -3269,6 +3275,10 @@ def _dataset_to_status_payload(state: dict) -> dict:
             if isinstance(state.get("current_run_range"), dict)
             else None
         ),
+        "current_run_union_size": int(state.get("current_run_union_size") or 0),
+        "current_run_processed_count": int(state.get("current_run_processed_count") or 0),
+        "tested_segments": _dataset_normalize_segments(state.get("tested_segments") or []),
+        "tested_union_size": _dataset_segments_union_size(state.get("tested_segments") or []),
     }
 
 
@@ -3288,6 +3298,9 @@ def _dataset_to_history_list_payload(rec: dict) -> dict:
     segs_raw = rec.get("range_segments")
     segs_norm = _dataset_normalize_segments(segs_raw) if isinstance(segs_raw, list) else []
     segs_union = _dataset_segments_union_size(segs_norm)
+    tested_raw = rec.get("tested_segments")
+    tested_norm = _dataset_normalize_segments(tested_raw) if isinstance(tested_raw, list) else []
+    tested_union = _dataset_segments_union_size(tested_norm)
     return {
         "task_id": rec.get("task_id"),
         "task_name": str(rec.get("task_name") or "").strip(),
@@ -3310,6 +3323,8 @@ def _dataset_to_history_list_payload(rec: dict) -> dict:
         "block_rate": block_rate,
         "range_segments": segs_norm,
         "segments_union_size": segs_union,
+        "tested_segments": tested_norm,
+        "tested_union_size": tested_union,
     }
 
 
@@ -3440,6 +3455,56 @@ def _dataset_segments_union_size(segs) -> int:
     for s in _dataset_normalize_segments(segs):
         total += int(s["end"]) - int(s["start"]) + 1
     return max(0, total)
+
+
+def _dataset_indexes_to_segments(indexes: set) -> List[Dict[str, int]]:
+    if not indexes:
+        return []
+    vals = sorted(int(x) for x in indexes if int(x) > 0)
+    if not vals:
+        return []
+    out: List[Dict[str, int]] = []
+    s = vals[0]
+    e = vals[0]
+    for v in vals[1:]:
+        if v <= e + 1:
+            e = max(e, v)
+        else:
+            out.append({"start": s, "end": e})
+            s = e = v
+    out.append({"start": s, "end": e})
+    return out
+
+
+def _dataset_segments_subtract(base_segs, remove_segs) -> List[Dict[str, int]]:
+    """Return base union minus remove union."""
+    base = _dataset_normalize_segments(base_segs)
+    rem = _dataset_normalize_segments(remove_segs)
+    if not base:
+        return []
+    if not rem:
+        return base
+    out: List[Dict[str, int]] = []
+    j = 0
+    for b in base:
+        cur = int(b["start"])
+        end = int(b["end"])
+        while j < len(rem) and int(rem[j]["end"]) < cur:
+            j += 1
+        k = j
+        while k < len(rem) and int(rem[k]["start"]) <= end:
+            rs = int(rem[k]["start"])
+            re_ = int(rem[k]["end"])
+            if rs > cur:
+                out.append({"start": cur, "end": min(end, rs - 1)})
+            if re_ + 1 > cur:
+                cur = re_ + 1
+            if cur > end:
+                break
+            k += 1
+        if cur <= end:
+            out.append({"start": cur, "end": end})
+    return _dataset_normalize_segments(out)
 
 
 def _dataset_range_is_subset_of_segments(rs: int, re_: int, segs) -> bool:
@@ -3754,12 +3819,16 @@ async def _dataset_run_task(task_id: str):
     has_header = bool(state.get("has_header"))
     prompt_col = int(state.get("prompt_column") or 0)
     data_start = 2 if has_header else 1
-    # Build target row_index set from range_segments (fall back to legacy
-    # row_start/row_end for old tasks). This replaces the old
-    # last_processed_row based filter so non-contiguous extend ranges
-    # work correctly — already-tested rows are filtered later by
-    # comparing against rows already present in result.csv.
-    segments = _dataset_effective_segments(state)
+    # For extend runs, execute strictly within the requested current_run_range.
+    # For initial/recover runs, use task-level effective segments.
+    run_kind = str(state.get("run_kind") or "")
+    if run_kind == "extend" and isinstance(state.get("current_run_range"), dict):
+        crr = state.get("current_run_range") or {}
+        segments = _dataset_normalize_segments(
+            [{"start": int(crr.get("start") or 0), "end": int(crr.get("end") or 0)}]
+        )
+    else:
+        segments = _dataset_effective_segments(state)
     target_indices: List[int] = []
     seen_targets: set = set()
     for seg in segments:
@@ -3816,6 +3885,20 @@ async def _dataset_run_task(task_id: str):
     # (also avoids redundant Guardrail calls on pause/resume recovery).
     selected = [(i, p) for (i, p) in selected if i not in seen_row_indexes]
 
+    def _finalize_segments_for_task(s: dict) -> None:
+        # Keep "declared" segments non-virtual: shrink to rows actually present
+        # in result.csv after each run/cancel/pause so users can see true tested
+        # ranges without guessing inside oversized declared windows.
+        tested_segments = _dataset_indexes_to_segments(seen_row_indexes)
+        s["tested_segments"] = tested_segments
+        s["range_segments"] = tested_segments
+        tested_union = _dataset_segments_union_size(tested_segments)
+        s["effective_rows"] = tested_union
+        s["current_run_union_size"] = 0
+        s["current_run_processed_count"] = 0
+        if str(s.get("run_kind") or "") == "extend":
+            s["current_run_range"] = None
+
     cap_c = _dataset_max_concurrency_allowed()
     c = max(1, min(int(state.get("concurrency_per_batch") or 1), cap_c))
     interval_seconds = max(0.0, min(float(state.get("interval_seconds") or 1.0), DATASET_MAX_INTERVAL_SECONDS))
@@ -3825,10 +3908,12 @@ async def _dataset_run_task(task_id: str):
             if latest.get("stop_requested"):
                 latest["status"] = "cancelled"
                 latest["phase"] = "cancelled"
+                _finalize_segments_for_task(latest)
                 _dataset_save_state(latest)
                 return
             if str(latest.get("status") or "") == "paused":
                 latest["phase"] = "paused"
+                _finalize_segments_for_task(latest)
                 _dataset_save_state(latest)
                 return
             state = latest
@@ -3852,6 +3937,7 @@ async def _dataset_run_task(task_id: str):
                     writer.writerow(item)
                     seen_row_indexes.add(ridx)
                     state["processed_count"] = int(state.get("processed_count") or 0) + 1
+                    state["current_run_processed_count"] = int(state.get("current_run_processed_count") or 0) + 1
                     state["last_processed_row"] = max(int(state.get("last_processed_row") or 0), ridx)
                     if item["guardrail_status"] == "rejected":
                         state["blocked_count"] = int(state.get("blocked_count") or 0) + 1
@@ -3873,6 +3959,7 @@ async def _dataset_run_task(task_id: str):
         if state.get("status") != "cancelled":
             state["status"] = "completed"
             state["phase"] = "step5_completed"
+        _finalize_segments_for_task(state)
         _dataset_save_state(state)
 
 
@@ -3995,8 +4082,11 @@ async def api_dataset_test_upload(
         "retry_in_progress": False,
         "retry_progress": None,
         "range_segments": [],
+        "tested_segments": [],
         "run_kind": "",
         "current_run_range": None,
+        "current_run_union_size": 0,
+        "current_run_processed_count": 0,
     }
     with DATASET_LOCK:
         _dataset_save_state(state)
@@ -4151,6 +4241,11 @@ async def api_dataset_test_start(request: Request, payload: DatasetTaskActionIn)
             raise HTTPException(status_code=400, detail="task cannot be started")
         state["status"] = "queued"
         state["phase"] = "step3_confirmed"
+        state["run_kind"] = "initial"
+        segs = _dataset_effective_segments(state)
+        state["current_run_range"] = segs[0] if segs else None
+        state["current_run_union_size"] = _dataset_segments_union_size(segs)
+        state["current_run_processed_count"] = 0
         state["stop_requested"] = False
         _dataset_save_state(state)
     _dataset_schedule_task(payload.task_id)
@@ -4314,6 +4409,8 @@ async def api_dataset_test_extend_range(request: Request, payload: DatasetTaskEx
         state["total_rows"] = total_rows
         state["run_kind"] = "extend"
         state["current_run_range"] = {"start": rs, "end": re_}
+        state["current_run_union_size"] = max(0, re_ - rs + 1)
+        state["current_run_processed_count"] = 0
         state["status"] = "queued"
         state["phase"] = "step4_running"
         state["stop_requested"] = False
