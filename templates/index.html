@@ -1012,6 +1012,36 @@
                 行 / rows
               </label>
             </div>
+            <div class="datasetRow">
+              <input type="text" id="datasetHistorySearch" class="datasetHistoryFilterInput" placeholder="任务名关键词 / Task name keyword" />
+              <label class="datasetHistoryFilterWrap">Test Type
+                <select id="datasetHistoryFilterTestType">
+                  <option value="">All</option>
+                  <option value="block_rate">Block rate</option>
+                  <option value="false_block_rate">False block rate</option>
+                </select>
+              </label>
+              <label class="datasetHistoryFilterWrap">Public
+                <select id="datasetHistoryFilterPublic">
+                  <option value="">All</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </label>
+              <label class="datasetHistoryFilterWrap">Status
+                <select id="datasetHistoryFilterStatus">
+                  <option value="">All</option>
+                  <option value="draft">Draft</option>
+                  <option value="queued">Queued</option>
+                  <option value="running">Running</option>
+                  <option value="paused">Paused</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                  <option value="failed">Failed</option>
+                </select>
+              </label>
+              <button type="button" id="datasetHistoryClearFiltersBtn" class="datasetGhostBtn">清空筛选 / Clear Filters</button>
+            </div>
             <div id="datasetHistoryTableWrap"></div>
             <div id="datasetHistoryPager" class="datasetHistoryPager"></div>
           </div>

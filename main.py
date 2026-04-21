@@ -2923,6 +2923,7 @@ DATASET_RESULT_FIELDNAMES = [
 
 class DatasetTaskConfigureIn(BaseModel):
     task_id: str
+    task_name: Optional[str] = None
     prompt_column: int  # 1-based index from UI
     has_header: bool = True
     row_start: Optional[int] = None
@@ -4135,6 +4136,13 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
                 detail="补测进行中，无法修改配置 / Cannot change configuration while retry is in progress",
             )
         _dataset_require_source_file(state)
+        if payload.task_name is not None:
+            new_name = str(payload.task_name or "").strip()
+            if not new_name:
+                raise HTTPException(status_code=400, detail="task_name is required")
+            if len(new_name) > 80:
+                raise HTTPException(status_code=400, detail="task_name too long (max 80)")
+            state["task_name"] = new_name
         rows = _dataset_read_all_rows(state["source_file_path"])
         if payload.prompt_column < 1:
             raise HTTPException(status_code=400, detail="invalid prompt_column")

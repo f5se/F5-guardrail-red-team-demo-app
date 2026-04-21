@@ -89,6 +89,11 @@ const datasetExtendBtn = document.getElementById("datasetExtendBtn");
 const datasetForceRebuildIndexBtn = document.getElementById("datasetForceRebuildIndexBtn");
 const datasetHistoryRefreshBtn = document.getElementById("datasetHistoryRefreshBtn");
 const datasetHistoryBatchDeleteBtn = document.getElementById("datasetHistoryBatchDeleteBtn");
+const datasetHistorySearch = document.getElementById("datasetHistorySearch");
+const datasetHistoryClearFiltersBtn = document.getElementById("datasetHistoryClearFiltersBtn");
+const datasetHistoryFilterTestType = document.getElementById("datasetHistoryFilterTestType");
+const datasetHistoryFilterPublic = document.getElementById("datasetHistoryFilterPublic");
+const datasetHistoryFilterStatus = document.getElementById("datasetHistoryFilterStatus");
 const datasetHistoryPageSize = document.getElementById("datasetHistoryPageSize");
 const datasetHistoryTableWrap = document.getElementById("datasetHistoryTableWrap");
 const datasetHistoryPager = document.getElementById("datasetHistoryPager");
@@ -107,6 +112,7 @@ let datasetCurrentStep = 1;
 let datasetLastPreviewRows = [];
 let datasetTaskSnapshot = {};
 let datasetHistoryItems = [];
+let datasetHistoryFilteredItems = [];
 let datasetHistoryTotalCount = 0;
 let datasetHistoryPage = 1;
 let datasetHistoryPageSizeValue = 15;
@@ -120,6 +126,7 @@ let datasetUploadCooldownTimer = null;
 let datasetViewerReadOnly = false;
 let datasetCancellingTaskIds = new Set();
 let datasetWasRetryingUi = false;
+let datasetHistorySearchDebounceTimer = null;
 let configuredAppTimezone = "UTC+08:00";
 let agenticToolConfigData = null;
 let agenticSelectedTool = "";
@@ -5127,8 +5134,15 @@ async function datasetSaveConfig(){
   let concVal = Number(datasetConcurrency?.value || 1);
   if (!Number.isFinite(concVal) || concVal < 1) concVal = 1;
   if (concVal > concCap) concVal = concCap;
+  const taskName = String(datasetTaskNameInput?.value || "").trim();
+  const taskNameErr = datasetValidateTaskName(taskName);
+  if (taskNameErr) {
+    showSyncNotice(taskNameErr, "error");
+    return;
+  }
   const payload = {
     task_id: datasetTaskId,
+    task_name: taskName,
     prompt_column: Number(datasetPromptColumn?.value || 1),
     has_header: !!datasetHasHeader?.checked,
     row_start: Number(datasetRowStart?.value || 1),
@@ -5744,24 +5758,47 @@ async function loadDatasetHistory(){
     + "</div>";
   try {
   const pageSize = Math.max(1, Number(datasetHistoryPageSizeValue || 15));
-  const offset = (Math.max(1, datasetHistoryPage) - 1) * pageSize;
-  const qs = new URLSearchParams({ limit: String(pageSize), offset: String(offset) });
-  const resp = await authFetch("/api/dataset-test/history?" + qs.toString(), { cache: "no-store" });
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(data?.detail || ("HTTP " + resp.status));
-  const total = Number(data.total);
-  datasetHistoryTotalCount = Number.isFinite(total) && total >= 0 ? total : 0;
-  const totalPages = Math.max(1, Math.ceil(datasetHistoryTotalCount / pageSize));
+  const apiLimit = 200; // backend constraint: Query(le=200)
+  const formatDetail = (detail, statusCode) => {
+    if (typeof detail === "string" && detail.trim()) return detail;
+    if (Array.isArray(detail)) {
+      const msg = detail.map((x) => String(x?.msg || x?.message || "")).filter(Boolean).join("; ");
+      if (msg) return msg;
+    }
+    if (detail && typeof detail === "object") {
+      try {
+        return JSON.stringify(detail);
+      } catch (_) {
+        return "HTTP " + String(statusCode || "");
+      }
+    }
+    return "HTTP " + String(statusCode || "");
+  };
+  const allItems = [];
+  let offsetApi = 0;
+  let totalApi = null;
+  while (true) {
+    const qs = new URLSearchParams({ limit: String(apiLimit), offset: String(offsetApi) });
+    const resp = await authFetch("/api/dataset-test/history?" + qs.toString(), { cache: "no-store" });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(formatDetail(data?.detail, resp.status));
+    const batch = Array.isArray(data.items) ? data.items : [];
+    allItems.push(...batch);
+    const t = Number(data.total);
+    totalApi = Number.isFinite(t) && t >= 0 ? t : allItems.length;
+    offsetApi += batch.length;
+    if (!batch.length || offsetApi >= totalApi) break;
+  }
+  datasetHistoryItems = allItems;
+  datasetHistoryFilteredItems = datasetFilterHistoryItems(datasetHistoryItems);
+  datasetHistoryTotalCount = datasetHistoryFilteredItems.length;
+  const totalPages = Math.max(1, Math.ceil(Math.max(0, datasetHistoryTotalCount) / pageSize));
   if (datasetHistoryPage > totalPages) {
     datasetHistoryPage = totalPages;
     return await loadDatasetHistory();
   }
-  datasetHistoryItems = Array.isArray(data.items) ? data.items : [];
-  const items = datasetHistoryItems;
-  if (!datasetHistoryTotalCount && !items.length && offset > 0) {
-    datasetHistoryPage = 1;
-    return await loadDatasetHistory();
-  }
+  const offset = (Math.max(1, datasetHistoryPage) - 1) * pageSize;
+  const items = datasetHistoryFilteredItems.slice(offset, offset + pageSize);
   if (!datasetHistoryTotalCount && !items.length) {
     datasetHistoryTableWrap.innerHTML = "<div class='datasetHint'>暂无历史任务 / No history tasks</div>";
     if (datasetHistoryPager) datasetHistoryPager.innerHTML = "";
@@ -6024,6 +6061,25 @@ async function loadDatasetHistory(){
   }
 }
 
+function datasetFilterHistoryItems(items){
+  const list = Array.isArray(items) ? items : [];
+  const kw = String(datasetHistorySearch?.value || "").trim().toLowerCase();
+  const typeV = String(datasetHistoryFilterTestType?.value || "").trim().toLowerCase();
+  const pubV = String(datasetHistoryFilterPublic?.value || "").trim().toLowerCase();
+  const stV = String(datasetHistoryFilterStatus?.value || "").trim().toLowerCase();
+  return list.filter((x) => {
+    const name = String(x?.task_name || "").toLowerCase();
+    if (kw && !name.includes(kw)) return false;
+    const tm = String(x?.test_mode || "").trim().toLowerCase();
+    if (typeV && tm !== typeV) return false;
+    if (pubV === "yes" && !x?.is_public) return false;
+    if (pubV === "no" && !!x?.is_public) return false;
+    const st = String(x?.status || "").trim().toLowerCase();
+    if (stV && st !== stV) return false;
+    return true;
+  });
+}
+
 datasetTabNew?.addEventListener("click", () => {
   datasetSetTab("new");
   datasetResetNewTaskForm();
@@ -6063,6 +6119,33 @@ datasetForceRebuildIndexBtn?.addEventListener("click", async () => {
   }
 });
 datasetHistoryRefreshBtn?.addEventListener("click", () => loadDatasetHistory().catch((e) => showSyncNotice("历史读取失败 / Failed to load history: " + (e?.message || String(e)), "error")));
+datasetHistorySearch?.addEventListener("input", () => {
+  if (datasetHistorySearchDebounceTimer) clearTimeout(datasetHistorySearchDebounceTimer);
+  datasetHistorySearchDebounceTimer = setTimeout(() => {
+    datasetHistoryPage = 1;
+    loadDatasetHistory().catch((e) => showSyncNotice("历史读取失败 / Failed to load history: " + (e?.message || String(e)), "error"));
+  }, 180);
+});
+datasetHistoryFilterTestType?.addEventListener("change", () => {
+  datasetHistoryPage = 1;
+  loadDatasetHistory().catch((e) => showSyncNotice("历史读取失败 / Failed to load history: " + (e?.message || String(e)), "error"));
+});
+datasetHistoryFilterPublic?.addEventListener("change", () => {
+  datasetHistoryPage = 1;
+  loadDatasetHistory().catch((e) => showSyncNotice("历史读取失败 / Failed to load history: " + (e?.message || String(e)), "error"));
+});
+datasetHistoryFilterStatus?.addEventListener("change", () => {
+  datasetHistoryPage = 1;
+  loadDatasetHistory().catch((e) => showSyncNotice("历史读取失败 / Failed to load history: " + (e?.message || String(e)), "error"));
+});
+datasetHistoryClearFiltersBtn?.addEventListener("click", () => {
+  if (datasetHistorySearch) datasetHistorySearch.value = "";
+  if (datasetHistoryFilterTestType) datasetHistoryFilterTestType.value = "";
+  if (datasetHistoryFilterPublic) datasetHistoryFilterPublic.value = "";
+  if (datasetHistoryFilterStatus) datasetHistoryFilterStatus.value = "";
+  datasetHistoryPage = 1;
+  loadDatasetHistory().catch((e) => showSyncNotice("历史读取失败 / Failed to load history: " + (e?.message || String(e)), "error"));
+});
 datasetHistoryPageSize?.addEventListener("change", () => {
   datasetHistoryPageSizeValue = Math.max(1, Number(datasetHistoryPageSize.value || 15));
   datasetHistoryPage = 1;
