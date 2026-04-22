@@ -97,6 +97,10 @@ const datasetHistoryFilterStatus = document.getElementById("datasetHistoryFilter
 const datasetHistoryPageSize = document.getElementById("datasetHistoryPageSize");
 const datasetHistoryTableWrap = document.getElementById("datasetHistoryTableWrap");
 const datasetHistoryPager = document.getElementById("datasetHistoryPager");
+const datasetHeatmapModal = document.getElementById("datasetHeatmapModal");
+const datasetHeatmapModalBody = document.getElementById("datasetHeatmapModalBody");
+const datasetHeatmapCloseBtn = document.getElementById("datasetHeatmapCloseBtn");
+const datasetHeatmapDownloadBtn = document.getElementById("datasetHeatmapDownloadBtn");
 const datasetMaxRunningTasksInputEl = document.getElementById("datasetMaxRunningTasksInput");
 const datasetMaxUploadMbInputEl = document.getElementById("datasetMaxUploadMbInput");
 const datasetMaxConcurrencyInputEl = document.getElementById("datasetMaxConcurrencyInput");
@@ -127,6 +131,69 @@ let datasetViewerReadOnly = false;
 let datasetCancellingTaskIds = new Set();
 let datasetWasRetryingUi = false;
 let datasetHistorySearchDebounceTimer = null;
+
+function datasetCloseHeatmapModal(){
+  if (!datasetHeatmapModal) return;
+  datasetHeatmapModal.style.display = "none";
+  if (datasetHeatmapModalBody) datasetHeatmapModalBody.innerHTML = "";
+  if (datasetHeatmapDownloadBtn) {
+    datasetHeatmapDownloadBtn.style.display = "none";
+    datasetHeatmapDownloadBtn.setAttribute("href", "#");
+    datasetHeatmapDownloadBtn.setAttribute("download", "scanner-heatmap.svg");
+  }
+}
+
+async function datasetOpenHeatmapFromHistory(taskId){
+  if (!taskId) return;
+  if (!datasetHeatmapModal || !datasetHeatmapModalBody) return;
+  datasetHeatmapModal.style.display = "";
+  datasetHeatmapModalBody.innerHTML = "<div class='datasetHint'>Loading heatmap... Please wait.</div>";
+  if (datasetHeatmapDownloadBtn) {
+    datasetHeatmapDownloadBtn.style.display = "none";
+    datasetHeatmapDownloadBtn.setAttribute("href", "#");
+  }
+  try {
+    const resp = await authFetch("/api/dataset-test/" + encodeURIComponent(taskId) + "/heatmap", { method: "POST" });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.detail || ("HTTP " + resp.status));
+    if (String(data?.status || "") === "no_data") {
+      const tip = String(data?.detail || "当期测试结果中未保存Guardrail Scanner检测结果，请在测试时候勾选：记录阻挡的scanner名称 选项。 / No Guardrail Scanner results were saved in this test. Please enable: record blocked scanner names.");
+      if (datasetHeatmapModalBody) {
+        datasetHeatmapModalBody.innerHTML = "<div class='datasetHint'>" + escapeHtml(tip) + "</div>";
+      }
+      if (datasetHeatmapDownloadBtn) {
+        datasetHeatmapDownloadBtn.style.display = "none";
+        datasetHeatmapDownloadBtn.setAttribute("href", "#");
+      }
+      return;
+    }
+    const url = String(data?.url || "");
+    if (!url) throw new Error("empty heatmap url");
+    if (datasetHeatmapModalBody) {
+      datasetHeatmapModalBody.innerHTML =
+        "<img src='" + escapeHtml(url) + "' alt='Scanner heatmap' />"
+        + "<div class='datasetHint' style='margin-top:8px'>Heatmap generated from failed_scanner_names aggregation.</div>";
+    }
+    if (datasetHeatmapDownloadBtn) {
+      datasetHeatmapDownloadBtn.style.display = "";
+      datasetHeatmapDownloadBtn.setAttribute("href", url);
+      datasetHeatmapDownloadBtn.setAttribute("download", String(data?.filename || "scanner-heatmap.svg"));
+    }
+    if (data?.generated) {
+      showSyncNotice("Heatmap generated successfully.", "success", 1400);
+    } else {
+      showSyncNotice("Loaded cached heatmap.", "info", 1200);
+    }
+  } catch (e) {
+    if (datasetHeatmapModalBody) {
+      datasetHeatmapModalBody.innerHTML = "<div class='datasetHint'>Failed to generate heatmap: " + escapeHtml(e?.message || String(e)) + "</div>";
+    }
+    if (datasetHeatmapDownloadBtn) {
+      datasetHeatmapDownloadBtn.style.display = "none";
+      datasetHeatmapDownloadBtn.setAttribute("href", "#");
+    }
+  }
+}
 let configuredAppTimezone = "UTC+08:00";
 let agenticToolConfigData = null;
 let agenticSelectedTool = "";
@@ -5836,7 +5903,10 @@ async function loadDatasetHistory(){
           ? "<button type='button' disabled class='datasetActionBtn datasetActionBtn--retry datasetRetryHistoryBtnDisabled'>补测中 / Retrying</button>"
           : "<button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--retry datasetRetryHistoryBtn'>补测错误项 / Retry errors</button>";
       }
-      actionBtn = retryHtml + "<button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--delete datasetDeleteHistoryBtn'>Delete</button>";
+      const heatmapBtn = resultExists
+        ? "<button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--heatmap datasetHeatmapHistoryBtn'>Heatmap</button>"
+        : "";
+      actionBtn = retryHtml + heatmapBtn + "<button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--delete datasetDeleteHistoryBtn'>Delete</button>";
     }
     const retryTag = retryIng ? "<span class='datasetRetryTag'>补测中 / Retrying</span> " : "";
     const segUnionN = Number(x.tested_union_size || x.segments_union_size || x.effective_rows || 0);
@@ -6052,6 +6122,13 @@ async function loadDatasetHistory(){
       }
     });
   });
+  Array.from(datasetHistoryTableWrap.querySelectorAll(".datasetHeatmapHistoryBtn")).forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const tid = String(btn.getAttribute("data-task-id") || "").trim();
+      if (!tid) return;
+      await datasetOpenHeatmapFromHistory(tid);
+    });
+  });
   datasetRefreshRunningTasksBar().catch(() => {});
   } catch (e) {
     datasetHistoryTableWrap.innerHTML =
@@ -6175,6 +6252,10 @@ datasetHistoryBatchDeleteBtn?.addEventListener("click", async () => {
   } catch (e) {
     showSyncNotice("批量删除失败 / Batch delete failed: " + (e?.message || String(e)), "error");
   }
+});
+datasetHeatmapCloseBtn?.addEventListener("click", datasetCloseHeatmapModal);
+datasetHeatmapModal?.addEventListener("click", (ev) => {
+  if (ev.target === datasetHeatmapModal) datasetCloseHeatmapModal();
 });
 datasetConcurrency?.addEventListener("input", datasetUpdateConcurrencyOverMaxHint);
 datasetConcurrency?.addEventListener("change", datasetUpdateConcurrencyOverMaxHint);

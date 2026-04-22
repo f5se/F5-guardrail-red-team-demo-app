@@ -11,6 +11,7 @@ import hashlib
 import secrets
 import threading
 import mimetypes
+import html
 from collections import defaultdict, deque
 from datetime import datetime, timezone, timedelta
 from typing import Deque, Dict, List, Optional, Tuple
@@ -2870,6 +2871,7 @@ async def get_user_activity(
 DATASET_RAW_DIR = os.path.join(BASE_DIR, "poc", "raw")
 DATASET_RESULT_DIR = os.path.join(BASE_DIR, "poc", "result")
 DATASET_STATE_DIR = os.path.join(BASE_DIR, "poc", "state")
+DATASET_HEATMAP_DIR = os.path.join(BASE_DIR, "poc", "heatmap")
 DATASET_INDEX_PATH = os.path.join(BASE_DIR, "poc", "dataset_tasks_index.json")
 DATASET_LOCK = threading.RLock()
 
@@ -2959,7 +2961,7 @@ class DatasetTaskExtendRangeIn(BaseModel):
 
 
 def _dataset_ensure_dirs():
-    for p in (DATASET_RAW_DIR, DATASET_RESULT_DIR, DATASET_STATE_DIR):
+    for p in (DATASET_RAW_DIR, DATASET_RESULT_DIR, DATASET_STATE_DIR, DATASET_HEATMAP_DIR):
         os.makedirs(p, exist_ok=True)
 
 
@@ -2974,6 +2976,135 @@ def _dataset_state_path(task_id: str) -> str:
 
 def _dataset_result_path(task_id: str) -> str:
     return os.path.join(DATASET_RESULT_DIR, f"{task_id}_result.csv")
+
+
+def _dataset_heatmap_path_from_result(result_path: str) -> str:
+    base = os.path.basename(str(result_path or ""))
+    if not base:
+        return ""
+    # Keep the heatmap filename aligned with result filename.
+    # Example: task_result.csv -> task_result.csv.svg
+    return os.path.join(DATASET_HEATMAP_DIR, f"{base}.svg")
+
+
+def _dataset_parse_failed_scanners_cell(cell: str) -> List[str]:
+    txt = str(cell or "").strip()
+    if not txt:
+        return []
+    parts = re.split(r"\s*,\s*", txt.replace("，", ","))
+    out: List[str] = []
+    seen = set()
+    for p in parts:
+        name = str(p or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+    return out
+
+
+def _dataset_collect_scanner_heatmap_stats(result_csv_path: str) -> Tuple[Dict[str, int], Dict[Tuple[str, str], int]]:
+    scanner_count: Dict[str, int] = defaultdict(int)
+    pair_count: Dict[Tuple[str, str], int] = defaultdict(int)
+    try:
+        with open(result_csv_path, "r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                scanners = _dataset_parse_failed_scanners_cell(row.get("failed_scanner_names") or "")
+                if not scanners:
+                    continue
+                scanners = sorted(scanners)
+                for s in scanners:
+                    scanner_count[s] += 1
+                for i in range(len(scanners)):
+                    a = scanners[i]
+                    pair_count[(a, a)] += 1
+                    for j in range(i + 1, len(scanners)):
+                        b = scanners[j]
+                        pair_count[(a, b)] += 1
+                        pair_count[(b, a)] += 1
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to read result csv: {e}")
+    return scanner_count, pair_count
+
+
+def _dataset_generate_scanner_heatmap_svg(
+    scanner_count: Dict[str, int],
+    pair_count: Dict[Tuple[str, str], int],
+    task_name: str,
+    out_svg_path: str,
+) -> None:
+    top = sorted(scanner_count.items(), key=lambda kv: kv[1], reverse=True)[:20]
+    names = [k for (k, _v) in top]
+    n = len(names)
+    width = 1280
+    height = 860
+    pad = 48
+    label_left = 320
+    legend_w = 200
+    title = "Scanner Co-occurrence Heatmap"
+    subtitle = "Source: failed_scanner_names aggregated from result.csv"
+    escaped_task = html.escape(str(task_name or ""))
+
+    parts: List[str] = []
+    parts.append(f"<svg xmlns='http://www.w3.org/2000/svg' width='{width}' height='{height}' viewBox='0 0 {width} {height}'>")
+    parts.append("<defs><linearGradient id='bg' x1='0' y1='0' x2='0' y2='1'>"
+                 "<stop offset='0%' stop-color='#f8fbff'/><stop offset='100%' stop-color='#eef4ff'/>"
+                 "</linearGradient></defs>")
+    parts.append("<rect x='0' y='0' width='100%' height='100%' fill='url(#bg)'/>")
+    parts.append(f"<text x='40' y='50' font-size='28' font-weight='700' fill='#0f172a'>{title}</text>")
+    parts.append(f"<text x='40' y='82' font-size='14' fill='#475569'>{subtitle}</text>")
+
+    # caller should skip generation when n == 0
+    max_v = 1
+    for a in names:
+        for b in names:
+            max_v = max(max_v, int(pair_count.get((a, b), 0)))
+
+    avail_w = max(200, width - pad - label_left - legend_w - pad)
+    avail_h = max(200, height - 180 - pad - 90)
+    cell = max(20, min(52, int(min(avail_w / max(1, n), avail_h / max(1, n)))))
+    grid_w = n * cell
+    grid_h = n * cell
+    margin_left = label_left + max(0, (avail_w - grid_w) // 2)
+    margin_top = 150 + max(0, (avail_h - grid_h) // 2)
+
+    parts.append(f"<rect x='{margin_left-10}' y='{margin_top-10}' width='{grid_w+20}' height='{grid_h+20}' rx='12' fill='white' stroke='#cbd5e1'/>")
+    for i, r in enumerate(names):
+        yy = margin_top + i * cell + int(cell * 0.70)
+        parts.append(f"<text x='{margin_left-14}' y='{yy}' font-size='12' text-anchor='end' fill='#334155'>{html.escape(r)}</text>")
+    for j, c in enumerate(names):
+        xx = margin_left + j * cell + int(cell * 0.65)
+        parts.append(f"<text x='{xx}' y='{margin_top-14}' font-size='12' fill='#334155' transform='rotate(-45 {xx},{margin_top-14})'>{html.escape(c)}</text>")
+    for i, a in enumerate(names):
+        for j, b in enumerate(names):
+            v = int(pair_count.get((a, b), 0))
+            t = (v / max_v) if max_v > 0 else 0.0
+            # blue scale
+            r = int(239 - (168 * t))
+            g = int(246 - (185 * t))
+            bb = int(255 - (95 * t))
+            x = margin_left + j * cell
+            y = margin_top + i * cell
+            parts.append(f"<rect x='{x}' y='{y}' width='{cell-1}' height='{cell-1}' fill='rgb({r},{g},{bb})'/>")
+    lx = margin_left + grid_w + 36
+    ly = margin_top + 14
+    parts.append(f"<text x='{lx}' y='{ly}' font-size='13' fill='#475569'>Count scale</text>")
+    for k in range(6):
+        tt = k / 5
+        rr = int(239 - (168 * tt))
+        gg = int(246 - (185 * tt))
+        bbb = int(255 - (95 * tt))
+        yy = ly + 16 + k * 20
+        parts.append(f"<rect x='{lx}' y='{yy}' width='20' height='15' fill='rgb({rr},{gg},{bbb})' stroke='#cbd5e1'/>")
+        vv = int(round(max_v * tt))
+        parts.append(f"<text x='{lx+28}' y='{yy+12}' font-size='12' fill='#334155'>{vv}</text>")
+
+    parts.append(f"<text x='{width-20}' y='{height-16}' font-size='12' text-anchor='end' fill='#94a3b8'>Task: {escaped_task}</text>")
+    parts.append("</svg>")
+    svg_content = "".join(parts)
+    with open(out_svg_path, "w", encoding="utf-8") as f:
+        f.write(svg_content)
 
 
 def _dataset_make_task_id() -> str:
@@ -4442,9 +4573,10 @@ async def api_dataset_test_delete(request: Request, payload: DatasetTaskDeleteIn
             raise HTTPException(status_code=400, detail="running/queued task cannot be deleted")
         raw_path = str(state.get("source_file_path") or "")
         result_path = str(state.get("result_file_path") or "")
+        heatmap_path = _dataset_heatmap_path_from_result(result_path)
         state_path = _dataset_state_path(payload.task_id)
         DATASET_TASK_RUNTIME_KEYS.pop(payload.task_id, None)
-    for p in (raw_path, result_path, state_path):
+    for p in (raw_path, result_path, heatmap_path, state_path):
         if not p:
             continue
         try:
@@ -4484,9 +4616,10 @@ async def api_dataset_test_delete_batch(request: Request, payload: DatasetTaskBa
                     continue
                 raw_path = str(state.get("source_file_path") or "")
                 result_path = str(state.get("result_file_path") or "")
+                heatmap_path = _dataset_heatmap_path_from_result(result_path)
                 state_path = _dataset_state_path(tid)
                 DATASET_TASK_RUNTIME_KEYS.pop(tid, None)
-            for p in (raw_path, result_path, state_path):
+            for p in (raw_path, result_path, heatmap_path, state_path):
                 if not p:
                     continue
                 try:
@@ -4624,3 +4757,61 @@ async def api_dataset_test_download_result(request: Request, task_id: str):
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="result not found")
     return FileResponse(path=path, filename=os.path.basename(path))
+
+
+@app.post("/api/dataset-test/{task_id}/heatmap")
+async def api_dataset_test_generate_heatmap(request: Request, task_id: str):
+    username = require_user(request)
+    with DATASET_LOCK:
+        state = _dataset_load_state(task_id)
+    _dataset_validate_read_access(state, username)
+    result_path = str(state.get("result_file_path") or "").strip()
+    if not result_path.startswith(DATASET_RESULT_DIR + os.sep):
+        raise HTTPException(status_code=403, detail="invalid result file path")
+    if not os.path.exists(result_path):
+        raise HTTPException(status_code=404, detail="result not found")
+    _dataset_ensure_dirs()
+    heatmap_path = _dataset_heatmap_path_from_result(result_path)
+    if not heatmap_path:
+        raise HTTPException(status_code=400, detail="invalid heatmap path")
+    scanner_count, pair_count = _dataset_collect_scanner_heatmap_stats(result_path)
+    if not scanner_count:
+        # If no scanner data exists, do not keep/generate empty chart files.
+        try:
+            if os.path.exists(heatmap_path):
+                os.remove(heatmap_path)
+        except Exception:
+            pass
+        return JSONResponse(
+            {
+                "status": "no_data",
+                "detail": "当期测试结果中未保存Guardrail Scanner检测结果，请在测试时候勾选：记录阻挡的scanner名称 选项。 / No Guardrail Scanner results were saved in this test. Please enable: record blocked scanner names.",
+            }
+        )
+    generated = False
+    if not os.path.exists(heatmap_path):
+        _dataset_generate_scanner_heatmap_svg(
+            scanner_count=scanner_count,
+            pair_count=pair_count,
+            task_name=str(state.get("task_name") or ""),
+            out_svg_path=heatmap_path,
+        )
+        generated = True
+    url = "/api/dataset-test/" + str(task_id) + "/heatmap?t=" + str(int(time.time()))
+    filename = os.path.basename(heatmap_path)
+    return JSONResponse({"status": "ok", "url": url, "filename": filename, "generated": generated})
+
+
+@app.get("/api/dataset-test/{task_id}/heatmap")
+async def api_dataset_test_get_heatmap(request: Request, task_id: str):
+    username = require_user(request)
+    with DATASET_LOCK:
+        state = _dataset_load_state(task_id)
+    _dataset_validate_read_access(state, username)
+    result_path = str(state.get("result_file_path") or "").strip()
+    if not result_path.startswith(DATASET_RESULT_DIR + os.sep):
+        raise HTTPException(status_code=403, detail="invalid result file path")
+    heatmap_path = _dataset_heatmap_path_from_result(result_path)
+    if not heatmap_path or not os.path.exists(heatmap_path):
+        raise HTTPException(status_code=404, detail="heatmap not found")
+    return FileResponse(path=heatmap_path, filename=os.path.basename(heatmap_path), media_type="image/svg+xml")
