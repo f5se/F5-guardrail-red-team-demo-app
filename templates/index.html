@@ -904,11 +904,51 @@
 
               <div class="datasetStepPage" id="datasetStep2">
                 <h4>Step 2 Guardrail 参数与速率 <span class="zh">/ Guardrail Config & Rate</span></h4>
-                <p class="datasetStepHint">以下三项留空即使用系统缺省（来自服务器 <code>.env</code> 中的 Project / Token / Provider）。<span class="zh"> Leave these fields empty to use server defaults from <code>.env</code>.</span></p>
+                <p class="datasetStepHint">先选择执行接口模式：F5 Guardrail SDK 或 OpenAI 兼容接口。正式测试开始后不可再更改。<span class="zh">Choose execution mode first: F5 Guardrail SDK or OpenAI-compatible API. Locked after start.</span></p>
                 <div class="datasetRow datasetFormRow">
+                  <label class="datasetFieldLabel"><input type="radio" name="datasetExecutionMode" value="f5_sdk" checked /> F5 Guardrail SDK</label>
+                  <label class="datasetFieldLabel"><input type="radio" name="datasetExecutionMode" value="openai_compatible" /> OpenAI Compatible API</label>
+                </div>
+                <div class="datasetStepHint" id="datasetExecutionModeHint">F5 模式：可选记录阻挡 scanner 名称。OpenAI 兼容模式：需填写 Endpoint / API Key / Model，且不支持 scanner 名称记录。阻断判定优先级：HTTP status &gt; JSONPath（仅 Content-Type 为 JSON）&gt; 通用 Payload 关键词。<span class="zh">F5 mode supports scanner names; OpenAI mode requires Endpoint/API key/Model and disables scanner names. Block detection priority: HTTP status &gt; JSONPath (JSON content-type only) &gt; generic payload keywords.</span></div>
+                <div class="datasetRow datasetFormRow" id="datasetF5ConfigRow">
                   <label class="datasetFieldLabel">Project ID <input type="text" id="datasetProjectId" value="" placeholder="" autocomplete="off" /></label>
                   <label class="datasetFieldLabel">API Key <input type="password" id="datasetApiKey" value="" placeholder="" autocomplete="off" /></label>
                   <label class="datasetFieldLabel">Provider <input type="text" id="datasetProvider" value="" placeholder="" autocomplete="off" /></label>
+                </div>
+                <div class="datasetOpenAICompatPanel" id="datasetOpenAICompatPanel" style="display:none;">
+                  <div class="datasetOpenAICompatPanelTitle">OpenAI Compatible API Config</div>
+                  <div class="datasetOpenAIDetectBox datasetOpenAIDetectBox--solid">
+                    <div class="datasetOpenAIDetectBoxTitle">OpenAI Connection</div>
+                    <div class="datasetRow datasetFormRow" id="datasetOpenAICompatRow" style="display:none;">
+                      <label class="datasetFieldLabel">API Endpoint（完整 URL） / Full URL <input type="text" id="datasetOpenaiApiEndpoint" value="" placeholder="https://example.com/v1" autocomplete="off" /></label>
+                      <label class="datasetFieldLabel">API Key <input type="password" id="datasetOpenaiApiKey" value="" placeholder="" autocomplete="off" /></label>
+                      <label class="datasetFieldLabel">Model Name <input type="text" id="datasetOpenaiModel" value="" placeholder="gpt-4o-mini" autocomplete="off" /></label>
+                    </div>
+                  </div>
+
+                  <div class="datasetOpenAIDetectPanel" id="datasetOpenAIBlockDetectPanel" style="display:none;">
+                    <div class="datasetOpenAIDetectPanelTitle">Blocked Detection Rules (OR, with priority)</div>
+                    <div class="datasetOpenAIDetectBox datasetOpenAIDetectBox--dashed">
+                      <div class="datasetOpenAIDetectBoxTitle">Priority 1: HTTP Status</div>
+                      <div class="datasetRow datasetFormRow" id="datasetOpenAIBlockDetectStatusRow">
+                        <label class="datasetFieldLabel">Blocked HTTP Statuses（逗号分隔） / e.g. 403,451 <input type="text" id="datasetOpenaiBlockHttpStatuses" value="403" placeholder="403,451" autocomplete="off" /></label>
+                      </div>
+                    </div>
+                    <div class="datasetOpenAIDetectBox datasetOpenAIDetectBox--dashed">
+                      <div class="datasetOpenAIDetectBoxTitle">Priority 2: JSONPath Match (JSON response only)</div>
+                      <div class="datasetRow datasetFormRow" id="datasetOpenAIBlockDetectRow">
+                        <label class="datasetFieldLabel">JSONPath（仅 JSON 响应） / e.g. choices[0].finish_reason <input type="text" id="datasetOpenaiBlockJsonPath" value="" placeholder="choices[0].finish_reason" autocomplete="off" /></label>
+                        <label class="datasetFieldLabel">JSONPath Expected Value / e.g. content_filter <input type="text" id="datasetOpenaiBlockJsonValue" value="" placeholder="content_filter" autocomplete="off" /></label>
+                      </div>
+                    </div>
+                    <div class="datasetOpenAIDetectBox datasetOpenAIDetectBox--dashed">
+                      <div class="datasetOpenAIDetectBoxTitle">Priority 3: Generic Payload Keywords</div>
+                      <div class="datasetRow datasetFormRow" id="datasetOpenAIBlockDetectPayloadRow">
+                        <label class="datasetFieldLabel">Payload Block Keywords（逗号分隔） / Payload 关键词 <input type="text" id="datasetOpenaiBlockPayloadKeywords" value="" placeholder="content policy,blocked by policy" autocomplete="off" /></label>
+                      </div>
+                    </div>
+                  </div>
+                  <p class="datasetStepHint" id="datasetOpenaiDetectSampleHint" style="display:none;">JSONPath 示例：<code>choices[0].finish_reason</code> + 值 <code>content_filter</code>；或 <code>error.code</code> + 值 <code>policy_blocked</code>。三种检测采用 OR 关系，任意命中即视为 Blocked（按优先级短路）。<span class="zh">JSONPath examples and OR matching with short-circuit by priority.</span></p>
                 </div>
                 <div class="datasetRow datasetFormRow">
                   <label class="datasetFieldLabel">并发数 / Concurrency <input type="number" id="datasetConcurrency" min="1" max="3" value="1" /></label>

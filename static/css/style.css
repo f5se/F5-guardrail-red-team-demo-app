@@ -3801,6 +3801,16 @@ code{
 .datasetFileUploadRow .datasetUploadFormatHint{width:100%;flex-basis:100%;margin:0;line-height:1.45}
 .datasetStepHint{margin:0 0 10px 0;font-size:13px;color:#64748b;line-height:1.5}
 .datasetStepHint code{font-size:12px;background:#f1f5f9;padding:1px 5px;border-radius:4px}
+.datasetOpenAICompatPanel{width:100%;padding:10px 12px;border:1px solid #c7d2fe;border-radius:12px;background:linear-gradient(180deg,#f8fbff 0%,#ffffff 55%)}
+.datasetOpenAICompatPanelTitle{font-size:13px;font-weight:700;color:#1e3a8a;margin-bottom:8px}
+.datasetOpenAIDetectPanel{margin-top:8px;padding:10px;border:1px solid #dbeafe;border-radius:12px;background:#fff}
+.datasetOpenAIDetectPanelTitle{font-size:12px;font-weight:700;color:#334155;margin-bottom:8px}
+.datasetOpenAIDetectBox{padding:8px 10px;border-radius:10px;background:#fff}
+.datasetOpenAIDetectBox + .datasetOpenAIDetectBox{margin-top:8px}
+.datasetOpenAIDetectBox--solid{border:1px solid #93c5fd}
+.datasetOpenAIDetectBox--dashed{border:1px dashed #94a3b8}
+.datasetOpenAIDetectBoxTitle{font-size:12px;font-weight:700;color:#475467;margin-bottom:6px}
+#datasetOpenaiBlockJsonPath{min-width:340px;width:420px;max-width:100%}
 .datasetSummaryCard{border:1px solid #dbeafe;background:#eff6ff;border-radius:12px;padding:12px;line-height:1.6;color:#1e3a8a}
 .datasetSummaryLine{display:flex;flex-wrap:wrap;gap:6px 10px;margin:6px 0;align-items:baseline}
 .datasetSummaryLabel{font-weight:600;color:#1d4ed8;min-width:8em}

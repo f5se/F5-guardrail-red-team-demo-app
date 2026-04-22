@@ -63,6 +63,21 @@ const datasetPreviewWrap = document.getElementById("datasetPreviewWrap");
 const datasetProjectId = document.getElementById("datasetProjectId");
 const datasetApiKey = document.getElementById("datasetApiKey");
 const datasetProvider = document.getElementById("datasetProvider");
+const datasetExecutionModeRadios = Array.from(document.querySelectorAll("input[name='datasetExecutionMode']"));
+const datasetF5ConfigRow = document.getElementById("datasetF5ConfigRow");
+const datasetOpenAICompatPanel = document.getElementById("datasetOpenAICompatPanel");
+const datasetOpenAICompatRow = document.getElementById("datasetOpenAICompatRow");
+const datasetOpenAIBlockDetectPanel = document.getElementById("datasetOpenAIBlockDetectPanel");
+const datasetOpenAIBlockDetectRow = document.getElementById("datasetOpenAIBlockDetectRow");
+const datasetOpenAIBlockDetectPayloadRow = document.getElementById("datasetOpenAIBlockDetectPayloadRow");
+const datasetOpenaiApiEndpoint = document.getElementById("datasetOpenaiApiEndpoint");
+const datasetOpenaiApiKey = document.getElementById("datasetOpenaiApiKey");
+const datasetOpenaiModel = document.getElementById("datasetOpenaiModel");
+const datasetOpenaiBlockHttpStatuses = document.getElementById("datasetOpenaiBlockHttpStatuses");
+const datasetOpenaiBlockJsonPath = document.getElementById("datasetOpenaiBlockJsonPath");
+const datasetOpenaiBlockJsonValue = document.getElementById("datasetOpenaiBlockJsonValue");
+const datasetOpenaiBlockPayloadKeywords = document.getElementById("datasetOpenaiBlockPayloadKeywords");
+const datasetOpenaiDetectSampleHint = document.getElementById("datasetOpenaiDetectSampleHint");
 const datasetConcurrency = document.getElementById("datasetConcurrency");
 const datasetGuardrailTimeout = document.getElementById("datasetGuardrailTimeout");
 const datasetInterval = document.getElementById("datasetInterval");
@@ -844,6 +859,50 @@ function datasetSetSelectedTestMode(mode){
   });
 }
 
+function datasetNormalizeExecutionMode(v){
+  const mode = String(v || "").trim().toLowerCase();
+  return mode === "openai_compatible" ? "openai_compatible" : "f5_sdk";
+}
+
+function datasetGetExecutionMode(){
+  const picked = datasetExecutionModeRadios.find((r) => r.checked);
+  return datasetNormalizeExecutionMode(picked ? picked.value : "f5_sdk");
+}
+
+function datasetSetExecutionMode(mode){
+  const normalized = datasetNormalizeExecutionMode(mode);
+  datasetExecutionModeRadios.forEach((r) => {
+    r.checked = r.value === normalized;
+  });
+}
+
+function datasetSyncExecutionModeUi(task){
+  const mode = datasetGetExecutionMode();
+  if (datasetF5ConfigRow) datasetF5ConfigRow.style.display = mode === "f5_sdk" ? "" : "none";
+  if (datasetOpenAICompatPanel) datasetOpenAICompatPanel.style.display = mode === "openai_compatible" ? "" : "none";
+  if (datasetOpenAICompatRow) datasetOpenAICompatRow.style.display = mode === "openai_compatible" ? "" : "none";
+  if (datasetOpenAIBlockDetectPanel) datasetOpenAIBlockDetectPanel.style.display = mode === "openai_compatible" ? "" : "none";
+  if (datasetOpenAIBlockDetectRow) datasetOpenAIBlockDetectRow.style.display = mode === "openai_compatible" ? "" : "none";
+  if (datasetOpenAIBlockDetectPayloadRow) datasetOpenAIBlockDetectPayloadRow.style.display = mode === "openai_compatible" ? "" : "none";
+  if (datasetOpenaiDetectSampleHint) datasetOpenaiDetectSampleHint.style.display = mode === "openai_compatible" ? "" : "none";
+  if (datasetRecordFailedScanners) {
+    const shouldDisableScannerNames = mode === "openai_compatible";
+    if (shouldDisableScannerNames) datasetRecordFailedScanners.checked = false;
+    const ro = datasetIsViewingOthersPublicTask();
+    datasetRecordFailedScanners.disabled = !!ro || shouldDisableScannerNames;
+    datasetRecordFailedScanners.title = shouldDisableScannerNames
+      ? "OpenAI compatible mode does not support scanner-name recording."
+      : "";
+  }
+  const t = task && typeof task === "object" ? task : {};
+  const editable = datasetIsTestModeEditable(t);
+  const lockHint = "Execution mode cannot be changed after start or during retry.";
+  datasetExecutionModeRadios.forEach((r) => {
+    r.disabled = !editable;
+    r.title = editable ? "" : lockHint;
+  });
+}
+
 function datasetGetIsPublic(){
   const picked = datasetPublicRadios.find((r) => r.checked);
   return picked != null && String(picked.value || "") === "1";
@@ -894,6 +953,13 @@ function datasetUpdateDatasetReadOnlyUi(task){
     datasetProjectId,
     datasetApiKey,
     datasetProvider,
+    datasetOpenaiApiEndpoint,
+    datasetOpenaiApiKey,
+    datasetOpenaiModel,
+    datasetOpenaiBlockHttpStatuses,
+    datasetOpenaiBlockJsonPath,
+    datasetOpenaiBlockJsonValue,
+    datasetOpenaiBlockPayloadKeywords,
     datasetConcurrency,
     datasetGuardrailTimeout,
     datasetInterval,
@@ -925,6 +991,12 @@ function datasetUpdateDatasetReadOnlyUi(task){
     if (!ro) r.title = modeEditable ? "" : lockHint;
     else r.title = "";
   });
+  datasetExecutionModeRadios.forEach((r) => {
+    r.disabled = !!ro || !modeEditable;
+    if (!ro) r.title = modeEditable ? "" : lockHint;
+    else r.title = "";
+  });
+  datasetSyncExecutionModeUi(snap);
   datasetSyncUploadBtn();
   if (ro) {
     ["datasetStep2NextBtn", "datasetStartBtn", "datasetCancelBtn", "datasetPauseBtn", "datasetResumeBtn", "datasetRetryErrorsBtn"].forEach((id) => {
@@ -989,6 +1061,7 @@ function datasetUpdateTestModeLockUi(task){
   if (warn) {
     warn.style.display = needsChoice ? "" : "none";
   }
+  datasetSyncExecutionModeUi(t);
 }
 
 function datasetGetModeMeta(mode){
@@ -4802,6 +4875,18 @@ function datasetResetNewTaskForm(){
   if (datasetProjectId) datasetProjectId.value = "";
   if (datasetApiKey) datasetApiKey.value = "";
   if (datasetProvider) datasetProvider.value = "";
+  datasetSetExecutionMode("f5_sdk");
+  if (datasetOpenaiApiEndpoint) datasetOpenaiApiEndpoint.value = "";
+  if (datasetOpenaiApiKey) datasetOpenaiApiKey.value = "";
+  if (datasetOpenaiModel) datasetOpenaiModel.value = "";
+  if (datasetOpenaiBlockHttpStatuses) datasetOpenaiBlockHttpStatuses.value = "403";
+  if (datasetOpenaiBlockJsonPath) datasetOpenaiBlockJsonPath.value = "";
+  if (datasetOpenaiBlockJsonValue) datasetOpenaiBlockJsonValue.value = "";
+  if (datasetOpenaiBlockPayloadKeywords) datasetOpenaiBlockPayloadKeywords.value = "";
+  if (datasetOpenaiBlockHttpStatuses) datasetOpenaiBlockHttpStatuses.value = "403";
+  if (datasetOpenaiBlockJsonPath) datasetOpenaiBlockJsonPath.value = "";
+  if (datasetOpenaiBlockJsonValue) datasetOpenaiBlockJsonValue.value = "";
+  if (datasetOpenaiBlockPayloadKeywords) datasetOpenaiBlockPayloadKeywords.value = "";
   if (datasetConcurrency) datasetConcurrency.value = "1";
   if (datasetGuardrailTimeout) datasetGuardrailTimeout.value = "20";
   if (datasetInterval) datasetInterval.value = "1";
@@ -4829,6 +4914,7 @@ function datasetResetNewTaskForm(){
   datasetRenderCapacityNotice(datasetCapacityState);
   datasetGotoStep(1);
   datasetUpdateStep1FromTask(datasetTaskSnapshot);
+  datasetSyncExecutionModeUi(datasetTaskSnapshot);
   datasetRenderTaskNameBanner(datasetTaskSnapshot);
   datasetBuildSummary();
   datasetRefreshCapacity().catch(() => {});
@@ -4919,6 +5005,7 @@ async function datasetFetchPreviewRows(){
 function datasetApplyTaskToForm(task){
   if (!task || typeof task !== "object") return;
   datasetSetSelectedTestMode(task.test_mode);
+  datasetSetExecutionMode(task.execution_mode || "f5_sdk");
   datasetSetIsPublic(!!task.is_public);
   if (datasetTaskNameInput && String(task.task_name || "").trim()) {
     datasetTaskNameInput.value = String(task.task_name || "").trim();
@@ -4932,11 +5019,33 @@ function datasetApplyTaskToForm(task){
   if (datasetProjectId) datasetProjectId.value = "";
   if (datasetProvider) datasetProvider.value = "";
   if (datasetApiKey) datasetApiKey.value = "";
+  if (datasetOpenaiApiEndpoint) datasetOpenaiApiEndpoint.value = "";
+  if (datasetOpenaiApiKey) datasetOpenaiApiKey.value = "";
+  if (datasetOpenaiModel) datasetOpenaiModel.value = "";
   if (datasetProjectId && String(task.project_id || "").trim()) {
     datasetProjectId.value = String(task.project_id || "").trim();
   }
   if (datasetProvider && String(task.provider_name || "").trim()) {
     datasetProvider.value = String(task.provider_name || "").trim();
+  }
+  if (datasetOpenaiApiEndpoint && String(task.openai_api_endpoint || "").trim()) {
+    datasetOpenaiApiEndpoint.value = String(task.openai_api_endpoint || "").trim();
+  }
+  if (datasetOpenaiModel && String(task.openai_model || "").trim()) {
+    datasetOpenaiModel.value = String(task.openai_model || "").trim();
+  }
+  if (datasetOpenaiBlockHttpStatuses) {
+    const arr = Array.isArray(task.openai_block_http_statuses) ? task.openai_block_http_statuses : [];
+    datasetOpenaiBlockHttpStatuses.value = arr.length ? arr.join(",") : "403";
+  }
+  if (datasetOpenaiBlockJsonPath && String(task.openai_block_json_path || "").trim()) {
+    datasetOpenaiBlockJsonPath.value = String(task.openai_block_json_path || "").trim();
+  }
+  if (datasetOpenaiBlockJsonValue && task.openai_block_json_value != null) {
+    datasetOpenaiBlockJsonValue.value = String(task.openai_block_json_value || "").trim();
+  }
+  if (datasetOpenaiBlockPayloadKeywords && String(task.openai_block_payload_keywords || "").trim()) {
+    datasetOpenaiBlockPayloadKeywords.value = String(task.openai_block_payload_keywords || "").trim();
   }
   if (task.max_concurrency_allowed != null && task.max_concurrency_allowed !== undefined) {
     datasetApplyConcurrencyUiMax(task.max_concurrency_allowed);
@@ -4959,6 +5068,7 @@ function datasetApplyTaskToForm(task){
   if (datasetRecordFailedScanners) {
     datasetRecordFailedScanners.checked = !!task.record_failed_scanner_names;
   }
+  datasetSyncExecutionModeUi(task);
   datasetUpdateConcurrencyOverMaxHint();
   if (datasetLastPreviewRows.length) datasetRenderPreview(datasetLastPreviewRows);
 }
@@ -5024,6 +5134,7 @@ async function datasetOpenTaskFromHistory(taskId){
 function datasetBuildSummary(){
   const card = document.getElementById("datasetSummaryCard");
   if (!card) return;
+  const executionMode = datasetGetExecutionMode();
   const apiNote = String(datasetTaskSnapshot.api_key_source || "") === "userProvided"
     ? datasetSummaryKV("API Key", "已使用自定义 Key（出于安全不回显，留空则继续沿用已保存密钥） / Custom key is set (masked for security).")
     : datasetSummaryKV("API Key", "使用系统缺省（.env） / Using server default (.env)");
@@ -5034,13 +5145,35 @@ function datasetBuildSummary(){
     datasetSummaryKV("任务名称 / Task Name", datasetGetTaskName(datasetTaskSnapshot) || "未填写 / Not set"),
     datasetSummaryKV("任务ID / Task ID", datasetTaskId || "未创建 / Not created"),
     datasetSummaryKV("测试类型 / Test Type", typeSummary),
+    datasetSummaryKV("执行接口模式 / Execution Mode", executionMode === "openai_compatible" ? "OpenAI Compatible API" : "F5 Guardrail SDK"),
     datasetSummaryKV("History 公开 / Public in History", pubLine),
     datasetSummaryKV("Prompt列(1基) / Prompt Col(1-based)", String(datasetPromptColumn?.value || "1")),
     datasetSummaryKV("第一行是标题 / Header Row", datasetHasHeader?.checked ? "是 / Yes" : "否 / No"),
     datasetSummaryKV("测试行范围 / Row Range", String(datasetRowStart?.value || "-") + " ~ " + String(datasetRowEnd?.value || "-")),
-    datasetSummaryKV("Project ID", (String(datasetProjectId?.value || "").trim() || "（系统缺省） / (Server default)")),
-    datasetSummaryKV("Provider", (String(datasetProvider?.value || "").trim() || "（系统缺省） / (Server default)")),
-    apiNote,
+    (executionMode === "openai_compatible")
+      ? datasetSummaryKV("OpenAI Endpoint / Model", (String(datasetOpenaiApiEndpoint?.value || "").trim() || "未填写 / Not set") + " / " + (String(datasetOpenaiModel?.value || "").trim() || "未填写 / Not set"))
+      : datasetSummaryKV("Project ID", (String(datasetProjectId?.value || "").trim() || "（系统缺省） / (Server default)")),
+    (executionMode === "openai_compatible")
+      ? datasetSummaryKV("OpenAI Provider", "OpenAI-compatible endpoint")
+      : datasetSummaryKV("Provider", (String(datasetProvider?.value || "").trim() || "（系统缺省） / (Server default)")),
+    (executionMode === "openai_compatible")
+      ? datasetSummaryKV("OpenAI API Key", String(datasetOpenaiApiKey?.value || "").trim() ? "已填写（不回显） / Provided (masked)" : "未填写 / Not set")
+      : apiNote,
+    (executionMode === "openai_compatible")
+      ? datasetSummaryKV(
+        "Blocked Detection Priority",
+        "HTTP status > JSONPath(JSON) > Payload keywords"
+      )
+      : "",
+    (executionMode === "openai_compatible")
+      ? datasetSummaryKV(
+        "OpenAI Block Rules",
+        "status=" + (String(datasetOpenaiBlockHttpStatuses?.value || "").trim() || "403")
+        + " ; jsonpath=" + (String(datasetOpenaiBlockJsonPath?.value || "").trim() || "—")
+        + " ; value=" + (String(datasetOpenaiBlockJsonValue?.value || "").trim() || "—")
+        + " ; keywords=" + (String(datasetOpenaiBlockPayloadKeywords?.value || "").trim() || "—")
+      )
+      : "",
     datasetSummaryKV(
       "并发 / Guardrail超时 / 批次间隔",
       String(datasetConcurrency?.value || 1)
@@ -5050,7 +5183,12 @@ function datasetBuildSummary(){
         + String(datasetInterval?.value || 1)
         + " 秒",
     ),
-    datasetSummaryKV("记录阻挡Scanner名称 / Record Blocked Scanner Names", datasetRecordFailedScanners?.checked ? "是 / Yes" : "否 / No"),
+    datasetSummaryKV(
+      "记录阻挡Scanner名称 / Record Blocked Scanner Names",
+      executionMode === "openai_compatible"
+        ? "OpenAI 模式不支持 / Not supported in OpenAI mode"
+        : (datasetRecordFailedScanners?.checked ? "是 / Yes" : "否 / No")
+    ),
     datasetSummaryKV("任务状态 / Task Status", String(datasetTaskSnapshot.status || "—") + " · " + String(datasetTaskSnapshot.phase || "—")),
   ].join("");
   card.innerHTML = html;
@@ -5207,6 +5345,47 @@ async function datasetSaveConfig(){
     showSyncNotice(taskNameErr, "error");
     return;
   }
+  const executionMode = datasetGetExecutionMode();
+  const parseStatusList = (raw) => {
+    const txt = String(raw || "").trim();
+    if (!txt) return [];
+    const out = [];
+    const seen = new Set();
+    for (const seg of txt.split(",")) {
+      const t = String(seg || "").trim();
+      if (!t) continue;
+      const n = Number(t);
+      if (!Number.isInteger(n) || n < 100 || n > 599) {
+        throw new Error("HTTP status must be integer 100..599, got: " + t);
+      }
+      if (seen.has(n)) continue;
+      seen.add(n);
+      out.push(n);
+    }
+    return out;
+  };
+  let openaiBlockStatuses = [];
+  if (executionMode === "openai_compatible") {
+    const endpoint = String(datasetOpenaiApiEndpoint?.value || "").trim();
+    const key = String(datasetOpenaiApiKey?.value || "").trim();
+    const model = String(datasetOpenaiModel?.value || "").trim();
+    if (!endpoint || !key || !model) {
+      showSyncNotice("OpenAI 兼容模式必须填写 Endpoint / API Key / Model。 / OpenAI-compatible mode requires Endpoint/API key/Model.", "error");
+      return;
+    }
+    if (!/^https?:\/\//i.test(endpoint)) {
+      showSyncNotice("OpenAI Endpoint 必须是完整 URL（http:// 或 https:// 开头）。 / OpenAI endpoint must start with http:// or https://", "error");
+      return;
+    }
+    try {
+      openaiBlockStatuses = parseStatusList(datasetOpenaiBlockHttpStatuses?.value || "");
+    } catch (e) {
+      showSyncNotice("Blocked HTTP Statuses 配置错误 / Invalid status list: " + (e?.message || String(e)), "error");
+      return;
+    }
+    if (!openaiBlockStatuses.length) openaiBlockStatuses = [403];
+    if (datasetRecordFailedScanners) datasetRecordFailedScanners.checked = false;
+  }
   const payload = {
     task_id: datasetTaskId,
     task_name: taskName,
@@ -5217,6 +5396,14 @@ async function datasetSaveConfig(){
     project_id: String(datasetProjectId?.value || "").trim() || null,
     api_key: String(datasetApiKey?.value || "").trim() || null,
     provider_name: String(datasetProvider?.value || "").trim() || null,
+    execution_mode: executionMode,
+    openai_api_endpoint: String(datasetOpenaiApiEndpoint?.value || "").trim() || null,
+    openai_api_key: String(datasetOpenaiApiKey?.value || "").trim() || null,
+    openai_model: String(datasetOpenaiModel?.value || "").trim() || null,
+    openai_block_http_statuses: executionMode === "openai_compatible" ? openaiBlockStatuses : [],
+    openai_block_json_path: String(datasetOpenaiBlockJsonPath?.value || "").trim() || null,
+    openai_block_json_value: String(datasetOpenaiBlockJsonValue?.value || "").trim() || null,
+    openai_block_payload_keywords: String(datasetOpenaiBlockPayloadKeywords?.value || "").trim() || null,
     concurrency_per_batch: concVal,
     interval_seconds: Number(datasetInterval?.value || 1),
     guardrail_timeout_seconds: Number(datasetGuardrailTimeout?.value ?? 20),
@@ -5273,6 +5460,8 @@ async function datasetSaveConfigIfAllowed(){
 function datasetRenderStatus(task){
   if (!task || typeof task !== "object") return;
   datasetTaskSnapshot = task;
+  datasetSetExecutionMode(task.execution_mode || datasetGetExecutionMode());
+  datasetSyncExecutionModeUi(task);
   if (task.max_concurrency_allowed != null && task.max_concurrency_allowed !== undefined) {
     datasetApplyConcurrencyUiMax(task.max_concurrency_allowed);
   }
@@ -6175,6 +6364,21 @@ datasetResumeBtn?.addEventListener("click", () => datasetResume().catch((e) => s
 datasetRefreshStatusBtn?.addEventListener("click", () => datasetRefreshStatus().catch((e) => showSyncNotice("刷新失败 / Refresh failed: " + (e?.message || String(e)), "error")));
 datasetRetryErrorsBtn?.addEventListener("click", () => datasetRetryErrors().catch((e) => showSyncNotice("补测启动失败 / Retry failed: " + (e?.message || String(e)), "error")));
 datasetExtendBtn?.addEventListener("click", () => datasetExtendRange().catch((e) => showSyncNotice("追加测试启动失败 / Extend failed: " + (e?.message || String(e)), "error")));
+datasetExecutionModeRadios.forEach((r) => r.addEventListener("change", () => {
+  datasetSyncExecutionModeUi(datasetTaskSnapshot);
+  datasetBuildSummary();
+}));
+[
+  datasetOpenaiApiEndpoint,
+  datasetOpenaiApiKey,
+  datasetOpenaiModel,
+  datasetOpenaiBlockHttpStatuses,
+  datasetOpenaiBlockJsonPath,
+  datasetOpenaiBlockJsonValue,
+  datasetOpenaiBlockPayloadKeywords,
+].forEach((el) => {
+  el?.addEventListener("input", () => datasetBuildSummary());
+});
 datasetForceRebuildIndexBtn?.addEventListener("click", async () => {
   try {
     if (!isAdminUser) {

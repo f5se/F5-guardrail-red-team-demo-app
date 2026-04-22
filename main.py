@@ -2903,6 +2903,8 @@ DATASET_INDEX_MINIMAL_KEYS = (
 DATASET_ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 DATASET_TEST_MODE_BLOCK_RATE = "block_rate"
 DATASET_TEST_MODE_FALSE_BLOCK_RATE = "false_block_rate"
+DATASET_EXEC_MODE_F5_SDK = "f5_sdk"
+DATASET_EXEC_MODE_OPENAI_COMPATIBLE = "openai_compatible"
 DATASET_MAX_INTERVAL_SECONDS = 30.0
 DATASET_MAX_RETRY = 2
 DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS = 20.0
@@ -2914,6 +2916,7 @@ DATASET_RESULT_FIELDNAMES = [
     "row_index",
     "prompt",
     "guardrail_status",
+    "block_detect_rule",
     "label",
     "failed_scanner_names",
     "response_excerpt",
@@ -2933,6 +2936,14 @@ class DatasetTaskConfigureIn(BaseModel):
     project_id: Optional[str] = None
     api_key: Optional[str] = None
     provider_name: Optional[str] = None
+    execution_mode: Optional[str] = None
+    openai_api_endpoint: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    openai_model: Optional[str] = None
+    openai_block_http_statuses: Optional[List[int]] = None
+    openai_block_json_path: Optional[str] = None
+    openai_block_json_value: Optional[str] = None
+    openai_block_payload_keywords: Optional[str] = None
     concurrency_per_batch: int = 1
     interval_seconds: float = 1.0
     guardrail_timeout_seconds: float = DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS
@@ -3313,6 +3324,101 @@ def _dataset_require_explicit_test_mode(v) -> str:
     return mode
 
 
+def _dataset_normalize_execution_mode(v) -> str:
+    mode = str(v or "").strip().lower()
+    if mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE:
+        return DATASET_EXEC_MODE_OPENAI_COMPATIBLE
+    return DATASET_EXEC_MODE_F5_SDK
+
+
+def _dataset_is_execution_mode_locked(state: dict) -> bool:
+    if bool(state.get("execution_mode_locked")):
+        return True
+    st = str(state.get("status") or "").strip().lower()
+    return st not in ("", "draft")
+
+
+def _dataset_normalize_http_status_list(v) -> List[int]:
+    out: List[int] = []
+    seen = set()
+    arr = v if isinstance(v, list) else []
+    for x in arr:
+        try:
+            n = int(x)
+        except Exception:
+            continue
+        if n < 100 or n > 599:
+            continue
+        if n in seen:
+            continue
+        seen.add(n)
+        out.append(n)
+    return sorted(out)
+
+
+def _dataset_json_path_get(data, path: str):
+    if not isinstance(data, (dict, list)):
+        return None, False
+    p = str(path or "").strip()
+    if not p:
+        return None, False
+    if p.startswith("$."):
+        p = p[2:]
+    elif p == "$":
+        return data, True
+    cur = data
+    i = 0
+    while i < len(p):
+        j = i
+        while j < len(p) and p[j] not in ".[":
+            j += 1
+        key = p[i:j].strip()
+        if key:
+            if not isinstance(cur, dict) or key not in cur:
+                return None, False
+            cur = cur[key]
+        i = j
+        while i < len(p) and p[i] == "[":
+            k = p.find("]", i + 1)
+            if k <= i + 1:
+                return None, False
+            idx_txt = p[i + 1 : k].strip()
+            try:
+                idx = int(idx_txt)
+            except Exception:
+                return None, False
+            if not isinstance(cur, list) or idx < 0 or idx >= len(cur):
+                return None, False
+            cur = cur[idx]
+            i = k + 1
+        if i < len(p) and p[i] == ".":
+            i += 1
+    return cur, True
+
+
+def _dataset_detect_openai_block(response_info: dict, state: dict) -> Tuple[bool, str]:
+    http_status = int(response_info.get("http_status") or 0)
+    statuses = _dataset_normalize_http_status_list(state.get("openai_block_http_statuses"))
+    if statuses and http_status in statuses:
+        return True, f"http_status:{http_status}"
+
+    ctype = str(response_info.get("content_type") or "").lower()
+    json_path = str(state.get("openai_block_json_path") or "").strip()
+    json_expected = str(state.get("openai_block_json_value") or "").strip()
+    if json_path and json_expected and "json" in ctype:
+        val, ok = _dataset_json_path_get(response_info.get("json_body"), json_path)
+        if ok and str(val) == json_expected:
+            return True, f"jsonpath:{json_path}"
+
+    payload_kw = str(state.get("openai_block_payload_keywords") or "").strip()
+    if payload_kw:
+        text = str(response_info.get("raw_text") or "").lower()
+        for kw in [x.strip().lower() for x in payload_kw.split(",") if x.strip()]:
+            if kw and kw in text:
+                return True, f"payload_keyword:{kw}"
+    return False, ""
+
+
 def _dataset_result_label_for_guardrail_outcome(state: dict, status_text: str) -> str:
     """
     Human-readable label column for result CSV. Counts/statistics use guardrail_status only.
@@ -3380,6 +3486,16 @@ def _dataset_to_status_payload(state: dict) -> dict:
         "provider_name": str(state.get("provider_name") or "").strip(),
         "api_key_source": str(state.get("api_key_source") or "env"),
         "api_key_masked": str(state.get("api_key_masked") or ""),
+        "execution_mode": _dataset_normalize_execution_mode(state.get("execution_mode")),
+        "execution_mode_locked": _dataset_is_execution_mode_locked(state),
+        "openai_api_endpoint": str(state.get("openai_api_endpoint") or "").strip(),
+        "openai_model": str(state.get("openai_model") or "").strip(),
+        "openai_api_key_source": str(state.get("openai_api_key_source") or "none"),
+        "openai_api_key_masked": str(state.get("openai_api_key_masked") or ""),
+        "openai_block_http_statuses": _dataset_normalize_http_status_list(state.get("openai_block_http_statuses")),
+        "openai_block_json_path": str(state.get("openai_block_json_path") or "").strip(),
+        "openai_block_json_value": str(state.get("openai_block_json_value") or "").strip(),
+        "openai_block_payload_keywords": str(state.get("openai_block_payload_keywords") or "").strip(),
         "concurrency_per_batch": int(state.get("concurrency_per_batch") or 1),
         "interval_seconds": float(state.get("interval_seconds") or 1.0),
         "guardrail_timeout_seconds": to_float(
@@ -3738,23 +3854,95 @@ def _dataset_prompt_for_row_index(state: dict, rows_data: List[list], row_index:
     return ""
 
 
-async def _dataset_process_row(state: dict, prompt_text: str, row_index: int, send_kwargs: dict, timeout_seconds: float) -> dict:
+async def _dataset_call_openai_compatible(
+    *,
+    endpoint: str,
+    api_key: str,
+    model: str,
+    prompt_text: str,
+    timeout_seconds: float,
+) -> str:
+    url = endpoint.strip()
+    body = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt_text}],
+        "stream": False,
+    }
+    headers = {"Content-Type": "application/json", "Authorization": "Bearer " + api_key}
+    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+        resp = await client.post(url, json=body, headers=headers)
+    raw_text = resp.text if isinstance(resp.text, str) else ""
+    ctype = str(resp.headers.get("content-type") or "")
+    json_body = None
+    if "json" in ctype.lower():
+        try:
+            json_body = resp.json()
+        except Exception:
+            json_body = None
+    reply_text = ""
+    if isinstance(json_body, dict):
+        try:
+            reply_text = _extract_openai_reply(json_body)
+        except Exception:
+            reply_text = ""
+    if not reply_text and raw_text:
+        reply_text = raw_text[:2000]
+    return {
+        "http_status": int(resp.status_code),
+        "content_type": ctype,
+        "json_body": json_body,
+        "raw_text": raw_text,
+        "reply_text": reply_text,
+    }
+
+
+async def _dataset_process_row(state: dict, prompt_text: str, row_index: int, exec_ctx: dict, timeout_seconds: float) -> dict:
     task_id = state["task_id"]
     runtime = DATASET_TASK_RUNTIME_KEYS.get(task_id) or {}
-    api_key = runtime.get("api_key") or _dataset_env_api_key()
-    cai_client = CalypsoAI(url=_dataset_env_calypso_url(), token=api_key)
     begin = time.perf_counter()
     last_err = ""
+    execution_mode = str(exec_ctx.get("execution_mode") or DATASET_EXEC_MODE_F5_SDK)
+    block_detect_rule = ""
     for attempt in range(DATASET_MAX_RETRY + 1):
         try:
-            reply, guardrail_raw = await call_f5_guardrail(cai_client, prompt_text, send_kwargs, timeout_seconds=timeout_seconds)
-            status_text, _ = classify_rejection(reply)
+            guardrail_raw = None
+            if execution_mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE:
+                endpoint = str(exec_ctx.get("openai_api_endpoint") or "").strip()
+                model = str(exec_ctx.get("openai_model") or "").strip()
+                api_key = str(runtime.get("openai_api_key") or "").strip()
+                if not endpoint or not model or not api_key:
+                    raise Exception("openai compatible settings incomplete")
+                openai_resp = await _dataset_call_openai_compatible(
+                    endpoint=endpoint,
+                    api_key=api_key,
+                    model=model,
+                    prompt_text=prompt_text,
+                    timeout_seconds=timeout_seconds,
+                )
+                is_blocked, block_detect_rule = _dataset_detect_openai_block(openai_resp, state)
+                reply = str(openai_resp.get("reply_text") or "")
+                status_code = int(openai_resp.get("http_status") or 0)
+                if is_blocked:
+                    status_text = "rejected"
+                elif status_code < 200 or status_code >= 300:
+                    raise Exception(f"openai_compatible http {status_code}")
+                else:
+                    status_text = "ok"
+            else:
+                send_kwargs = exec_ctx.get("send_kwargs") or {}
+                api_key = runtime.get("api_key") or _dataset_env_api_key()
+                cai_client = CalypsoAI(url=_dataset_env_calypso_url(), token=api_key)
+                reply, guardrail_raw = await call_f5_guardrail(
+                    cai_client, prompt_text, send_kwargs, timeout_seconds=timeout_seconds
+                )
+                status_text, _ = classify_rejection(reply)
             latency_ms = int((time.perf_counter() - begin) * 1000)
             if status_text == "error":
                 return {
                     "row_index": row_index,
                     "prompt": prompt_text,
                     "guardrail_status": "error",
+                    "block_detect_rule": "",
                     "label": "Error",
                     "failed_scanner_names": "",
                     "response_excerpt": "",
@@ -3765,12 +3953,13 @@ async def _dataset_process_row(state: dict, prompt_text: str, row_index: int, se
             label = _dataset_result_label_for_guardrail_outcome(state, status_text)
             guardrail_status = "rejected" if status_text == "rejected" else "ok"
             failed_scanners = []
-            if bool(state.get("record_failed_scanner_names", False)):
+            if execution_mode == DATASET_EXEC_MODE_F5_SDK and bool(state.get("record_failed_scanner_names", False)):
                 failed_scanners = _extract_failed_scanner_friendly_names(guardrail_raw)
             return {
                 "row_index": row_index,
                 "prompt": prompt_text,
                 "guardrail_status": guardrail_status,
+                "block_detect_rule": block_detect_rule if guardrail_status == "rejected" else "",
                 "label": label,
                 "failed_scanner_names": ",".join(failed_scanners),
                 "response_excerpt": (reply or "")[:500],
@@ -3788,6 +3977,7 @@ async def _dataset_process_row(state: dict, prompt_text: str, row_index: int, se
         "row_index": row_index,
         "prompt": prompt_text,
         "guardrail_status": "error",
+        "block_detect_rule": "",
         "label": "Error",
         "failed_scanner_names": "",
         "response_excerpt": "",
@@ -3854,11 +4044,19 @@ async def _dataset_retry_error_rows_task(task_id: str):
                 state = fresh
 
         rows_data = _dataset_read_all_rows(state["source_file_path"])
-        provider_name = str(state.get("provider_name") or "").strip()
-        project_id = str(state.get("project_id") or "").strip() or _dataset_env_project_id()
+        execution_mode = _dataset_normalize_execution_mode(state.get("execution_mode"))
         timeout_seconds = float(state.get("guardrail_timeout_seconds") or DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS)
-        verbose_enabled = bool(state.get("record_failed_scanner_names", False))
-        send_kwargs = build_send_kwargs(project_id=project_id, verbose=verbose_enabled, provider_override=provider_name or None)
+        exec_ctx = {"execution_mode": execution_mode}
+        if execution_mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE:
+            exec_ctx["openai_api_endpoint"] = str(state.get("openai_api_endpoint") or "").strip()
+            exec_ctx["openai_model"] = str(state.get("openai_model") or "").strip()
+        else:
+            provider_name = str(state.get("provider_name") or "").strip()
+            project_id = str(state.get("project_id") or "").strip() or _dataset_env_project_id()
+            verbose_enabled = bool(state.get("record_failed_scanner_names", False))
+            exec_ctx["send_kwargs"] = build_send_kwargs(
+                project_id=project_id, verbose=verbose_enabled, provider_override=provider_name or None
+            )
 
         total = len(error_indices)
         processed = 0
@@ -3881,7 +4079,7 @@ async def _dataset_retry_error_rows_task(task_id: str):
                         state,
                         _dataset_prompt_for_row_index(state, rows_data, row_idx),
                         row_idx,
-                        send_kwargs,
+                        exec_ctx,
                         timeout_seconds,
                     )
                     for row_idx in batch_idx
@@ -3984,11 +4182,19 @@ async def _dataset_run_task(task_id: str):
         if 0 <= prompt_col < len(row):
             value = str(row[prompt_col] or "")
         selected.append((idx, value))
-    provider_name = str(state.get("provider_name") or "").strip()
-    project_id = str(state.get("project_id") or "").strip() or _dataset_env_project_id()
+    execution_mode = _dataset_normalize_execution_mode(state.get("execution_mode"))
     timeout_seconds = float(state.get("guardrail_timeout_seconds") or DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS)
-    verbose_enabled = bool(state.get("record_failed_scanner_names", False))
-    send_kwargs = build_send_kwargs(project_id=project_id, verbose=verbose_enabled, provider_override=provider_name or None)
+    exec_ctx = {"execution_mode": execution_mode}
+    if execution_mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE:
+        exec_ctx["openai_api_endpoint"] = str(state.get("openai_api_endpoint") or "").strip()
+        exec_ctx["openai_model"] = str(state.get("openai_model") or "").strip()
+    else:
+        provider_name = str(state.get("provider_name") or "").strip()
+        project_id = str(state.get("project_id") or "").strip() or _dataset_env_project_id()
+        verbose_enabled = bool(state.get("record_failed_scanner_names", False))
+        exec_ctx["send_kwargs"] = build_send_kwargs(
+            project_id=project_id, verbose=verbose_enabled, provider_override=provider_name or None
+        )
     result_path = state["result_file_path"]
     if not os.path.exists(result_path):
         # Use UTF-8 BOM for better compatibility when opening CSV directly in Microsoft Excel.
@@ -4051,7 +4257,7 @@ async def _dataset_run_task(task_id: str):
             state = latest
         batch = selected[i:i + c]
         results = await asyncio.gather(
-            *[_dataset_process_row(state, prompt, row_idx, send_kwargs, timeout_seconds) for (row_idx, prompt) in batch]
+            *[_dataset_process_row(state, prompt, row_idx, exec_ctx, timeout_seconds) for (row_idx, prompt) in batch]
         )
         with DATASET_LOCK:
             state = _dataset_load_state(task_id) or state
@@ -4199,6 +4405,16 @@ async def api_dataset_test_upload(
         "provider_name": _dataset_env_provider_name(),
         "api_key_source": "env",
         "api_key_masked": "***",
+        "execution_mode": DATASET_EXEC_MODE_F5_SDK,
+        "execution_mode_locked": False,
+        "openai_api_endpoint": "",
+        "openai_model": "",
+        "openai_api_key_source": "none",
+        "openai_api_key_masked": "",
+        "openai_block_http_statuses": [403],
+        "openai_block_json_path": "",
+        "openai_block_json_value": "",
+        "openai_block_payload_keywords": "",
         "concurrency_per_batch": 1,
         "interval_seconds": 1.0,
         "record_failed_scanner_names": False,
@@ -4292,25 +4508,60 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
         effective_rows = max(0, row_end - row_start + 1)
         if effective_rows <= 0:
             raise HTTPException(status_code=400, detail="no rows selected")
+        current_mode = _dataset_normalize_execution_mode(state.get("execution_mode"))
+        requested_mode = _dataset_normalize_execution_mode(payload.execution_mode or current_mode)
+        mode_locked = _dataset_is_execution_mode_locked(state) or bool(state.get("processed_count") or 0)
+        if mode_locked and requested_mode != current_mode:
+            raise HTTPException(
+                status_code=400,
+                detail="测试已开始，不能再切换执行接口模式 / Execution mode is locked after test start",
+            )
+        execution_mode = current_mode if mode_locked else requested_mode
         resolved_project_id = str(payload.project_id or "").strip() or _dataset_env_project_id()
         resolved_provider_name = str(payload.provider_name or "").strip() or _dataset_env_provider_name()
         provided_key = str(payload.api_key or "").strip()
         resolved_api_key = provided_key or _dataset_env_api_key()
-        if not resolved_project_id:
-            raise HTTPException(
-                status_code=400,
-                detail="缺少 Project ID：请在向导中填写，或在 .env 中配置 CALYPSOAI_PROJECT_ID（Dataset 可选 Guardrail_PoC_Project）",
-            )
-        if not resolved_provider_name:
-            raise HTTPException(
-                status_code=400,
-                detail="缺少 Provider：请在向导中填写，或在 .env 中配置 DEFAULT_PROVIDER（Dataset 可选 Guardrail_PoC_Provider）",
-            )
-        if not resolved_api_key:
-            raise HTTPException(
-                status_code=400,
-                detail="缺少 API Key：请在向导中填写，或在 .env 中配置 CALYPSOAI_TOKEN（Dataset 可选 Guardrail_PoC_Token）",
-            )
+        openai_endpoint = str(payload.openai_api_endpoint or "").strip()
+        openai_model = str(payload.openai_model or "").strip()
+        openai_key = str(payload.openai_api_key or "").strip()
+        openai_block_statuses = _dataset_normalize_http_status_list(payload.openai_block_http_statuses)
+        if not openai_block_statuses:
+            openai_block_statuses = _dataset_normalize_http_status_list(state.get("openai_block_http_statuses")) or [403]
+        openai_block_json_path = str(payload.openai_block_json_path or "").strip()
+        openai_block_json_value = str(payload.openai_block_json_value or "").strip()
+        openai_block_payload_keywords = str(payload.openai_block_payload_keywords or "").strip()
+        if execution_mode == DATASET_EXEC_MODE_F5_SDK:
+            if not resolved_project_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="缺少 Project ID：请在向导中填写，或在 .env 中配置 CALYPSOAI_PROJECT_ID（Dataset 可选 Guardrail_PoC_Project）",
+                )
+            if not resolved_provider_name:
+                raise HTTPException(
+                    status_code=400,
+                    detail="缺少 Provider：请在向导中填写，或在 .env 中配置 DEFAULT_PROVIDER（Dataset 可选 Guardrail_PoC_Provider）",
+                )
+            if not resolved_api_key:
+                raise HTTPException(
+                    status_code=400,
+                    detail="缺少 API Key：请在向导中填写，或在 .env 中配置 CALYPSOAI_TOKEN（Dataset 可选 Guardrail_PoC_Token）",
+                )
+        else:
+            if not openai_endpoint:
+                raise HTTPException(status_code=400, detail="OpenAI 兼容模式缺少 API Endpoint / Missing OpenAI API endpoint")
+            if not re.match(r"^https?://", openai_endpoint, flags=re.IGNORECASE):
+                raise HTTPException(status_code=400, detail="OpenAI API Endpoint 必须是完整 URL（http/https 开头）")
+            if not openai_model:
+                raise HTTPException(status_code=400, detail="OpenAI 兼容模式缺少 Model name / Missing OpenAI model")
+            runtime = DATASET_TASK_RUNTIME_KEYS.get(state["task_id"]) or {}
+            saved_openai_key = str(runtime.get("openai_api_key") or "").strip()
+            if not openai_key and not saved_openai_key:
+                raise HTTPException(status_code=400, detail="OpenAI 兼容模式缺少 API Key / Missing OpenAI API key")
+            if payload.record_failed_scanner_names:
+                raise HTTPException(
+                    status_code=400,
+                    detail="OpenAI 兼容模式不支持记录 scanner 名称 / Scanner-name recording is unavailable in OpenAI-compatible mode",
+                )
         if orig_status not in ("completed",):
             state["phase"] = "step2_configured"
         state["prompt_column"] = int(payload.prompt_column) - 1
@@ -4332,16 +4583,46 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
         segs_after = state.get("range_segments") or [{"start": row_start, "end": row_end}]
         union_size = _dataset_segments_union_size(segs_after)
         state["effective_rows"] = union_size if union_size > 0 else effective_rows
-        state["project_id"] = resolved_project_id
-        if provided_key:
-            state["api_key_source"] = "userProvided"
-            state["api_key_masked"] = "*" * 6 + provided_key[-4:]
-            DATASET_TASK_RUNTIME_KEYS[state["task_id"]] = {"api_key": provided_key}
+        state["execution_mode"] = execution_mode
+        state["execution_mode_locked"] = mode_locked
+        state["project_id"] = resolved_project_id if execution_mode == DATASET_EXEC_MODE_F5_SDK else ""
+        state["provider_name"] = resolved_provider_name if execution_mode == DATASET_EXEC_MODE_F5_SDK else ""
+        state["openai_api_endpoint"] = openai_endpoint if execution_mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE else ""
+        state["openai_model"] = openai_model if execution_mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE else ""
+        state["openai_block_http_statuses"] = openai_block_statuses if execution_mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE else [403]
+        state["openai_block_json_path"] = openai_block_json_path if execution_mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE else ""
+        state["openai_block_json_value"] = openai_block_json_value if execution_mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE else ""
+        state["openai_block_payload_keywords"] = openai_block_payload_keywords if execution_mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE else ""
+        runtime = DATASET_TASK_RUNTIME_KEYS.get(state["task_id"]) or {}
+        if execution_mode == DATASET_EXEC_MODE_F5_SDK:
+            if provided_key:
+                state["api_key_source"] = "userProvided"
+                state["api_key_masked"] = "*" * 6 + provided_key[-4:]
+                runtime["api_key"] = provided_key
+            else:
+                state["api_key_source"] = "env"
+                state["api_key_masked"] = "***"
+                runtime.pop("api_key", None)
+            runtime.pop("openai_api_key", None)
+            state["openai_api_key_source"] = "none"
+            state["openai_api_key_masked"] = ""
         else:
-            state["api_key_source"] = "env"
-            state["api_key_masked"] = "***"
+            state["api_key_source"] = "n/a"
+            state["api_key_masked"] = ""
+            runtime.pop("api_key", None)
+            if openai_key:
+                runtime["openai_api_key"] = openai_key
+                state["openai_api_key_source"] = "userProvided"
+                state["openai_api_key_masked"] = "*" * 6 + openai_key[-4:]
+            else:
+                state["openai_api_key_source"] = "saved"
+                masked = str(state.get("openai_api_key_masked") or "")
+                state["openai_api_key_masked"] = masked or "***"
+            state["record_failed_scanner_names"] = False
+        if runtime:
+            DATASET_TASK_RUNTIME_KEYS[state["task_id"]] = runtime
+        else:
             DATASET_TASK_RUNTIME_KEYS.pop(state["task_id"], None)
-        state["provider_name"] = resolved_provider_name
         cap_c = _dataset_max_concurrency_allowed()
         req_c = int(payload.concurrency_per_batch or 1)
         if req_c < 1 or req_c > cap_c:
@@ -4357,7 +4638,8 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
             1.0,
             120.0,
         )
-        state["record_failed_scanner_names"] = bool(payload.record_failed_scanner_names)
+        if execution_mode == DATASET_EXEC_MODE_F5_SDK:
+            state["record_failed_scanner_names"] = bool(payload.record_failed_scanner_names)
         if orig_status == "draft":
             state["test_mode"] = _dataset_require_explicit_test_mode(payload.test_mode)
             if payload.is_public is not None:
@@ -4378,8 +4660,19 @@ async def api_dataset_test_start(request: Request, payload: DatasetTaskActionIn)
             return JSONResponse({"status": "ok", "already_running": True, "task": _dataset_to_status_payload(state)})
         if st not in ("draft", "failed", "paused"):
             raise HTTPException(status_code=400, detail="task cannot be started")
+        if _dataset_normalize_execution_mode(state.get("execution_mode")) == DATASET_EXEC_MODE_OPENAI_COMPATIBLE:
+            endpoint = str(state.get("openai_api_endpoint") or "").strip()
+            model = str(state.get("openai_model") or "").strip()
+            runtime = DATASET_TASK_RUNTIME_KEYS.get(payload.task_id) or {}
+            openai_key = str(runtime.get("openai_api_key") or "").strip()
+            if not endpoint or not model or not openai_key:
+                raise HTTPException(
+                    status_code=400,
+                    detail="OpenAI 模式参数不完整：请在 Step2 重新填写 Endpoint / API Key / Model 并保存后再启动。",
+                )
         state["status"] = "queued"
         state["phase"] = "step3_confirmed"
+        state["execution_mode_locked"] = True
         state["run_kind"] = "initial"
         segs = _dataset_effective_segments(state)
         state["current_run_range"] = segs[0] if segs else None
