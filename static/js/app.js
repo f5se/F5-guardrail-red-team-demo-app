@@ -115,6 +115,7 @@ const datasetHistoryPager = document.getElementById("datasetHistoryPager");
 const datasetHeatmapModal = document.getElementById("datasetHeatmapModal");
 const datasetHeatmapModalBody = document.getElementById("datasetHeatmapModalBody");
 const datasetHeatmapCloseBtn = document.getElementById("datasetHeatmapCloseBtn");
+const datasetHeatmapRegenBtn = document.getElementById("datasetHeatmapRegenBtn");
 const datasetHeatmapDownloadBtn = document.getElementById("datasetHeatmapDownloadBtn");
 const datasetMaxRunningTasksInputEl = document.getElementById("datasetMaxRunningTasksInput");
 const datasetMaxUploadMbInputEl = document.getElementById("datasetMaxUploadMbInput");
@@ -146,10 +147,12 @@ let datasetViewerReadOnly = false;
 let datasetCancellingTaskIds = new Set();
 let datasetWasRetryingUi = false;
 let datasetHistorySearchDebounceTimer = null;
+let datasetHeatmapCurrentTaskId = "";
 
 function datasetCloseHeatmapModal(){
   if (!datasetHeatmapModal) return;
   datasetHeatmapModal.style.display = "none";
+  datasetHeatmapCurrentTaskId = "";
   if (datasetHeatmapModalBody) datasetHeatmapModalBody.innerHTML = "";
   if (datasetHeatmapDownloadBtn) {
     datasetHeatmapDownloadBtn.style.display = "none";
@@ -158,17 +161,23 @@ function datasetCloseHeatmapModal(){
   }
 }
 
-async function datasetOpenHeatmapFromHistory(taskId){
+async function datasetOpenHeatmapFromHistory(taskId, force = false){
   if (!taskId) return;
   if (!datasetHeatmapModal || !datasetHeatmapModalBody) return;
+  datasetHeatmapCurrentTaskId = String(taskId || "").trim();
   datasetHeatmapModal.style.display = "";
-  datasetHeatmapModalBody.innerHTML = "<div class='datasetHint'>Loading heatmap... Please wait.</div>";
+  datasetHeatmapModalBody.innerHTML = "<div class='datasetHint'>" + (force ? "Regenerating heatmap... Please wait." : "Loading heatmap... Please wait.") + "</div>";
+  if (datasetHeatmapRegenBtn) {
+    datasetHeatmapRegenBtn.disabled = true;
+    datasetHeatmapRegenBtn.style.display = "none";
+  }
   if (datasetHeatmapDownloadBtn) {
     datasetHeatmapDownloadBtn.style.display = "none";
     datasetHeatmapDownloadBtn.setAttribute("href", "#");
   }
   try {
-    const resp = await authFetch("/api/dataset-test/" + encodeURIComponent(taskId) + "/heatmap", { method: "POST" });
+    const qs = force ? "?force=1" : "";
+    const resp = await authFetch("/api/dataset-test/" + encodeURIComponent(taskId) + "/heatmap" + qs, { method: "POST" });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data?.detail || ("HTTP " + resp.status));
     if (String(data?.status || "") === "no_data") {
@@ -179,6 +188,9 @@ async function datasetOpenHeatmapFromHistory(taskId){
       if (datasetHeatmapDownloadBtn) {
         datasetHeatmapDownloadBtn.style.display = "none";
         datasetHeatmapDownloadBtn.setAttribute("href", "#");
+      }
+      if (datasetHeatmapRegenBtn) {
+        datasetHeatmapRegenBtn.style.display = "none";
       }
       return;
     }
@@ -194,6 +206,9 @@ async function datasetOpenHeatmapFromHistory(taskId){
       datasetHeatmapDownloadBtn.setAttribute("href", url);
       datasetHeatmapDownloadBtn.setAttribute("download", String(data?.filename || "scanner-heatmap.svg"));
     }
+    if (datasetHeatmapRegenBtn) {
+      datasetHeatmapRegenBtn.style.display = "";
+    }
     if (data?.generated) {
       showSyncNotice("Heatmap generated successfully.", "success", 1400);
     } else {
@@ -207,6 +222,11 @@ async function datasetOpenHeatmapFromHistory(taskId){
       datasetHeatmapDownloadBtn.style.display = "none";
       datasetHeatmapDownloadBtn.setAttribute("href", "#");
     }
+    if (datasetHeatmapRegenBtn) {
+      datasetHeatmapRegenBtn.style.display = "none";
+    }
+  } finally {
+    if (datasetHeatmapRegenBtn) datasetHeatmapRegenBtn.disabled = false;
   }
 }
 let configuredAppTimezone = "UTC+08:00";
@@ -6460,6 +6480,11 @@ datasetHistoryBatchDeleteBtn?.addEventListener("click", async () => {
   }
 });
 datasetHeatmapCloseBtn?.addEventListener("click", datasetCloseHeatmapModal);
+datasetHeatmapRegenBtn?.addEventListener("click", async () => {
+  const tid = String(datasetHeatmapCurrentTaskId || "").trim();
+  if (!tid) return;
+  await datasetOpenHeatmapFromHistory(tid, true);
+});
 datasetHeatmapModal?.addEventListener("click", (ev) => {
   if (ev.target === datasetHeatmapModal) datasetCloseHeatmapModal();
 });

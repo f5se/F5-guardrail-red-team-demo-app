@@ -5053,7 +5053,7 @@ async def api_dataset_test_download_result(request: Request, task_id: str):
 
 
 @app.post("/api/dataset-test/{task_id}/heatmap")
-async def api_dataset_test_generate_heatmap(request: Request, task_id: str):
+async def api_dataset_test_generate_heatmap(request: Request, task_id: str, force: bool = Query(default=False)):
     username = require_user(request)
     with DATASET_LOCK:
         state = _dataset_load_state(task_id)
@@ -5082,6 +5082,11 @@ async def api_dataset_test_generate_heatmap(request: Request, task_id: str):
             }
         )
     generated = False
+    if force and os.path.exists(heatmap_path):
+        try:
+            os.remove(heatmap_path)
+        except Exception:
+            pass
     if not os.path.exists(heatmap_path):
         _dataset_generate_scanner_heatmap_svg(
             scanner_count=scanner_count,
