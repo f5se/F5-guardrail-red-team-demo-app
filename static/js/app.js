@@ -5888,7 +5888,9 @@ async function loadDatasetHistory(){
     let actionBtn = "";
     const cancelling = datasetCancellingTaskIds.has(id);
     if (viewerOnly) {
-      actionBtn = "";
+      actionBtn = resultExists
+        ? "<button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--heatmap datasetHeatmapHistoryBtn'>Heatmap</button>"
+        : "";
     } else if (isRunningLike) {
       actionBtn = "<button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--pause datasetPauseHistoryBtn'>暂停 / Pause</button>"
         + "<button type='button' data-task-id='" + escapeHtml(id) + "' class='datasetActionBtn datasetActionBtn--cancel datasetCancelHistoryBtn'" + (cancelling ? " disabled" : "") + ">" + (cancelling ? "取消中 / Cancelling" : "取消任务 / Cancel Task") + "</button>";
