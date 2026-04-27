@@ -308,6 +308,7 @@ class AgenticRunIn(BaseModel):
     scenario: Optional[str] = "unsafe_procurement"
     bypass_f5_guardrail: bool = False
     session_id: Optional[str] = None
+    tool_protocol: Optional[str] = None  # legacy_json_prompt | openai_tool_calls_mcp_sim
 
 
 # -----------------------------
@@ -1807,6 +1808,17 @@ def _extract_openai_text(data: dict) -> str:
     return json.dumps(data, ensure_ascii=False)[:1500]
 
 
+def _extract_openai_message(data: dict) -> dict:
+    if not isinstance(data, dict):
+        return {}
+    choices = data.get("choices")
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        msg = choices[0].get("message")
+        if isinstance(msg, dict):
+            return msg
+    return {}
+
+
 def _agentic_tools_catalog(agent_name: str) -> List[dict]:
     base_tools = [
         {
@@ -2042,6 +2054,90 @@ async def _agentic_openai_chat(
     return text, (finish_reason or "stop")
 
 
+async def _agentic_openai_chat_message(
+    *,
+    session_id: str,
+    messages: List[dict],
+    tools: List[dict],
+    tool_choice: str = "auto",
+    bypass_f5_guardrail: bool = False,
+    timeout: float = 60.0,
+) -> Tuple[dict, str]:
+    """OpenAI-compatible chat call that preserves assistant message and tool_calls."""
+    if bypass_f5_guardrail:
+        base_url, token, model = _get_direct_provider_config()
+        if not base_url or not token or not model:
+            raise HTTPException(
+                status_code=500,
+                detail="Bypass mode unavailable: missing LLM_PROVIDER_URL / LLM_PROVIDER_KEY_DIRECT / LLM_PROVIDER_MODEL",
+            )
+        model_name = model
+    else:
+        token = AGENTIC_TOKEN or CALYPSOAI_TOKEN
+        if not token:
+            raise HTTPException(status_code=500, detail="Configure AGENTIC_TOKEN or CALYPSOAI_TOKEN for Agentic Security (Calypso path).")
+        base_url = _resolve_agentic_base_url()
+        model_name = AGENTIC_MODEL or "deepseek-chat"
+    url = base_url + "/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + token,
+    }
+    if not bypass_f5_guardrail:
+        headers["x-cai-metadata-session-id"] = session_id
+    body = {
+        "model": model_name,
+        "messages": messages,
+        "tools": tools,
+        "tool_choice": tool_choice,
+        "thinking": {"type": "disabled"},
+        "stream": False,
+    }
+    req_timeout = httpx.Timeout(connect=15.0, read=timeout, write=30.0, pool=15.0)
+    try:
+        async with httpx.AsyncClient(timeout=req_timeout) as client:
+            resp = await client.post(url, headers=headers, json=body)
+    except httpx.ConnectTimeout:
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                "Agentic OpenAI-compatible request connect timeout. "
+                "Please verify CALYPSOAI_URL/AGENTIC_BASE_URL network reachability."
+            ),
+        )
+    except httpx.ReadTimeout:
+        raise HTTPException(
+            status_code=504,
+            detail="Agentic OpenAI-compatible request read timeout.",
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Agentic OpenAI-compatible request failed: {type(e).__name__}: {e}",
+        )
+    try:
+        resp_data = resp.json()
+    except Exception:
+        resp_data = {"_raw_text": (resp.text or "")[:20000]}
+    if resp.status_code < 200 or resp.status_code >= 300:
+        err_msg, failed_ids = _extract_agentic_error_info(resp_data) if not bypass_f5_guardrail else (str(resp_data)[:280], [])
+        raise HTTPException(
+            status_code=resp.status_code,
+            detail={
+                "message": err_msg,
+                "failed_scanner_ids": failed_ids,
+                "raw_error": (resp.text or "")[:2000],
+            },
+        )
+    data = resp_data if isinstance(resp_data, dict) else {}
+    message = _extract_openai_message(data)
+    finish_reason = ""
+    choices = data.get("choices")
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        finish_reason = str(choices[0].get("finish_reason") or "")
+    return message, (finish_reason or "stop")
+
+
 @app.post("/api/agentic/run")
 async def api_agentic_run(request: Request, payload: AgenticRunIn):
     """Independent Agentic Security endpoint powered by LangGraph."""
@@ -2052,6 +2148,9 @@ async def api_agentic_run(request: Request, payload: AgenticRunIn):
 
     scenario = (payload.scenario or "unsafe_procurement").strip() or "unsafe_procurement"
     bypass_f5_guardrail = bool(payload.bypass_f5_guardrail)
+    tool_protocol = str(payload.tool_protocol or "openai_tool_calls_mcp_sim").strip().lower()
+    if tool_protocol not in ("legacy_json_prompt", "openai_tool_calls_mcp_sim"):
+        raise HTTPException(status_code=400, detail="tool_protocol must be legacy_json_prompt or openai_tool_calls_mcp_sim")
     session_id = (payload.session_id or "").strip() or f"agentic-{int(time.time())}-{secrets.token_hex(4)}"
     now_ts = int(time.time())
     runtime_trace: List[dict] = []
@@ -2068,8 +2167,16 @@ async def api_agentic_run(request: Request, payload: AgenticRunIn):
                 messages=msgs,
                 bypass_f5_guardrail=bypass_f5_guardrail,
             ),
+            llm_tool_call=lambda sid, msgs, tools, opts: _agentic_openai_chat_message(
+                session_id=sid,
+                messages=msgs,
+                tools=tools,
+                tool_choice=str((opts or {}).get("tool_choice") or "auto"),
+                bypass_f5_guardrail=bypass_f5_guardrail,
+            ),
             tool_dispatch=lambda name, args, s, p: dispatch_agentic_tool(name, args, s, p),
             trace_logger=_trace_logger_runtime,
+            tool_protocol=tool_protocol,
         )
     except Exception as e:
         raise HTTPException(
@@ -2109,6 +2216,7 @@ async def api_agentic_run(request: Request, payload: AgenticRunIn):
                 "session_id": session_id,
                 "scenario": scenario,
                 "runtime_engine": "LangGraph",
+                "tool_protocol": tool_protocol,
                 "provider": "direct-openai-compatible" if bypass_f5_guardrail else AGENTIC_PROVIDER,
                 "required_header": "" if bypass_f5_guardrail else "x-cai-metadata-session-id",
                 "blocked": True,
@@ -2127,6 +2235,7 @@ async def api_agentic_run(request: Request, payload: AgenticRunIn):
             "session_id": run_result["session_id"],
             "scenario": run_result["scenario"],
             "runtime_engine": run_result.get("runtime_engine", "LangGraph"),
+            "tool_protocol": tool_protocol,
             "provider": "direct-openai-compatible" if bypass_f5_guardrail else AGENTIC_PROVIDER,
             "required_header": "" if bypass_f5_guardrail else "x-cai-metadata-session-id",
             "blocked": run_result["blocked"],

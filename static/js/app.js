@@ -1353,6 +1353,7 @@ const testGuideContentEl = document.getElementById("testGuideContent");
 const agenticRiskTemplateEl = document.getElementById("agenticRiskTemplate");
 const agenticPromptEl = document.getElementById("agenticPrompt");
 const agenticBypassGuardrailEl = document.getElementById("agenticBypassGuardrail");
+const agenticToolProtocolEl = document.getElementById("agenticToolProtocol");
 const btnRunAgenticEl = document.getElementById("btnRunAgentic");
 const agenticSessionIdEl = document.getElementById("agenticSessionId");
 const agenticRuntimeEl = document.getElementById("agenticRuntime");
@@ -1783,6 +1784,23 @@ function agenticTimelineToolBlock(item){
   );
 }
 
+function agenticTraceIdsBlock(item){
+  const toolCallId = String(item.tool_call_id || "").trim();
+  const mcpRequestId = String(item.mcp_request_id || "").trim();
+  const toolCallIds = Array.isArray(item.tool_call_ids) ? item.tool_call_ids : [];
+  const mcpRequestIds = Array.isArray(item.mcp_request_ids) ? item.mcp_request_ids : [];
+  const lines = [];
+  if (toolCallId) lines.push("<div class=\"agenticStepRoute\">tool_call_id: <code>" + escapeHtml(toolCallId) + "</code></div>");
+  if (mcpRequestId) lines.push("<div class=\"agenticStepRoute\">mcp_request_id: <code>" + escapeHtml(mcpRequestId) + "</code></div>");
+  if (toolCallIds.length > 1) {
+    lines.push("<div class=\"agenticStepRoute\">tool_call_ids: <code>" + escapeHtml(toolCallIds.map(v => String(v)).join(", ")) + "</code></div>");
+  }
+  if (mcpRequestIds.length > 1) {
+    lines.push("<div class=\"agenticStepRoute\">mcp_request_ids: <code>" + escapeHtml(mcpRequestIds.map(v => String(v)).join(", ")) + "</code></div>");
+  }
+  return lines.join("");
+}
+
 function renderAgenticTimeline(trace){
   if (!agenticTimelineEl) return;
   const rows = Array.isArray(trace) ? trace : [];
@@ -1809,6 +1827,7 @@ function renderAgenticTimeline(trace){
     const failedScannerLine = failedScanners.length
       ? ("<div class=\"agenticStepRoute\">Failed scanners: " + failedScanners.map(id => escapeHtml(String(id))).join(", ") + "</div>")
       : "";
+    const idsBlock = agenticTraceIdsBlock(item);
     return (
       "<div class=\"agenticStepItem\">" +
         "<div class=\"agenticStepHead\">" +
@@ -1819,6 +1838,7 @@ function renderAgenticTimeline(trace){
         "</div>" +
         toolBlock +
         "<div class=\"agenticStepSummary\">" + summary + "</div>" +
+        idsBlock +
         riskHint +
         failedScannerLine +
         routeLine +
@@ -1838,6 +1858,8 @@ function renderAgenticToolPanel(trace){
     const toolName = escapeHtml(String(item.tool_name || "-"));
     const argsText = escapeHtml(JSON.stringify(item.tool_args || {}, null, 0));
     const resultText = escapeHtml(JSON.stringify(item.tool_result || {}, null, 2));
+    const toolCallId = escapeHtml(String(item.tool_call_id || "-"));
+    const mcpRequestId = escapeHtml(String(item.mcp_request_id || "-"));
     const tags = Array.isArray(item.risk_tags) ? item.risk_tags : [];
     const tagsHtml = tags.length
       ? tags.map(tag => "<span class=\"agenticRiskTag\">" + escapeHtml(String(tag)) + "</span>").join("")
@@ -1845,6 +1867,8 @@ function renderAgenticToolPanel(trace){
     return (
       "<div class=\"agenticToolItem\">" +
         "<div><strong>Tool:</strong> " + toolName + "</div>" +
+        "<div><strong>tool_call_id:</strong> <code>" + toolCallId + "</code></div>" +
+        "<div><strong>mcp_request_id:</strong> <code>" + mcpRequestId + "</code></div>" +
         "<div><strong>Args:</strong> <code>" + argsText + "</code></div>" +
         "<div><strong>Risk Tags:</strong> " + tagsHtml + "</div>" +
         "<details class=\"agenticToolRaw\">" +
@@ -1865,6 +1889,7 @@ async function runAgenticSecurity(){
   }
   const scenario = (agenticSelectedScenario || "unsafe_procurement").trim();
   const bypassF5Guardrail = !!agenticBypassGuardrailEl?.checked;
+  const toolProtocol = (agenticToolProtocolEl?.value || "openai_tool_calls_mcp_sim").trim();
   const sessionId = "agentic-" + Date.now() + "-" + Math.random().toString(16).slice(2, 10);
   btnRunAgenticEl.disabled = true;
   if (agenticSessionIdEl) agenticSessionIdEl.textContent = sessionId;
@@ -1892,7 +1917,13 @@ async function runAgenticSecurity(){
     const res = await authFetch("/api/agentic/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, scenario, bypass_f5_guardrail: bypassF5Guardrail, session_id: sessionId })
+      body: JSON.stringify({
+        prompt,
+        scenario,
+        bypass_f5_guardrail: bypassF5Guardrail,
+        session_id: sessionId,
+        tool_protocol: toolProtocol
+      })
     });
     const data = await res.json();
     if (agenticSessionIdEl) agenticSessionIdEl.textContent = data.session_id || "-";

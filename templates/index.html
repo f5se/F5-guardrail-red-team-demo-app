@@ -493,6 +493,11 @@
               <textarea id="agenticPrompt" rows="3" placeholder="Describe the task for the multi-agent workflow..."></textarea>
             </div>
             <div class="agenticControlGroup agenticRunControl">
+              <label for="agenticToolProtocol">Tool Calling Mode</label>
+              <select id="agenticToolProtocol">
+                <option value="openai_tool_calls_mcp_sim">OpenAI Completions Chat format + MCP</option>
+                <option value="legacy_json_prompt">Tools Json embedded in prompt mode</option>
+              </select>
               <button id="btnRunAgentic" type="button">Run Agentic Test</button>
               <label class="agenticBypassLabel" for="agenticBypassGuardrail">
                 <input type="checkbox" id="agenticBypassGuardrail">

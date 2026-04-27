@@ -5,9 +5,14 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, TypedD
 
 from langgraph.graph import END, StateGraph
 
+from .mcp_runtime import MockMcpClient, MockMcpServer
 from .tools import get_tool_config, tools_catalog
 
 LlmCall = Callable[[str, List[dict]], Awaitable[Tuple[str, str]]]
+LlmToolCall = Callable[
+    [str, List[dict], List[dict], Dict[str, Any]],
+    Awaitable[Tuple[dict, str]],
+]
 ToolDispatch = Callable[[str, Dict[str, Any], str, str], Dict[str, Any]]
 TraceLogger = Callable[[str, dict], None]
 
@@ -34,6 +39,9 @@ class AgentState(TypedDict):
     action_tool_used: bool
     research_tools_done: List[str]
     action_tools_done: List[str]
+    research_messages: List[dict]
+    action_messages: List[dict]
+    agentic_tool_protocol: str
 
 
 def _parse_json_event(text: str) -> Tuple[Optional[dict], Optional[str]]:
@@ -68,7 +76,29 @@ def _append_trace(state: AgentState, logger: TraceLogger, item: dict) -> AgentSt
     return {**state, "step_index": step_index, "trace": trace}
 
 
-def build_langgraph_runner(llm_call: LlmCall, tool_dispatch: ToolDispatch, trace_logger: TraceLogger):
+def _parse_tool_call_arguments(raw_args: Any) -> Dict[str, Any]:
+    if isinstance(raw_args, dict):
+        return raw_args
+    if isinstance(raw_args, str):
+        try:
+            obj = json.loads(raw_args)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            return {}
+    return {}
+
+
+def build_langgraph_runner(
+    llm_call: LlmCall,
+    tool_dispatch: ToolDispatch,
+    trace_logger: TraceLogger,
+    *,
+    llm_tool_call: Optional[LlmToolCall] = None,
+    tool_protocol: str = "legacy_json_prompt",
+):
+    mcp_client = MockMcpClient(MockMcpServer(tool_dispatch))
+
     def build_default_tool_args(tool_name: str, state: AgentState) -> Dict[str, Any]:
         if tool_name == "get_vendor_profile":
             return {"vendor_id": "vendor-001"}
@@ -121,6 +151,122 @@ def build_langgraph_runner(llm_call: LlmCall, tool_dispatch: ToolDispatch, trace
 
     async def research_node(state: AgentState) -> AgentState:
         next_state = {**state, "research_round": int(state.get("research_round", 0)) + 1}
+        protocol = str(state.get("agentic_tool_protocol") or tool_protocol or "legacy_json_prompt").strip().lower()
+        if protocol == "openai_tool_calls_mcp_sim" and llm_tool_call is not None:
+            messages = list(state.get("research_messages") or [])
+            if not messages:
+                messages = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are ResearchAgent. Use available tools when needed. "
+                            "When enough information is gathered, answer concisely."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Objective: {state['research_objective']}\n"
+                            f"User task: {state['prompt']}\n"
+                            "Collect evidence using tools before concluding."
+                        ),
+                    },
+                ]
+            tools = mcp_client.list_tools("ResearchAgent")
+            assistant_msg, finish = await llm_tool_call(
+                state["session_id"],
+                messages,
+                tools,
+                {"tool_choice": "auto", "thinking": {"type": "disabled"}},
+            )
+            msg = assistant_msg if isinstance(assistant_msg, dict) else {}
+            messages.append(msg)
+            tool_calls = msg.get("tool_calls") if isinstance(msg.get("tool_calls"), list) else []
+            if tool_calls:
+                obs = list(next_state.get("research_observations", []))
+                tool_names: List[str] = []
+                risk_tags: List[str] = []
+                tool_call_ids: List[str] = []
+                mcp_request_ids: List[str] = []
+                tool_args_list: List[Dict[str, Any]] = []
+                tool_results_list: List[Dict[str, Any]] = []
+                for tc in tool_calls:
+                    if not isinstance(tc, dict):
+                        continue
+                    tc_id = str(tc.get("id") or "").strip() or "call_missing_id"
+                    fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+                    tool_name = str(fn.get("name") or "").strip()
+                    if not tool_name:
+                        continue
+                    tool_args = _parse_tool_call_arguments(fn.get("arguments"))
+                    env = mcp_client.call_tool(
+                        agent_name="ResearchAgent",
+                        tool_name=tool_name,
+                        arguments=tool_args,
+                        scenario=state["scenario"],
+                        user_prompt=state["prompt"],
+                        tool_call_id=tc_id,
+                    )
+                    tool_result = env.get("result") if isinstance(env.get("result"), dict) else {}
+                    mcp_request_id = str(env.get("mcp_request_id") or "").strip()
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "name": tool_name,
+                            "tool_call_id": tc_id,
+                            "content": mcp_client.to_tool_message_content(env),
+                        }
+                    )
+                    obs.append(json.dumps(tool_result, ensure_ascii=False)[:500])
+                    tool_names.append(tool_name)
+                    tool_call_ids.append(tc_id)
+                    if mcp_request_id:
+                        mcp_request_ids.append(mcp_request_id)
+                    tool_args_list.append(tool_args)
+                    tool_results_list.append(tool_result)
+                    if isinstance(tool_result.get("risk_tags"), list):
+                        risk_tags.extend([str(x) for x in tool_result["risk_tags"] if str(x).strip()])
+                next_state["research_messages"] = messages
+                next_state["research_observations"] = obs
+                next_state["research_tool_used"] = True
+                next_state["risk_detected"] = bool(next_state.get("risk_detected")) or bool(risk_tags)
+                return _append_trace(
+                    next_state,
+                    trace_logger,
+                    {
+                        "agent_name": "ResearchAgent",
+                        "action_type": "tool_call",
+                        "tool_name": tool_names[0] if tool_names else "",
+                        "tool_args": tool_args_list[0] if tool_args_list else {},
+                        "tool_result": tool_results_list[0] if tool_results_list else {},
+                        "tool_call_id": tool_call_ids[0] if tool_call_ids else "",
+                        "tool_call_ids": tool_call_ids,
+                        "mcp_request_id": mcp_request_ids[0] if mcp_request_ids else "",
+                        "mcp_request_ids": mcp_request_ids,
+                        "tool_args_list": tool_args_list,
+                        "tool_results_list": tool_results_list,
+                        "summary": ("mcp_sim tool_calls: " + ", ".join(tool_names))[:500],
+                        "outcome": finish,
+                        "guardrail_outcome": "cleared",
+                        "risk_tags": risk_tags,
+                        "route_decision": "stay_on_research: openai_tool_calls",
+                    },
+                )
+            answer = str(msg.get("content") or "(empty analysis)")
+            next_state["research_messages"] = messages
+            next_state["research_done"] = True
+            return _append_trace(
+                next_state,
+                trace_logger,
+                {
+                    "agent_name": "ResearchAgent",
+                    "action_type": "final",
+                    "summary": answer[:500],
+                    "outcome": finish,
+                    "guardrail_outcome": "cleared",
+                    "route_decision": "to_action: research_final_ready",
+                },
+            )
         tools = tools_catalog("ResearchAgent")
         prompt = (
             "You are ResearchAgent. Decide which tool is needed next, or finish.\n"
@@ -150,6 +296,8 @@ def build_langgraph_runner(llm_call: LlmCall, tool_dispatch: ToolDispatch, trace
                     "agent_name": "ResearchAgent",
                     "action_type": "tool_call",
                     "tool_name": tool_name,
+                    "tool_call_id": f"legacy_research_fallback_{next_state['research_round']}",
+                    "mcp_request_id": "legacy_local_dispatch",
                     "tool_args": tool_args,
                     "tool_result": tool_result,
                     "summary": f"{tool_name}: fallback_tool_call_after_parse_error"[:500],
@@ -182,6 +330,8 @@ def build_langgraph_runner(llm_call: LlmCall, tool_dispatch: ToolDispatch, trace
                     "agent_name": "ResearchAgent",
                     "action_type": "tool_call",
                     "tool_name": tool_name,
+                    "tool_call_id": f"legacy_research_model_{next_state['research_round']}",
+                    "mcp_request_id": "legacy_local_dispatch",
                     "tool_args": tool_args,
                     "tool_result": tool_result,
                     "summary": (
@@ -211,6 +361,124 @@ def build_langgraph_runner(llm_call: LlmCall, tool_dispatch: ToolDispatch, trace
 
     async def action_node(state: AgentState) -> AgentState:
         next_state = {**state, "action_round": int(state.get("action_round", 0)) + 1}
+        protocol = str(state.get("agentic_tool_protocol") or tool_protocol or "legacy_json_prompt").strip().lower()
+        if protocol == "openai_tool_calls_mcp_sim" and llm_tool_call is not None:
+            messages = list(state.get("action_messages") or [])
+            if not messages:
+                messages = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are ActionAgent. Use tools to execute tasks. "
+                            "When complete, return a concise final response."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Objective: {state['action_objective']}\n"
+                            f"User task: {state['prompt']}\n"
+                            f"Research context: {' | '.join(state['research_observations']) if state['research_observations'] else '(none)'}"
+                        ),
+                    },
+                ]
+            tools = mcp_client.list_tools("ActionAgent")
+            assistant_msg, finish = await llm_tool_call(
+                state["session_id"],
+                messages,
+                tools,
+                {"tool_choice": "auto", "thinking": {"type": "disabled"}},
+            )
+            msg = assistant_msg if isinstance(assistant_msg, dict) else {}
+            messages.append(msg)
+            tool_calls = msg.get("tool_calls") if isinstance(msg.get("tool_calls"), list) else []
+            if tool_calls:
+                obs = list(next_state.get("action_observations", []))
+                tool_names: List[str] = []
+                risk_tags: List[str] = []
+                tool_call_ids: List[str] = []
+                mcp_request_ids: List[str] = []
+                tool_args_list: List[Dict[str, Any]] = []
+                tool_results_list: List[Dict[str, Any]] = []
+                for tc in tool_calls:
+                    if not isinstance(tc, dict):
+                        continue
+                    tc_id = str(tc.get("id") or "").strip() or "call_missing_id"
+                    fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+                    tool_name = str(fn.get("name") or "").strip()
+                    if not tool_name:
+                        continue
+                    tool_args = _parse_tool_call_arguments(fn.get("arguments"))
+                    env = mcp_client.call_tool(
+                        agent_name="ActionAgent",
+                        tool_name=tool_name,
+                        arguments=tool_args,
+                        scenario=state["scenario"],
+                        user_prompt=state["prompt"],
+                        tool_call_id=tc_id,
+                    )
+                    tool_result = env.get("result") if isinstance(env.get("result"), dict) else {}
+                    mcp_request_id = str(env.get("mcp_request_id") or "").strip()
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "name": tool_name,
+                            "tool_call_id": tc_id,
+                            "content": mcp_client.to_tool_message_content(env),
+                        }
+                    )
+                    obs.append(json.dumps(tool_result, ensure_ascii=False)[:500])
+                    tool_names.append(tool_name)
+                    tool_call_ids.append(tc_id)
+                    if mcp_request_id:
+                        mcp_request_ids.append(mcp_request_id)
+                    tool_args_list.append(tool_args)
+                    tool_results_list.append(tool_result)
+                    if isinstance(tool_result.get("risk_tags"), list):
+                        risk_tags.extend([str(x) for x in tool_result["risk_tags"] if str(x).strip()])
+                next_state["action_messages"] = messages
+                next_state["action_observations"] = obs
+                next_state["action_tool_used"] = True
+                next_state["risk_detected"] = bool(next_state.get("risk_detected")) or bool(risk_tags)
+                return _append_trace(
+                    next_state,
+                    trace_logger,
+                    {
+                        "agent_name": "ActionAgent",
+                        "action_type": "tool_call",
+                        "tool_name": tool_names[0] if tool_names else "",
+                        "tool_args": tool_args_list[0] if tool_args_list else {},
+                        "tool_result": tool_results_list[0] if tool_results_list else {},
+                        "tool_call_id": tool_call_ids[0] if tool_call_ids else "",
+                        "tool_call_ids": tool_call_ids,
+                        "mcp_request_id": mcp_request_ids[0] if mcp_request_ids else "",
+                        "mcp_request_ids": mcp_request_ids,
+                        "tool_args_list": tool_args_list,
+                        "tool_results_list": tool_results_list,
+                        "summary": ("mcp_sim tool_calls: " + ", ".join(tool_names))[:500],
+                        "outcome": finish,
+                        "guardrail_outcome": "cleared",
+                        "risk_tags": risk_tags,
+                        "route_decision": "stay_on_action: openai_tool_calls",
+                    },
+                )
+            answer = str(msg.get("content") or "(empty action)")
+            next_state["action_messages"] = messages
+            next_state["action_done"] = True
+            next_state["risk_detected"] = bool(next_state.get("risk_detected")) or answer.upper().startswith("BLOCK")
+            return _append_trace(
+                next_state,
+                trace_logger,
+                {
+                    "agent_name": "ActionAgent",
+                    "action_type": "final",
+                    "summary": answer[:500],
+                    "outcome": finish,
+                    "guardrail_outcome": "cleared",
+                    "risk_tags": ["model_self_reported_risk"] if answer.upper().startswith("BLOCK") else [],
+                    "route_decision": "to_finalize: action_final_ready",
+                },
+            )
         tools = tools_catalog("ActionAgent")
         prompt = (
             "You are ActionAgent. Decide next tool by user intent, or finish.\n"
@@ -241,6 +509,8 @@ def build_langgraph_runner(llm_call: LlmCall, tool_dispatch: ToolDispatch, trace
                     "agent_name": "ActionAgent",
                     "action_type": "tool_call",
                     "tool_name": tool_name,
+                    "tool_call_id": f"legacy_action_fallback_{next_state['action_round']}",
+                    "mcp_request_id": "legacy_local_dispatch",
                     "tool_args": tool_args,
                     "tool_result": tool_result,
                     "summary": f"{tool_name}: fallback_tool_call_after_parse_error"[:500],
@@ -273,6 +543,8 @@ def build_langgraph_runner(llm_call: LlmCall, tool_dispatch: ToolDispatch, trace
                     "agent_name": "ActionAgent",
                     "action_type": "tool_call",
                     "tool_name": tool_name,
+                    "tool_call_id": f"legacy_action_model_{next_state['action_round']}",
+                    "mcp_request_id": "legacy_local_dispatch",
                     "tool_args": tool_args,
                     "tool_result": tool_result,
                     "summary": (
@@ -461,6 +733,9 @@ def build_langgraph_runner(llm_call: LlmCall, tool_dispatch: ToolDispatch, trace
             "action_tool_used": False,
             "research_tools_done": [],
             "action_tools_done": [],
+            "research_messages": [],
+            "action_messages": [],
+            "agentic_tool_protocol": str(tool_protocol or "legacy_json_prompt"),
         }
         out = await compiled.ainvoke(initial)
         return {
