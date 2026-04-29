@@ -1412,6 +1412,12 @@ function setAgenticStatus(text, isError){
   agenticStatusEl.classList.toggle("error", !!isError);
 }
 
+function setAgenticStatusHtml(html, isError){
+  if (!agenticStatusEl) return;
+  agenticStatusEl.innerHTML = html || "";
+  agenticStatusEl.classList.toggle("error", !!isError);
+}
+
 function renderAgenticFinalReply(markdownText){
   if (!agenticFinalReplyEl) return;
   const txt = String(markdownText || "").trim();
@@ -1801,6 +1807,34 @@ function agenticTraceIdsBlock(item){
   return lines.join("");
 }
 
+function formatAgenticFailedScanners(failedScanners, failedScannerIds){
+  const rows = [];
+  if (Array.isArray(failedScanners) && failedScanners.length) {
+    failedScanners.forEach(item => {
+      if (!item || typeof item !== "object") return;
+      const id = String(item.id || "").trim();
+      if (!id) return;
+      const msg = String(item.message || "").trim();
+      rows.push({ id, message: msg });
+    });
+  }
+  if (rows.length) return rows;
+  const fallbackIds = Array.isArray(failedScannerIds) ? failedScannerIds : [];
+  return fallbackIds.map(id => String(id)).filter(Boolean).map(id => ({ id, message: "" }));
+}
+
+function formatAgenticFailedScannersHtml(failedScannerRows){
+  const rows = Array.isArray(failedScannerRows) ? failedScannerRows : [];
+  return rows.map(item => {
+    const id = escapeHtml(String(item?.id || ""));
+    const message = escapeHtml(String(item?.message || ""));
+    if (!id) return "";
+    return message
+      ? (id + " (<span class=\"agenticScannerMessage\">" + message + "</span>)")
+      : id;
+  }).filter(Boolean).join(", ");
+}
+
 function renderAgenticTimeline(trace){
   if (!agenticTimelineEl) return;
   const rows = Array.isArray(trace) ? trace : [];
@@ -1823,9 +1857,9 @@ function renderAgenticTimeline(trace){
     const riskHint = tags.length
       ? ("<div class=\"agenticStepRoute\">Risk Hint: " + tags.map(tag => escapeHtml(String(tag))).join(", ") + "</div>")
       : "";
-    const failedScanners = Array.isArray(item.failed_scanner_ids) ? item.failed_scanner_ids : [];
-    const failedScannerLine = failedScanners.length
-      ? ("<div class=\"agenticStepRoute\">Failed scanners: " + failedScanners.map(id => escapeHtml(String(id))).join(", ") + "</div>")
+    const failedScannerRows = formatAgenticFailedScanners(item.failed_scanners, item.failed_scanner_ids);
+    const failedScannerLine = failedScannerRows.length
+      ? ("<div class=\"agenticStepRoute\">Failed scanners: " + formatAgenticFailedScannersHtml(failedScannerRows) + "</div>")
       : "";
     const idsBlock = agenticTraceIdsBlock(item);
     return (
@@ -1934,10 +1968,12 @@ async function runAgenticSecurity(){
     updateAgenticFlowVisualization(data.trace || [], { running: false, bypass: bypassF5Guardrail });
     if (!res.ok) {
       stopAgenticRunningStatusAnimation();
-      const scanners = Array.isArray(data.failed_scanner_ids) ? data.failed_scanner_ids : [];
-      const scannerText = scanners.length ? (" | failed scanners: " + scanners.join(", ")) : "";
       const msg = data.error_message || data.detail || ("HTTP " + res.status);
-      setAgenticStatus("Agentic run blocked: " + msg + scannerText, true);
+      const scannerRows = formatAgenticFailedScanners(data.failed_scanners, data.failed_scanner_ids);
+      const scannerHtml = scannerRows.length
+        ? (" | failed scanners: " + formatAgenticFailedScannersHtml(scannerRows))
+        : "";
+      setAgenticStatusHtml("Agentic run blocked: " + escapeHtml(String(msg)) + scannerHtml, true);
       renderAgenticFinalReply("");
       return;
     }

@@ -1658,6 +1658,10 @@ code{
   border-radius:8px;
   padding:4px 8px;
 }
+.agenticScannerMessage{
+  color:#6d28d9;
+  font-weight:600;
+}
 .agenticRiskTag{
   display:inline-block;
   margin-right:6px;

@@ -1893,17 +1893,19 @@ def _read_agentic_run_trace(session_id: str) -> List[dict]:
     return rows
 
 
-def _extract_agentic_error_info(resp_data: object) -> Tuple[str, List[str]]:
-    """Extract friendly error message and failed scanner IDs from Calypso error JSON."""
+def _extract_agentic_error_info(resp_data: object) -> Tuple[str, List[str], List[dict]]:
+    """Extract friendly error message and failed scanner IDs/messages from Calypso error JSON."""
     fallback_msg = "CalypsoAI blocked the request."
     if not isinstance(resp_data, dict):
-        return fallback_msg, []
+        return fallback_msg, [], []
     err = resp_data.get("error")
     if not isinstance(err, dict):
-        return fallback_msg, []
+        return fallback_msg, [], []
     msg = str(err.get("message") or fallback_msg).strip() or fallback_msg
     cai_error = err.get("cai_error")
     failed_ids: List[str] = []
+    failed_scanners: List[dict] = []
+    seen_ids: set = set()
     if isinstance(cai_error, dict):
         scanner_results = cai_error.get("scanner_results")
         if isinstance(scanner_results, list):
@@ -1914,8 +1916,17 @@ def _extract_agentic_error_info(resp_data: object) -> Tuple[str, List[str]]:
                     continue
                 sid = str(item.get("scanner_id") or "").strip()
                 if sid:
+                    if sid in seen_ids:
+                        continue
+                    seen_ids.add(sid)
                     failed_ids.append(sid)
-    return msg, failed_ids
+                    failed_scanners.append(
+                        {
+                            "id": sid,
+                            "message": str(item.get("message") or "").strip(),
+                        }
+                    )
+    return msg, failed_ids, failed_scanners
 
 
 def _infer_failed_agent_name(trace_rows: List[dict]) -> str:
@@ -2036,12 +2047,17 @@ async def _agentic_openai_chat(
     except Exception:
         resp_data = {"_raw_text": (resp.text or "")[:20000]}
     if resp.status_code < 200 or resp.status_code >= 300:
-        err_msg, failed_ids = _extract_agentic_error_info(resp_data) if not bypass_f5_guardrail else (str(resp_data)[:280], [])
+        err_msg, failed_ids, failed_scanners = (
+            _extract_agentic_error_info(resp_data)
+            if not bypass_f5_guardrail
+            else (str(resp_data)[:280], [], [])
+        )
         raise HTTPException(
             status_code=resp.status_code,
             detail={
                 "message": err_msg,
                 "failed_scanner_ids": failed_ids,
+                "failed_scanners": failed_scanners,
                 "raw_error": (resp.text or "")[:2000],
             },
         )
@@ -2120,12 +2136,17 @@ async def _agentic_openai_chat_message(
     except Exception:
         resp_data = {"_raw_text": (resp.text or "")[:20000]}
     if resp.status_code < 200 or resp.status_code >= 300:
-        err_msg, failed_ids = _extract_agentic_error_info(resp_data) if not bypass_f5_guardrail else (str(resp_data)[:280], [])
+        err_msg, failed_ids, failed_scanners = (
+            _extract_agentic_error_info(resp_data)
+            if not bypass_f5_guardrail
+            else (str(resp_data)[:280], [], [])
+        )
         raise HTTPException(
             status_code=resp.status_code,
             detail={
                 "message": err_msg,
                 "failed_scanner_ids": failed_ids,
+                "failed_scanners": failed_scanners,
                 "raw_error": (resp.text or "")[:2000],
             },
         )
@@ -2194,6 +2215,22 @@ async def api_agentic_run(request: Request, payload: AgenticRunIn):
         if not isinstance(failed_scanner_ids, list):
             failed_scanner_ids = []
         failed_scanner_ids = [str(x) for x in failed_scanner_ids if str(x).strip()]
+        failed_scanners = detail_obj.get("failed_scanners")
+        if not isinstance(failed_scanners, list):
+            failed_scanners = []
+        cleaned_failed_scanners: List[dict] = []
+        for item in failed_scanners:
+            if not isinstance(item, dict):
+                continue
+            sid = str(item.get("id") or "").strip()
+            if not sid:
+                continue
+            cleaned_failed_scanners.append(
+                {
+                    "id": sid,
+                    "message": str(item.get("message") or "").strip(),
+                }
+            )
         failed_agent_name = _infer_failed_agent_name(runtime_trace)
         fail_step = {
             "step_index": step_index,
@@ -2204,9 +2241,10 @@ async def api_agentic_run(request: Request, payload: AgenticRunIn):
             "summary": error_message[:500],
             "outcome": "blocked",
             "guardrail_outcome": "blocked",
-            "risk_tags": ["calypso_guardrail_blocked"] if failed_scanner_ids else [],
+            "risk_tags": ["calypso_guardrail_blocked"] if (failed_scanner_ids or cleaned_failed_scanners) else [],
             "route_decision": "terminated: calypso_blocked",
             "failed_scanner_ids": failed_scanner_ids,
+            "failed_scanners": cleaned_failed_scanners,
         }
         _trace_logger_runtime(session_id, fail_step)
         final_trace = list(runtime_trace)
@@ -2225,6 +2263,7 @@ async def api_agentic_run(request: Request, payload: AgenticRunIn):
                 "trace": final_trace,
                 "error_message": error_message,
                 "failed_scanner_ids": failed_scanner_ids,
+                "failed_scanners": cleaned_failed_scanners,
             },
         )
     except Exception as e:
