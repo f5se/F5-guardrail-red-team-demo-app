@@ -76,6 +76,7 @@ from agentic.langgraph_dual_agent.tools import (
     dispatch_tool as dispatch_agentic_tool,
     get_tool_config as get_agentic_tool_config,
     save_tool_config as save_agentic_tool_config,
+    tools_catalog as get_agentic_tools_catalog,
 )
 
 # Project-root anchored paths to avoid cwd mismatch.
@@ -2289,6 +2290,48 @@ async def api_agentic_run(request: Request, payload: AgenticRunIn):
 async def api_agentic_tool_config_get(request: Request):
     require_user(request)
     return JSONResponse(get_agentic_tool_config())
+
+
+def _build_agentic_tool_basic_info(tool_name: str) -> dict:
+    tool_name = str(tool_name or "").strip()
+    if not tool_name:
+        return {}
+    tool_map: Dict[str, dict] = {}
+    for agent_name in ("ResearchAgent", "ActionAgent"):
+        for item in get_agentic_tools_catalog(agent_name):
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            tool_map[name] = item
+    if tool_name == "legal_counsel":
+        return {
+            "mcp_server": "mock-mcp-server",
+            "tool_name": "legal_counsel",
+            "description": "Run legal review prompts driven by legal_counsel configuration topics.",
+        }
+    item = tool_map.get(tool_name)
+    if not isinstance(item, dict):
+        return {
+            "mcp_server": "mock-mcp-server",
+            "tool_name": tool_name,
+            "description": "",
+        }
+    return {
+        "mcp_server": "mock-mcp-server",
+        "tool_name": str(item.get("name") or tool_name),
+        "description": str(item.get("description") or "").strip(),
+    }
+
+
+@app.get("/api/agentic/tool-basic-info")
+async def api_agentic_tool_basic_info(request: Request, tool_name: str = Query(...)):
+    require_user(request)
+    name = str(tool_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="tool_name is required")
+    return JSONResponse(_build_agentic_tool_basic_info(name))
 
 
 @app.get("/api/agentic/risk-templates")

@@ -392,6 +392,23 @@ body{
   font-weight:700;
   color:#334155;
 }
+.agenticToolBasicInfo{
+  margin:8px 0 10px;
+  border:1px solid #dbe4ff;
+  border-radius:10px;
+  background:#f8faff;
+  padding:8px 10px;
+  font-size:12px;
+  line-height:1.5;
+  color:#334155;
+}
+.agenticToolBasicInfoRow{
+  margin:2px 0;
+}
+.agenticToolBasicInfoLabel{
+  color:#1e3a8a;
+  font-weight:700;
+}
 .agenticToolConfigEditor{
   width:100%;
   min-height:460px;
@@ -1316,6 +1333,18 @@ code{
   box-shadow:0 0 0 3px rgba(37,99,235,.2), 0 4px 14px rgba(37,99,235,.12);
   animation:agenticFlowBreathe 1.8s ease-in-out infinite;
 }
+.agenticFlowNode--tooling{
+  border-color:#7c3aed;
+  box-shadow:0 0 0 3px rgba(124,58,237,.2), 0 4px 14px rgba(124,58,237,.12);
+  animation:agenticFlowToolingPulse 1.0s ease-in-out infinite;
+}
+.agenticFlowNode--tooling .agenticFlowNodeTitle{
+  color:#5b21b6;
+}
+.agenticFlowNode--tooling .agenticFlowNodeSub{
+  color:#6d28d9;
+  font-weight:700;
+}
 .agenticFlowNode--done{
   border-color:#16a34a;
   background:#f0fdf4;
@@ -1362,6 +1391,10 @@ code{
 @keyframes agenticFlowBreathe{
   0%, 100%{ transform:scale(1); box-shadow:0 0 0 3px rgba(37,99,235,.15), 0 4px 14px rgba(37,99,235,.1); }
   50%{ transform:scale(1.03); box-shadow:0 0 0 6px rgba(37,99,235,.22), 0 6px 18px rgba(37,99,235,.14); }
+}
+@keyframes agenticFlowToolingPulse{
+  0%, 100%{ transform:scale(1); box-shadow:0 0 0 3px rgba(124,58,237,.18), 0 4px 14px rgba(124,58,237,.10); }
+  50%{ transform:scale(1.025); box-shadow:0 0 0 6px rgba(124,58,237,.26), 0 6px 18px rgba(124,58,237,.16); }
 }
 .agenticFlowHub{
   min-width:168px;

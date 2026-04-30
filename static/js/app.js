@@ -29,6 +29,7 @@ const agenticToolConfigCardEl = document.getElementById("agenticToolConfigCard")
 const agenticToolEditorOverlayEl = document.getElementById("agenticToolEditorOverlay");
 const agenticToolConfigListEl = document.getElementById("agenticToolConfigList");
 const agenticToolConfigTitleEl = document.getElementById("agenticToolConfigTitle");
+const agenticToolBasicInfoEl = document.getElementById("agenticToolBasicInfo");
 const agenticToolConfigEditorEl = document.getElementById("agenticToolConfigEditor");
 const agenticToolConfigHintEl = document.getElementById("agenticToolConfigHint");
 const agenticToolConfigHintCodeEl = document.getElementById("agenticToolConfigHintCode");
@@ -232,6 +233,7 @@ async function datasetOpenHeatmapFromHistory(taskId, force = false){
 let configuredAppTimezone = "UTC+08:00";
 let agenticToolConfigData = null;
 let agenticSelectedTool = "";
+let agenticToolBasicInfoCache = {};
 let currentBackendProviderName = "";
 let directModeAvailable = false;
 const AGENTIC_SEARCH_POLICY_INJECTION_HINT = `{
@@ -1474,7 +1476,12 @@ function updateAgenticFlowVisualization(trace, options){
     agenticFlowHubSubEl.textContent = bypass ? "OpenAI-compatible · direct" : "OpenAI-compatible · Calypso session";
   }
   agenticFlowVizEl.querySelectorAll(".agenticFlowNode").forEach(el => {
-    el.classList.remove("agenticFlowNode--active", "agenticFlowNode--blocked", "agenticFlowNode--done");
+    el.classList.remove("agenticFlowNode--active", "agenticFlowNode--blocked", "agenticFlowNode--done", "agenticFlowNode--tooling");
+  });
+  agenticFlowVizEl.querySelectorAll(".agenticFlowNodeSub").forEach(el => {
+    const base = el.getAttribute("data-base-sub");
+    if (!base) el.setAttribute("data-base-sub", String(el.textContent || ""));
+    el.textContent = base || String(el.textContent || "");
   });
   const hubEl = agenticFlowVizEl.querySelector(".agenticFlowHub");
   if (hubEl) hubEl.classList.remove("agenticFlowHub--blocked", "agenticFlowHub--comm", "agenticFlowHub--done");
@@ -1531,7 +1538,17 @@ function updateAgenticFlowVisualization(trace, options){
   }
   const isToolStep = lastRow && String(lastRow.action_type || "").toLowerCase() === "tool_call";
   if (isToolStep) {
-    return;
+    if (activeNode && !activeNode.classList.contains("agenticFlowNode--blocked")) {
+      activeNode.classList.add("agenticFlowNode--tooling");
+      const toolName = String(lastRow.tool_name || "").trim();
+      const subEl = activeNode.querySelector(".agenticFlowNodeSub");
+      if (subEl) {
+        const base = subEl.getAttribute("data-base-sub") || String(subEl.textContent || "");
+        const shortTool = toolName || "tool";
+        subEl.textContent = "calling " + shortTool;
+        subEl.setAttribute("title", (base ? (base + " | ") : "") + "calling " + shortTool);
+      }
+    }
   }
   if (active === "supervisor") {
     const e = agenticFlowVizEl.querySelector(".agenticFlowEdge[data-edge=\"supervisor-hub\"]");
@@ -1589,6 +1606,48 @@ function getAgenticToolNames(){
     "send_email",
     "legal_counsel"
   ];
+}
+
+function renderAgenticToolBasicInfo(toolName, info){
+  if (!agenticToolBasicInfoEl) return;
+  if (!toolName) {
+    agenticToolBasicInfoEl.style.display = "none";
+    agenticToolBasicInfoEl.innerHTML = "";
+    return;
+  }
+  const data = info && typeof info === "object" ? info : {};
+  const mcpServer = String(data.mcp_server || "mock-mcp-server").trim() || "mock-mcp-server";
+  const displayToolName = String(data.tool_name || toolName).trim() || toolName;
+  const description = String(data.description || "").trim() || "-";
+  agenticToolBasicInfoEl.innerHTML = (
+    "<div class=\"agenticToolBasicInfoRow\"><span class=\"agenticToolBasicInfoLabel\">MCP Server:</span> " + escapeHtml(mcpServer) + "</div>" +
+    "<div class=\"agenticToolBasicInfoRow\"><span class=\"agenticToolBasicInfoLabel\">Tool Name:</span> " + escapeHtml(displayToolName) + "</div>" +
+    "<div class=\"agenticToolBasicInfoRow\"><span class=\"agenticToolBasicInfoLabel\">Description:</span> " + escapeHtml(description) + "</div>"
+  );
+  agenticToolBasicInfoEl.style.display = "";
+}
+
+async function loadAgenticToolBasicInfo(toolName){
+  if (!toolName) {
+    renderAgenticToolBasicInfo("", null);
+    return;
+  }
+  if (agenticToolBasicInfoCache[toolName]) {
+    renderAgenticToolBasicInfo(toolName, agenticToolBasicInfoCache[toolName]);
+    return;
+  }
+  renderAgenticToolBasicInfo(toolName, { mcp_server: "Loading...", tool_name: toolName, description: "Loading..." });
+  try {
+    const resp = await authFetch("/api/agentic/tool-basic-info?tool_name=" + encodeURIComponent(toolName), { cache: "no-store" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const data = await resp.json();
+    agenticToolBasicInfoCache[toolName] = data;
+    if (agenticSelectedTool === toolName) renderAgenticToolBasicInfo(toolName, data);
+  } catch (_e) {
+    const fallback = { mcp_server: "mock-mcp-server", tool_name: toolName, description: "-" };
+    agenticToolBasicInfoCache[toolName] = fallback;
+    if (agenticSelectedTool === toolName) renderAgenticToolBasicInfo(toolName, fallback);
+  }
 }
 
 function buildToolScopedConfig(toolName, cfg){
@@ -1714,10 +1773,12 @@ function renderAgenticToolConfigPanel(){
   refreshSearchPolicySec022Buttons();
   if (!agenticSelectedTool) {
     agenticToolConfigEditorEl.value = "";
+    renderAgenticToolBasicInfo("", null);
     setAgenticToolConfigStatus("Click a tool on the left to edit.", false);
     if (agenticToolEditorOverlayEl) agenticToolEditorOverlayEl.style.display = "none";
     return;
   }
+  void loadAgenticToolBasicInfo(agenticSelectedTool);
   const scoped = buildToolScopedConfig(agenticSelectedTool, agenticToolConfigData || {});
   agenticToolConfigEditorEl.value = JSON.stringify(scoped, null, 2);
 }
@@ -1731,6 +1792,7 @@ async function loadAgenticToolConfig(){
     const data = await resp.json();
     agenticToolConfigData = data;
     agenticSelectedTool = "";
+    agenticToolBasicInfoCache = {};
     renderAgenticToolConfigPanel();
     setAgenticToolConfigStatus("Loaded.", false);
   } catch (e) {
