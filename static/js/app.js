@@ -1915,10 +1915,6 @@ function renderAgenticTimeline(trace){
     const routeDecision = escapeHtml(String(item.route_decision || ""));
     const routeLine = routeDecision ? ("<div class=\"agenticStepRoute\">Route: " + routeDecision + "</div>") : "";
     const toolBlock = agenticTimelineToolBlock(item);
-    const tags = Array.isArray(item.risk_tags) ? item.risk_tags : [];
-    const riskHint = tags.length
-      ? ("<div class=\"agenticStepRoute\">Risk Hint: " + tags.map(tag => escapeHtml(String(tag))).join(", ") + "</div>")
-      : "";
     const failedScannerRows = formatAgenticFailedScanners(item.failed_scanners, item.failed_scanner_ids);
     const failedScannerLine = failedScannerRows.length
       ? ("<div class=\"agenticStepRoute\">Failed scanners: " + formatAgenticFailedScannersHtml(failedScannerRows) + "</div>")
@@ -1935,7 +1931,6 @@ function renderAgenticTimeline(trace){
         toolBlock +
         "<div class=\"agenticStepSummary\">" + summary + "</div>" +
         idsBlock +
-        riskHint +
         failedScannerLine +
         routeLine +
       "</div>"
@@ -1945,9 +1940,9 @@ function renderAgenticTimeline(trace){
 
 function renderAgenticToolPanel(trace){
   if (!agenticToolPanelEl) return;
-  const rows = Array.isArray(trace) ? trace.filter(item => item && (item.tool_name || (Array.isArray(item.risk_tags) && item.risk_tags.length))) : [];
+  const rows = Array.isArray(trace) ? trace.filter(item => item && item.tool_name) : [];
   if (!rows.length) {
-    agenticToolPanelEl.innerHTML = "<div class=\"agenticEmpty\">No tool calls or risk tags for current run.</div>";
+    agenticToolPanelEl.innerHTML = "<div class=\"agenticEmpty\">No tool calls for current run.</div>";
     return;
   }
   agenticToolPanelEl.innerHTML = rows.map(item => {
@@ -1956,17 +1951,12 @@ function renderAgenticToolPanel(trace){
     const resultText = escapeHtml(JSON.stringify(item.tool_result || {}, null, 2));
     const toolCallId = escapeHtml(String(item.tool_call_id || "-"));
     const mcpRequestId = escapeHtml(String(item.mcp_request_id || "-"));
-    const tags = Array.isArray(item.risk_tags) ? item.risk_tags : [];
-    const tagsHtml = tags.length
-      ? tags.map(tag => "<span class=\"agenticRiskTag\">" + escapeHtml(String(tag)) + "</span>").join("")
-      : "<span class=\"agenticRiskTag agenticRiskTag--none\">none</span>";
     return (
       "<div class=\"agenticToolItem\">" +
         "<div><strong>Tool:</strong> " + toolName + "</div>" +
         "<div><strong>tool_call_id:</strong> <code>" + toolCallId + "</code></div>" +
         "<div><strong>mcp_request_id:</strong> <code>" + mcpRequestId + "</code></div>" +
         "<div><strong>Args:</strong> <code>" + argsText + "</code></div>" +
-        "<div><strong>Risk Tags:</strong> " + tagsHtml + "</div>" +
         "<details class=\"agenticToolRaw\">" +
           "<summary>View raw tool_result</summary>" +
           "<pre><code>" + resultText + "</code></pre>" +

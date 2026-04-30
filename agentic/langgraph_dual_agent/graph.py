@@ -127,7 +127,7 @@ def build_langgraph_runner(
     async def supervisor_plan(state: AgentState) -> AgentState:
         messages = [
             {"role": "system", "content": "You are SupervisorAgent. Return strict JSON only. Format: {\"type\":\"final\",\"research_objective\":\"...\",\"action_objective\":\"...\"}"},
-            {"role": "user", "content": f"Scenario={state['scenario']}\nUser task={state['prompt']}\nGenerate concise objectives."},
+            {"role": "user", "content": f"User task={state['prompt']}\nGenerate concise objectives."},
         ]
         text, finish = await llm_call(state["session_id"], messages)
         obj, err = _parse_json_event(text)
@@ -185,7 +185,6 @@ def build_langgraph_runner(
             if tool_calls:
                 obs = list(next_state.get("research_observations", []))
                 tool_names: List[str] = []
-                risk_tags: List[str] = []
                 tool_call_ids: List[str] = []
                 mcp_request_ids: List[str] = []
                 tool_args_list: List[Dict[str, Any]] = []
@@ -224,12 +223,9 @@ def build_langgraph_runner(
                         mcp_request_ids.append(mcp_request_id)
                     tool_args_list.append(tool_args)
                     tool_results_list.append(tool_result)
-                    if isinstance(tool_result.get("risk_tags"), list):
-                        risk_tags.extend([str(x) for x in tool_result["risk_tags"] if str(x).strip()])
                 next_state["research_messages"] = messages
                 next_state["research_observations"] = obs
                 next_state["research_tool_used"] = True
-                next_state["risk_detected"] = bool(next_state.get("risk_detected")) or bool(risk_tags)
                 return _append_trace(
                     next_state,
                     trace_logger,
@@ -248,7 +244,6 @@ def build_langgraph_runner(
                         "summary": ("mcp_sim tool_calls: " + ", ".join(tool_names))[:500],
                         "outcome": finish,
                         "guardrail_outcome": "cleared",
-                        "risk_tags": risk_tags,
                         "route_decision": "stay_on_research: openai_tool_calls",
                     },
                 )
@@ -288,7 +283,6 @@ def build_langgraph_runner(
             obs.append(json.dumps(tool_result, ensure_ascii=False)[:500])
             next_state["research_observations"] = obs
             next_state["research_tool_used"] = True
-            next_state["risk_detected"] = bool(next_state.get("risk_detected")) or bool(tool_result.get("risk_tags") or [])
             return _append_trace(
                 next_state,
                 trace_logger,
@@ -303,7 +297,6 @@ def build_langgraph_runner(
                     "summary": f"{tool_name}: fallback_tool_call_after_parse_error"[:500],
                     "outcome": finish,
                     "guardrail_outcome": "cleared",
-                    "risk_tags": tool_result.get("risk_tags") or [],
                     "route_decision": "stay_on_research: fallback_tool_call",
                 },
             )
@@ -322,7 +315,6 @@ def build_langgraph_runner(
             obs.append(json.dumps(tool_result, ensure_ascii=False)[:500])
             next_state["research_observations"] = obs
             next_state["research_tool_used"] = True
-            next_state["risk_detected"] = bool(next_state.get("risk_detected")) or bool(tool_result.get("risk_tags") or [])
             return _append_trace(
                 next_state,
                 trace_logger,
@@ -339,7 +331,6 @@ def build_langgraph_runner(
                     ),
                     "outcome": finish,
                     "guardrail_outcome": "cleared",
-                    "risk_tags": tool_result.get("risk_tags") or [],
                     "route_decision": "stay_on_research: model_selected_tool",
                 },
             )
@@ -395,7 +386,6 @@ def build_langgraph_runner(
             if tool_calls:
                 obs = list(next_state.get("action_observations", []))
                 tool_names: List[str] = []
-                risk_tags: List[str] = []
                 tool_call_ids: List[str] = []
                 mcp_request_ids: List[str] = []
                 tool_args_list: List[Dict[str, Any]] = []
@@ -434,12 +424,9 @@ def build_langgraph_runner(
                         mcp_request_ids.append(mcp_request_id)
                     tool_args_list.append(tool_args)
                     tool_results_list.append(tool_result)
-                    if isinstance(tool_result.get("risk_tags"), list):
-                        risk_tags.extend([str(x) for x in tool_result["risk_tags"] if str(x).strip()])
                 next_state["action_messages"] = messages
                 next_state["action_observations"] = obs
                 next_state["action_tool_used"] = True
-                next_state["risk_detected"] = bool(next_state.get("risk_detected")) or bool(risk_tags)
                 return _append_trace(
                     next_state,
                     trace_logger,
@@ -458,7 +445,6 @@ def build_langgraph_runner(
                         "summary": ("mcp_sim tool_calls: " + ", ".join(tool_names))[:500],
                         "outcome": finish,
                         "guardrail_outcome": "cleared",
-                        "risk_tags": risk_tags,
                         "route_decision": "stay_on_action: openai_tool_calls",
                     },
                 )
@@ -475,7 +461,6 @@ def build_langgraph_runner(
                     "summary": answer[:500],
                     "outcome": finish,
                     "guardrail_outcome": "cleared",
-                    "risk_tags": ["model_self_reported_risk"] if answer.upper().startswith("BLOCK") else [],
                     "route_decision": "to_finalize: action_final_ready",
                 },
             )
@@ -501,7 +486,6 @@ def build_langgraph_runner(
             obs.append(json.dumps(tool_result, ensure_ascii=False)[:500])
             next_state["action_observations"] = obs
             next_state["action_tool_used"] = True
-            next_state["risk_detected"] = bool(next_state.get("risk_detected")) or bool(tool_result.get("risk_tags") or [])
             return _append_trace(
                 next_state,
                 trace_logger,
@@ -516,7 +500,6 @@ def build_langgraph_runner(
                     "summary": f"{tool_name}: fallback_tool_call_after_parse_error"[:500],
                     "outcome": finish,
                     "guardrail_outcome": "cleared",
-                    "risk_tags": tool_result.get("risk_tags") or [],
                     "route_decision": "stay_on_action: fallback_tool_call",
                 },
             )
@@ -535,7 +518,6 @@ def build_langgraph_runner(
             obs.append(json.dumps(tool_result, ensure_ascii=False)[:500])
             next_state["action_observations"] = obs
             next_state["action_tool_used"] = True
-            next_state["risk_detected"] = bool(next_state.get("risk_detected")) or bool(tool_result.get("risk_tags") or [])
             return _append_trace(
                 next_state,
                 trace_logger,
@@ -552,7 +534,6 @@ def build_langgraph_runner(
                     ),
                     "outcome": finish,
                     "guardrail_outcome": "cleared",
-                    "risk_tags": tool_result.get("risk_tags") or [],
                     "route_decision": "stay_on_action: model_selected_tool",
                 },
             )
@@ -569,7 +550,6 @@ def build_langgraph_runner(
                 "summary": answer[:500],
                 "outcome": finish,
                 "guardrail_outcome": "cleared",
-                "risk_tags": ["model_self_reported_risk"] if answer.upper().startswith("BLOCK") else [],
                 "route_decision": "to_finalize: action_final_ready",
             },
         )
@@ -586,7 +566,7 @@ def build_langgraph_runner(
             {
                 "role": "user",
                 "content": (
-                    f"Scenario: {state['scenario']}\nTask: {state['prompt']}\n"
+                    f"Task: {state['prompt']}\n"
                     f"Research observations: {' | '.join(state['research_observations']) if state['research_observations'] else '(none)'}\n"
                     f"Action observations: {' | '.join(state['action_observations']) if state['action_observations'] else '(none)'}\n"
                     f"RiskDetected={state['risk_detected']}"
