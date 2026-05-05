@@ -5059,7 +5059,7 @@ function datasetResetNewTaskForm(){
   if (datasetOpenaiBlockPayloadKeywords) datasetOpenaiBlockPayloadKeywords.value = "";
   if (datasetAlicloudRegionId) datasetAlicloudRegionId.value = "cn-shanghai";
   if (datasetAlicloudEndpoint) datasetAlicloudEndpoint.value = "green-cip.cn-shanghai.aliyuncs.com";
-  if (datasetAlicloudService) datasetAlicloudService.value = "query_security_check";
+  if (datasetAlicloudService) datasetAlicloudService.value = "query_security_check_pro";
   if (datasetAlicloudBizInterface) datasetAlicloudBizInterface.value = "MultiModalGuard";
   if (datasetAlicloudApiPath) datasetAlicloudApiPath.value = "/";
   if (datasetAlicloudConnectMs) datasetAlicloudConnectMs.value = "10000";
@@ -5236,7 +5236,7 @@ function datasetApplyTaskToForm(task){
     datasetAlicloudEndpoint.value = String(task.alicloud_endpoint || "").trim() || "green-cip.cn-shanghai.aliyuncs.com";
   }
   if (datasetAlicloudService) {
-    datasetAlicloudService.value = String(task.alicloud_service || "").trim() || "query_security_check";
+    datasetAlicloudService.value = String(task.alicloud_service || "").trim() || "query_security_check_pro";
   }
   if (datasetAlicloudBizInterface) {
     datasetAlicloudBizInterface.value = String(task.alicloud_biz_interface || "").trim() || "MultiModalGuard";
