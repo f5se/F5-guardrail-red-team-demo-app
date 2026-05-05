@@ -3822,6 +3822,61 @@ code{
 .datasetFileUploadRow .datasetUploadFormatHint{width:100%;flex-basis:100%;margin:0;line-height:1.45}
 .datasetStepHint{margin:0 0 10px 0;font-size:13px;color:#64748b;line-height:1.5}
 .datasetStepHint code{font-size:12px;background:#f1f5f9;padding:1px 5px;border-radius:4px}
+.datasetRow .datasetModeHelpBtn{
+  width:16px;
+  height:16px;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  color:#98a2b3;
+  font-size:13px;
+  line-height:1;
+  font-weight:500;
+  cursor:pointer;
+  padding:0;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  vertical-align:middle;
+  transition:all .12s ease;
+  transform:translateY(-1px);
+  /* Override generic ".datasetRow button" primary style */
+  border-color:transparent !important;
+  box-shadow:none !important;
+  padding:0 !important;
+  min-width:16px !important;
+  min-height:16px !important;
+  max-height:16px !important;
+  height:16px !important;
+}
+.datasetRow .datasetModeHelpBtn:hover{
+  color:#667085;
+  background:#f3f4f6;
+  border-color:transparent !important;
+}
+.datasetRow .datasetModeHelpBtn:focus-visible{
+  outline:none;
+  box-shadow:0 0 0 2px rgba(156,163,175,.16);
+}
+.datasetModeHelpPopover{
+  margin:8px 0 10px 0;
+  border:1px solid #bfdbfe;
+  background:linear-gradient(180deg,#f8fbff 0%,#ffffff 55%);
+  border-radius:12px;
+  padding:10px 12px;
+}
+.datasetModeHelpTitle{font-size:13px;font-weight:700;color:#1e3a8a;margin-bottom:6px}
+.datasetModeHelpCode{
+  margin:0;
+  white-space:pre-wrap;
+  word-break:break-word;
+  font-size:12px;
+  line-height:1.45;
+  background:#0f172a;
+  color:#e2e8f0;
+  border-radius:10px;
+  padding:10px;
+}
 .datasetOpenAICompatPanel{width:100%;padding:10px 12px;border:1px solid #c7d2fe;border-radius:12px;background:linear-gradient(180deg,#f8fbff 0%,#ffffff 55%)}
 .datasetOpenAICompatPanelTitle{font-size:13px;font-weight:700;color:#1e3a8a;margin-bottom:8px}
 .datasetOpenAIDetectPanel{margin-top:8px;padding:10px;border:1px solid #dbeafe;border-radius:12px;background:#fff}

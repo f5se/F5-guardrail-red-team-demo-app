@@ -89,10 +89,14 @@ const datasetAlicloudConnectMs = document.getElementById("datasetAlicloudConnect
 const datasetAlicloudReadMs = document.getElementById("datasetAlicloudReadMs");
 const datasetAlicloudAccessKeyId = document.getElementById("datasetAlicloudAccessKeyId");
 const datasetAlicloudAccessKeySecret = document.getElementById("datasetAlicloudAccessKeySecret");
+const datasetAlicloudHelpBtn = document.getElementById("datasetAlicloudHelpBtn");
+const datasetAlicloudHelpPopover = document.getElementById("datasetAlicloudHelpPopover");
 const datasetXiangxinPanel = document.getElementById("datasetXiangxinPanel");
 const datasetXiangxinApiEndpoint = document.getElementById("datasetXiangxinApiEndpoint");
 const datasetXiangxinModel = document.getElementById("datasetXiangxinModel");
 const datasetXiangxinApiKey = document.getElementById("datasetXiangxinApiKey");
+const datasetXiangxinHelpBtn = document.getElementById("datasetXiangxinHelpBtn");
+const datasetXiangxinHelpPopover = document.getElementById("datasetXiangxinHelpPopover");
 const datasetConcurrency = document.getElementById("datasetConcurrency");
 const datasetGuardrailTimeout = document.getElementById("datasetGuardrailTimeout");
 const datasetInterval = document.getElementById("datasetInterval");
@@ -163,6 +167,20 @@ let datasetCancellingTaskIds = new Set();
 let datasetWasRetryingUi = false;
 let datasetHistorySearchDebounceTimer = null;
 let datasetHeatmapCurrentTaskId = "";
+
+function datasetCloseModeHelpPopovers(){
+  if (datasetAlicloudHelpPopover) datasetAlicloudHelpPopover.style.display = "none";
+  if (datasetXiangxinHelpPopover) datasetXiangxinHelpPopover.style.display = "none";
+}
+
+function datasetToggleModeHelp(which){
+  const target = which === "alicloud" ? datasetAlicloudHelpPopover : datasetXiangxinHelpPopover;
+  const other = which === "alicloud" ? datasetXiangxinHelpPopover : datasetAlicloudHelpPopover;
+  if (!target) return;
+  const isOpen = target.style.display !== "none";
+  if (other) other.style.display = "none";
+  target.style.display = isOpen ? "none" : "";
+}
 
 function datasetCloseHeatmapModal(){
   if (!datasetHeatmapModal) return;
@@ -6776,6 +6794,23 @@ datasetHeatmapRegenBtn?.addEventListener("click", async () => {
 });
 datasetHeatmapModal?.addEventListener("click", (ev) => {
   if (ev.target === datasetHeatmapModal) datasetCloseHeatmapModal();
+});
+datasetAlicloudHelpBtn?.addEventListener("click", (ev) => {
+  ev.preventDefault();
+  ev.stopPropagation();
+  datasetToggleModeHelp("alicloud");
+});
+datasetXiangxinHelpBtn?.addEventListener("click", (ev) => {
+  ev.preventDefault();
+  ev.stopPropagation();
+  datasetToggleModeHelp("xiangxin");
+});
+document.addEventListener("click", (ev) => {
+  const t = ev.target;
+  if (!(t instanceof Element)) return;
+  if (t.closest("#datasetAlicloudHelpPopover") || t.closest("#datasetXiangxinHelpPopover")) return;
+  if (t.closest("#datasetAlicloudHelpBtn") || t.closest("#datasetXiangxinHelpBtn")) return;
+  datasetCloseModeHelpPopovers();
 });
 datasetConcurrency?.addEventListener("input", datasetUpdateConcurrencyOverMaxHint);
 datasetConcurrency?.addEventListener("change", datasetUpdateConcurrencyOverMaxHint);
