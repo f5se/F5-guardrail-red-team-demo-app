@@ -910,12 +910,14 @@
 
               <div class="datasetStepPage" id="datasetStep2">
                 <h4>Step 2 Guardrail 参数与速率 <span class="zh">/ Guardrail Config & Rate</span></h4>
-                <p class="datasetStepHint">先选择执行接口模式：F5 Guardrail SDK 或 OpenAI 兼容接口。正式测试开始后不可再更改。<span class="zh">Choose execution mode first: F5 Guardrail SDK or OpenAI-compatible API. Locked after start.</span></p>
+                <p class="datasetStepHint">先选择执行接口模式。正式测试开始后不可再更改。<span class="zh">Choose execution mode first. Locked after start.</span></p>
                 <div class="datasetRow datasetFormRow">
                   <label class="datasetFieldLabel"><input type="radio" name="datasetExecutionMode" value="f5_sdk" checked /> F5 Guardrail SDK</label>
                   <label class="datasetFieldLabel"><input type="radio" name="datasetExecutionMode" value="openai_compatible" /> OpenAI Compatible API</label>
+                  <label class="datasetFieldLabel"><input type="radio" name="datasetExecutionMode" value="alicloud" /> AliCloud AI Guard（阿里云）</label>
+                  <label class="datasetFieldLabel"><input type="radio" name="datasetExecutionMode" value="xiangxin" /> 象信 Guardrail</label>
                 </div>
-                <div class="datasetStepHint" id="datasetExecutionModeHint">F5 模式：可选记录阻挡 scanner 名称。OpenAI 兼容模式：需填写 Endpoint / API Key / Model，且不支持 scanner 名称记录。阻断判定优先级：HTTP status &gt; JSONPath（仅 Content-Type 为 JSON）&gt; 通用 Payload 关键词。<span class="zh">F5 mode supports scanner names; OpenAI mode requires Endpoint/API key/Model and disables scanner names. Block detection priority: HTTP status &gt; JSONPath (JSON content-type only) &gt; generic payload keywords.</span></div>
+                <div class="datasetStepHint" id="datasetExecutionModeHint">F5：可选记录阻挡 scanner。OpenAI：Endpoint / Key / Model；阻断由 HTTP / JSONPath / 关键词判定。阿里云 Green：<code>Data.Suggestion=block</code> 为阻断。象信：<code>suggest_action=reject</code> 为阻断（其它含未知值视为通过）。<span class="zh">See each panel for required fields.</span></div>
                 <div class="datasetRow datasetFormRow" id="datasetF5ConfigRow">
                   <label class="datasetFieldLabel">Project ID <input type="text" id="datasetProjectId" value="" placeholder="" autocomplete="off" /></label>
                   <label class="datasetFieldLabel">API Key <input type="password" id="datasetApiKey" value="" placeholder="" autocomplete="off" /></label>
@@ -955,6 +957,32 @@
                     </div>
                   </div>
                   <p class="datasetStepHint" id="datasetOpenaiDetectSampleHint" style="display:none;">JSONPath 示例：<code>choices[0].finish_reason</code> + 值 <code>content_filter</code>；或 <code>error.code</code> + 值 <code>policy_blocked</code>。三种检测采用 OR 关系，任意命中即视为 Blocked（按优先级短路）。<span class="zh">JSONPath examples and OR matching with short-circuit by priority.</span></p>
+                </div>
+                <div class="datasetOpenAICompatPanel" id="datasetAlicloudPanel" style="display:none;">
+                  <div class="datasetOpenAICompatPanelTitle">AliCloud Guardrail</div>
+                  <div class="datasetRow datasetFormRow">
+                    <label class="datasetFieldLabel">Region ID <input type="text" id="datasetAlicloudRegionId" value="cn-shanghai" autocomplete="off" /></label>
+                    <label class="datasetFieldLabel">Endpoint <input type="text" id="datasetAlicloudEndpoint" value="green-cip.cn-shanghai.aliyuncs.com" autocomplete="off" /></label>
+                    <label class="datasetFieldLabel">Service <input type="text" id="datasetAlicloudService" value="query_security_check" autocomplete="off" /></label>
+                  </div>
+                  <div class="datasetRow datasetFormRow">
+                    <label class="datasetFieldLabel">Biz Action <input type="text" id="datasetAlicloudBizInterface" value="MultiModalGuard" autocomplete="off" /></label>
+                    <label class="datasetFieldLabel">API Path <input type="text" id="datasetAlicloudApiPath" value="/" autocomplete="off" /></label>
+                    <label class="datasetFieldLabel">连接超时(ms) <input type="number" id="datasetAlicloudConnectMs" min="1000" max="120000" step="500" value="10000" /></label>
+                    <label class="datasetFieldLabel">读超时(ms) <input type="number" id="datasetAlicloudReadMs" min="1000" max="120000" step="500" value="10000" /></label>
+                  </div>
+                  <div class="datasetRow datasetFormRow">
+                    <label class="datasetFieldLabel">AccessKey ID <input type="password" id="datasetAlicloudAccessKeyId" value="" placeholder="留空沿用已保存 / Leave empty to reuse saved" autocomplete="off" /></label>
+                    <label class="datasetFieldLabel">AccessKey Secret <input type="password" id="datasetAlicloudAccessKeySecret" value="" placeholder="留空沿用已保存" autocomplete="off" /></label>
+                  </div>
+                </div>
+                <div class="datasetOpenAICompatPanel" id="datasetXiangxinPanel" style="display:none;">
+                  <div class="datasetOpenAICompatPanelTitle">象信 Guardrail（Bearer Token）</div>
+                  <div class="datasetRow datasetFormRow">
+                    <label class="datasetFieldLabel">API Endpoint（完整 URL） <input type="text" id="datasetXiangxinApiEndpoint" value="https://api.xiangxinai.cn/v1/guardrails" autocomplete="off" /></label>
+                    <label class="datasetFieldLabel">Model <input type="text" id="datasetXiangxinModel" value="OpenGuardrails-Text" autocomplete="off" /></label>
+                    <label class="datasetFieldLabel">API Key <input type="password" id="datasetXiangxinApiKey" value="" placeholder="留空沿用已保存" autocomplete="off" /></label>
+                  </div>
                 </div>
                 <div class="datasetRow datasetFormRow">
                   <label class="datasetFieldLabel">并发数 / Concurrency <input type="number" id="datasetConcurrency" min="1" max="3" value="1" /></label>

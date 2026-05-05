@@ -14,7 +14,7 @@ import mimetypes
 import html
 from collections import defaultdict, deque
 from datetime import datetime, timezone, timedelta
-from typing import Deque, Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, List, Optional, Tuple
 from urllib.request import Request as UrlRequest, urlopen
 from urllib.error import HTTPError, URLError
 from zoneinfo import ZoneInfo
@@ -3096,6 +3096,16 @@ DATASET_TEST_MODE_BLOCK_RATE = "block_rate"
 DATASET_TEST_MODE_FALSE_BLOCK_RATE = "false_block_rate"
 DATASET_EXEC_MODE_F5_SDK = "f5_sdk"
 DATASET_EXEC_MODE_OPENAI_COMPATIBLE = "openai_compatible"
+DATASET_EXEC_MODE_ALICLOUD = "alicloud"
+DATASET_EXEC_MODE_XIANGXIN = "xiangxin"
+DATASET_ALICLOUD_DEFAULT_REGION = "cn-shanghai"
+DATASET_ALICLOUD_DEFAULT_ENDPOINT = "green-cip.cn-shanghai.aliyuncs.com"
+DATASET_ALICLOUD_DEFAULT_SERVICE = "query_security_check"
+DATASET_ALICLOUD_DEFAULT_BIZ_INTERFACE = "MultiModalGuard"
+DATASET_ALICLOUD_DEFAULT_API_PATH = "/"
+DATASET_ALICLOUD_DEFAULT_TIMEOUT_MS = 10000
+DATASET_XIANGXIN_DEFAULT_ENDPOINT = "https://api.xiangxinai.cn/v1/guardrails"
+DATASET_XIANGXIN_DEFAULT_MODEL = "OpenGuardrails-Text"
 DATASET_MAX_INTERVAL_SECONDS = 30.0
 DATASET_MAX_RETRY = 2
 DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS = 20.0
@@ -3135,6 +3145,18 @@ class DatasetTaskConfigureIn(BaseModel):
     openai_block_json_path: Optional[str] = None
     openai_block_json_value: Optional[str] = None
     openai_block_payload_keywords: Optional[str] = None
+    alicloud_region_id: Optional[str] = None
+    alicloud_endpoint: Optional[str] = None
+    alicloud_service: Optional[str] = None
+    alicloud_biz_interface: Optional[str] = None
+    alicloud_api_path: Optional[str] = None
+    alicloud_connect_timeout_ms: Optional[int] = None
+    alicloud_read_timeout_ms: Optional[int] = None
+    alicloud_access_key_id: Optional[str] = None
+    alicloud_access_key_secret: Optional[str] = None
+    xiangxin_api_endpoint: Optional[str] = None
+    xiangxin_model: Optional[str] = None
+    xiangxin_api_key: Optional[str] = None
     concurrency_per_batch: int = 1
     interval_seconds: float = 1.0
     guardrail_timeout_seconds: float = DATASET_DEFAULT_GUARDRAIL_TIMEOUT_SECONDS
@@ -3519,6 +3541,10 @@ def _dataset_normalize_execution_mode(v) -> str:
     mode = str(v or "").strip().lower()
     if mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE:
         return DATASET_EXEC_MODE_OPENAI_COMPATIBLE
+    if mode == DATASET_EXEC_MODE_ALICLOUD:
+        return DATASET_EXEC_MODE_ALICLOUD
+    if mode == DATASET_EXEC_MODE_XIANGXIN:
+        return DATASET_EXEC_MODE_XIANGXIN
     return DATASET_EXEC_MODE_F5_SDK
 
 
@@ -3610,6 +3636,165 @@ def _dataset_detect_openai_block(response_info: dict, state: dict) -> Tuple[bool
     return False, ""
 
 
+def _dataset_mask_credential_tail(s: str) -> str:
+    t = str(s or "").strip()
+    if len(t) >= 4:
+        return "*" * 6 + t[-4:]
+    return "***" if t else ""
+
+
+def _dataset_clamp_timeout_ms(v: Optional[int], default_ms: int) -> int:
+    if v is None:
+        return default_ms
+    try:
+        n = int(v)
+    except Exception:
+        return default_ms
+    return max(1000, min(120000, n))
+
+
+def _dataset_object_to_plain(obj: Any) -> Any:
+    if obj is None:
+        return None
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
+    if isinstance(obj, list):
+        return [_dataset_object_to_plain(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _dataset_object_to_plain(v) for k, v in obj.items()}
+    if hasattr(obj, "to_map"):
+        return _dataset_object_to_plain(obj.to_map())
+    if hasattr(obj, "__dict__"):
+        return {
+            k: _dataset_object_to_plain(v)
+            for k, v in obj.__dict__.items()
+            if not str(k).startswith("_")
+        }
+    return str(obj)
+
+
+def _dataset_case_insensitive_get(data: Dict[str, Any], key: str, default: Any = None) -> Any:
+    if not isinstance(data, dict):
+        return default
+    kl = key.lower()
+    for k, v in data.items():
+        if str(k).lower() == kl:
+            return v
+    return default
+
+
+def _dataset_alicloud_get_business_payload(response: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(response, dict):
+        return {}
+    body = _dataset_case_insensitive_get(response, "body")
+    if isinstance(body, dict):
+        return body
+    return response
+
+
+def _dataset_alicloud_extract_api_error(response: Dict[str, Any]) -> str:
+    payload = _dataset_alicloud_get_business_payload(response)
+    code = _dataset_case_insensitive_get(payload, "Code", "")
+    message = _dataset_case_insensitive_get(payload, "Message", _dataset_case_insensitive_get(payload, "Msg", ""))
+    status_code = _dataset_case_insensitive_get(response, "statusCode", _dataset_case_insensitive_get(response, "status_code", ""))
+    code_s = str(code).strip()
+    msg_s = str(message).strip()
+    status_s = str(status_code).strip()
+    if code_s and code_s != "200":
+        return f"Code={code_s}, Message={msg_s}"
+    if status_s and status_s != "200":
+        return f"HTTPStatus={status_s}, Message={msg_s}"
+    return ""
+
+
+def _dataset_alicloud_get_data_suggestion(response: Dict[str, Any]) -> str:
+    payload = _dataset_alicloud_get_business_payload(response)
+    data = _dataset_case_insensitive_get(payload, "Data", {})
+    if not isinstance(data, dict):
+        return ""
+    return str(_dataset_case_insensitive_get(data, "Suggestion", "") or "").strip()
+
+
+def _dataset_alicloud_call_rpc(
+    access_key_id: str,
+    access_key_secret: str,
+    region_id: str,
+    endpoint: str,
+    service: str,
+    biz_interface: str,
+    api_path: str,
+    connect_ms: int,
+    read_ms: int,
+    content: str,
+) -> Dict[str, Any]:
+    try:
+        from alibabacloud_green20220302.client import Client
+        from alibabacloud_tea_openapi.models import Config
+        from alibabacloud_tea_openapi import models as open_api_models
+        from alibabacloud_tea_util import models as util_models
+    except ModuleNotFoundError as e:
+        raise RuntimeError(
+            "未安装阿里云 Green SDK：请安装 alibabacloud_green20220302==2.20.3"
+        ) from e
+
+    config = Config(
+        access_key_id=access_key_id,
+        access_key_secret=access_key_secret,
+        region_id=region_id,
+        endpoint=endpoint,
+        connect_timeout=int(connect_ms),
+        read_timeout=int(read_ms),
+    )
+    client = Client(config)
+    service_parameters = {"content": content}
+    body = {
+        "Service": service,
+        "ServiceParameters": json.dumps(service_parameters, ensure_ascii=False),
+    }
+    request = open_api_models.OpenApiRequest(body=body)
+    params = open_api_models.Params(
+        action=biz_interface,
+        version="2022-03-02",
+        protocol="HTTPS",
+        pathname=api_path,
+        method="POST",
+        auth_type="AK",
+        style="RPC",
+        req_body_type="formData",
+        body_type="json",
+    )
+    runtime = util_models.RuntimeOptions()
+    raw = client.call_api(params, request, runtime)
+    return _dataset_object_to_plain(raw)
+
+
+async def _dataset_call_xiangxin_guardrail(
+    url: str,
+    api_key: str,
+    model: str,
+    prompt_text: str,
+    timeout_seconds: float,
+) -> Dict[str, Any]:
+    body = {"model": model, "messages": [{"role": "user", "content": prompt_text}]}
+    headers = {"Authorization": "Bearer " + api_key, "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+        resp = await client.post(url.strip(), json=body, headers=headers)
+    raw_text = resp.text if isinstance(resp.text, str) else ""
+    ctype = str(resp.headers.get("content-type") or "")
+    json_body = None
+    if "json" in ctype.lower():
+        try:
+            json_body = resp.json()
+        except Exception:
+            json_body = None
+    return {
+        "http_status": int(resp.status_code),
+        "content_type": ctype,
+        "json_body": json_body if isinstance(json_body, dict) else None,
+        "raw_text": raw_text,
+    }
+
+
 def _dataset_result_label_for_guardrail_outcome(state: dict, status_text: str) -> str:
     """
     Human-readable label column for result CSV. Counts/statistics use guardrail_status only.
@@ -3687,6 +3872,20 @@ def _dataset_to_status_payload(state: dict) -> dict:
         "openai_block_json_path": str(state.get("openai_block_json_path") or "").strip(),
         "openai_block_json_value": str(state.get("openai_block_json_value") or "").strip(),
         "openai_block_payload_keywords": str(state.get("openai_block_payload_keywords") or "").strip(),
+        "alicloud_region_id": str(state.get("alicloud_region_id") or "").strip(),
+        "alicloud_endpoint": str(state.get("alicloud_endpoint") or "").strip(),
+        "alicloud_service": str(state.get("alicloud_service") or "").strip(),
+        "alicloud_biz_interface": str(state.get("alicloud_biz_interface") or "").strip(),
+        "alicloud_api_path": str(state.get("alicloud_api_path") or "").strip(),
+        "alicloud_connect_timeout_ms": int(state.get("alicloud_connect_timeout_ms") or 0),
+        "alicloud_read_timeout_ms": int(state.get("alicloud_read_timeout_ms") or 0),
+        "alicloud_access_key_id_source": str(state.get("alicloud_access_key_id_source") or "none"),
+        "alicloud_access_key_id_masked": str(state.get("alicloud_access_key_id_masked") or ""),
+        "alicloud_access_key_secret_masked": str(state.get("alicloud_access_key_secret_masked") or ""),
+        "xiangxin_api_endpoint": str(state.get("xiangxin_api_endpoint") or "").strip(),
+        "xiangxin_model": str(state.get("xiangxin_model") or "").strip(),
+        "xiangxin_api_key_source": str(state.get("xiangxin_api_key_source") or "none"),
+        "xiangxin_api_key_masked": str(state.get("xiangxin_api_key_masked") or ""),
         "concurrency_per_batch": int(state.get("concurrency_per_batch") or 1),
         "interval_seconds": float(state.get("interval_seconds") or 1.0),
         "guardrail_timeout_seconds": to_float(
@@ -4119,6 +4318,72 @@ async def _dataset_process_row(state: dict, prompt_text: str, row_index: int, ex
                     raise Exception(f"openai_compatible http {status_code}")
                 else:
                     status_text = "ok"
+            elif execution_mode == DATASET_EXEC_MODE_ALICLOUD:
+                ak_id = str(runtime.get("alicloud_access_key_id") or "").strip()
+                ak_sec = str(runtime.get("alicloud_access_key_secret") or "").strip()
+                region_id = str(exec_ctx.get("alicloud_region_id") or "").strip()
+                endpoint = str(exec_ctx.get("alicloud_endpoint") or "").strip()
+                service = str(exec_ctx.get("alicloud_service") or "").strip()
+                biz_if = str(exec_ctx.get("alicloud_biz_interface") or "").strip()
+                api_path = str(exec_ctx.get("alicloud_api_path") or "").strip()
+                connect_ms = int(exec_ctx.get("alicloud_connect_timeout_ms") or DATASET_ALICLOUD_DEFAULT_TIMEOUT_MS)
+                read_ms = int(exec_ctx.get("alicloud_read_timeout_ms") or DATASET_ALICLOUD_DEFAULT_TIMEOUT_MS)
+                if not ak_id or not ak_sec or not region_id or not endpoint or not service or not biz_if or not api_path:
+                    raise Exception("alicloud settings incomplete")
+                resp_plain = await asyncio.to_thread(
+                    _dataset_alicloud_call_rpc,
+                    ak_id,
+                    ak_sec,
+                    region_id,
+                    endpoint,
+                    service,
+                    biz_if,
+                    api_path,
+                    connect_ms,
+                    read_ms,
+                    prompt_text,
+                )
+                api_err = _dataset_alicloud_extract_api_error(resp_plain)
+                if api_err:
+                    raise Exception(api_err)
+                suggestion = _dataset_alicloud_get_data_suggestion(resp_plain)
+                sug_norm = suggestion.strip().lower()
+                reply = suggestion or json.dumps(resp_plain, ensure_ascii=False)[:500]
+                if sug_norm == "block":
+                    status_text = "rejected"
+                    block_detect_rule = "alicloud:Data.Suggestion=block"
+                else:
+                    status_text = "ok"
+            elif execution_mode == DATASET_EXEC_MODE_XIANGXIN:
+                url = str(exec_ctx.get("xiangxin_api_endpoint") or "").strip()
+                model = str(exec_ctx.get("xiangxin_model") or "").strip()
+                xk = str(runtime.get("xiangxin_api_key") or "").strip()
+                if not url or not model or not xk:
+                    raise Exception("xiangxin settings incomplete")
+                xr = await _dataset_call_xiangxin_guardrail(
+                    url=url,
+                    api_key=xk,
+                    model=model,
+                    prompt_text=prompt_text,
+                    timeout_seconds=timeout_seconds,
+                )
+                status_code = int(xr.get("http_status") or 0)
+                jb = xr.get("json_body")
+                if status_code < 200 or status_code >= 300:
+                    raise Exception(f"xiangxin http {status_code}: {(xr.get('raw_text') or '')[:300]}")
+                if not isinstance(jb, dict):
+                    raise Exception("xiangxin response is not JSON object")
+                suggest_raw = str(jb.get("suggest_action") or "").strip().lower()
+                reply = (
+                    str(jb.get("suggest_action") or "")
+                    + " "
+                    + (json.dumps(jb.get("result"), ensure_ascii=False) if jb.get("result") is not None else "")
+                )[:500]
+                if suggest_raw == "reject":
+                    status_text = "rejected"
+                    block_detect_rule = "xiangxin:suggest_action=reject"
+                else:
+                    status_text = "ok"
             else:
                 send_kwargs = exec_ctx.get("send_kwargs") or {}
                 api_key = runtime.get("api_key") or _dataset_env_api_key()
@@ -4241,6 +4506,23 @@ async def _dataset_retry_error_rows_task(task_id: str):
         if execution_mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE:
             exec_ctx["openai_api_endpoint"] = str(state.get("openai_api_endpoint") or "").strip()
             exec_ctx["openai_model"] = str(state.get("openai_model") or "").strip()
+        elif execution_mode == DATASET_EXEC_MODE_ALICLOUD:
+            exec_ctx["alicloud_region_id"] = str(state.get("alicloud_region_id") or "").strip() or DATASET_ALICLOUD_DEFAULT_REGION
+            exec_ctx["alicloud_endpoint"] = str(state.get("alicloud_endpoint") or "").strip() or DATASET_ALICLOUD_DEFAULT_ENDPOINT
+            exec_ctx["alicloud_service"] = str(state.get("alicloud_service") or "").strip() or DATASET_ALICLOUD_DEFAULT_SERVICE
+            exec_ctx["alicloud_biz_interface"] = (
+                str(state.get("alicloud_biz_interface") or "").strip() or DATASET_ALICLOUD_DEFAULT_BIZ_INTERFACE
+            )
+            exec_ctx["alicloud_api_path"] = str(state.get("alicloud_api_path") or "").strip() or DATASET_ALICLOUD_DEFAULT_API_PATH
+            _ct_r = int(state.get("alicloud_connect_timeout_ms") or 0)
+            _rt_r = int(state.get("alicloud_read_timeout_ms") or 0)
+            exec_ctx["alicloud_connect_timeout_ms"] = _ct_r if _ct_r > 0 else DATASET_ALICLOUD_DEFAULT_TIMEOUT_MS
+            exec_ctx["alicloud_read_timeout_ms"] = _rt_r if _rt_r > 0 else DATASET_ALICLOUD_DEFAULT_TIMEOUT_MS
+        elif execution_mode == DATASET_EXEC_MODE_XIANGXIN:
+            exec_ctx["xiangxin_api_endpoint"] = (
+                str(state.get("xiangxin_api_endpoint") or "").strip() or DATASET_XIANGXIN_DEFAULT_ENDPOINT
+            )
+            exec_ctx["xiangxin_model"] = str(state.get("xiangxin_model") or "").strip() or DATASET_XIANGXIN_DEFAULT_MODEL
         else:
             provider_name = str(state.get("provider_name") or "").strip()
             project_id = str(state.get("project_id") or "").strip() or _dataset_env_project_id()
@@ -4379,6 +4661,23 @@ async def _dataset_run_task(task_id: str):
     if execution_mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE:
         exec_ctx["openai_api_endpoint"] = str(state.get("openai_api_endpoint") or "").strip()
         exec_ctx["openai_model"] = str(state.get("openai_model") or "").strip()
+    elif execution_mode == DATASET_EXEC_MODE_ALICLOUD:
+        exec_ctx["alicloud_region_id"] = str(state.get("alicloud_region_id") or "").strip() or DATASET_ALICLOUD_DEFAULT_REGION
+        exec_ctx["alicloud_endpoint"] = str(state.get("alicloud_endpoint") or "").strip() or DATASET_ALICLOUD_DEFAULT_ENDPOINT
+        exec_ctx["alicloud_service"] = str(state.get("alicloud_service") or "").strip() or DATASET_ALICLOUD_DEFAULT_SERVICE
+        exec_ctx["alicloud_biz_interface"] = (
+            str(state.get("alicloud_biz_interface") or "").strip() or DATASET_ALICLOUD_DEFAULT_BIZ_INTERFACE
+        )
+        exec_ctx["alicloud_api_path"] = str(state.get("alicloud_api_path") or "").strip() or DATASET_ALICLOUD_DEFAULT_API_PATH
+        _ct = int(state.get("alicloud_connect_timeout_ms") or 0)
+        _rt = int(state.get("alicloud_read_timeout_ms") or 0)
+        exec_ctx["alicloud_connect_timeout_ms"] = _ct if _ct > 0 else DATASET_ALICLOUD_DEFAULT_TIMEOUT_MS
+        exec_ctx["alicloud_read_timeout_ms"] = _rt if _rt > 0 else DATASET_ALICLOUD_DEFAULT_TIMEOUT_MS
+    elif execution_mode == DATASET_EXEC_MODE_XIANGXIN:
+        exec_ctx["xiangxin_api_endpoint"] = (
+            str(state.get("xiangxin_api_endpoint") or "").strip() or DATASET_XIANGXIN_DEFAULT_ENDPOINT
+        )
+        exec_ctx["xiangxin_model"] = str(state.get("xiangxin_model") or "").strip() or DATASET_XIANGXIN_DEFAULT_MODEL
     else:
         provider_name = str(state.get("provider_name") or "").strip()
         project_id = str(state.get("project_id") or "").strip() or _dataset_env_project_id()
@@ -4606,6 +4905,20 @@ async def api_dataset_test_upload(
         "openai_block_json_path": "",
         "openai_block_json_value": "",
         "openai_block_payload_keywords": "",
+        "alicloud_region_id": "",
+        "alicloud_endpoint": "",
+        "alicloud_service": "",
+        "alicloud_biz_interface": "",
+        "alicloud_api_path": "",
+        "alicloud_connect_timeout_ms": 0,
+        "alicloud_read_timeout_ms": 0,
+        "alicloud_access_key_id_source": "none",
+        "alicloud_access_key_id_masked": "",
+        "alicloud_access_key_secret_masked": "",
+        "xiangxin_api_endpoint": "",
+        "xiangxin_model": "",
+        "xiangxin_api_key_source": "none",
+        "xiangxin_api_key_masked": "",
         "concurrency_per_batch": 1,
         "interval_seconds": 1.0,
         "record_failed_scanner_names": False,
@@ -4737,15 +5050,15 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
                     status_code=400,
                     detail="缺少 API Key：请在向导中填写，或在 .env 中配置 CALYPSOAI_TOKEN（Dataset 可选 Guardrail_PoC_Token）",
                 )
-        else:
+        elif execution_mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE:
             if not openai_endpoint:
                 raise HTTPException(status_code=400, detail="OpenAI 兼容模式缺少 API Endpoint / Missing OpenAI API endpoint")
             if not re.match(r"^https?://", openai_endpoint, flags=re.IGNORECASE):
                 raise HTTPException(status_code=400, detail="OpenAI API Endpoint 必须是完整 URL（http/https 开头）")
             if not openai_model:
                 raise HTTPException(status_code=400, detail="OpenAI 兼容模式缺少 Model name / Missing OpenAI model")
-            runtime = DATASET_TASK_RUNTIME_KEYS.get(state["task_id"]) or {}
-            saved_openai_key = str(runtime.get("openai_api_key") or "").strip()
+            runtime_chk = DATASET_TASK_RUNTIME_KEYS.get(state["task_id"]) or {}
+            saved_openai_key = str(runtime_chk.get("openai_api_key") or "").strip()
             if not openai_key and not saved_openai_key:
                 raise HTTPException(status_code=400, detail="OpenAI 兼容模式缺少 API Key / Missing OpenAI API key")
             if payload.record_failed_scanner_names:
@@ -4753,6 +5066,49 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
                     status_code=400,
                     detail="OpenAI 兼容模式不支持记录 scanner 名称 / Scanner-name recording is unavailable in OpenAI-compatible mode",
                 )
+        elif execution_mode == DATASET_EXEC_MODE_ALICLOUD:
+            alicloud_path_try = str(payload.alicloud_api_path or "").strip() or DATASET_ALICLOUD_DEFAULT_API_PATH
+            if not str(alicloud_path_try).startswith("/"):
+                raise HTTPException(status_code=400, detail="阿里云 api_path 必须以 / 开头 / alicloud_api_path must start with /")
+            rt = DATASET_TASK_RUNTIME_KEYS.get(state["task_id"]) or {}
+            new_aid = str(payload.alicloud_access_key_id or "").strip()
+            new_asec = str(payload.alicloud_access_key_secret or "").strip()
+            saved_aid = str(rt.get("alicloud_access_key_id") or "").strip()
+            saved_asec = str(rt.get("alicloud_access_key_secret") or "").strip()
+            if new_aid and new_asec:
+                pass
+            elif not new_aid and not new_asec:
+                if not saved_aid or not saved_asec:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="阿里云模式缺少 AccessKey ID 与 Secret：请填写或沿用会话内已保存密钥 / Missing Alicloud AccessKey pair",
+                    )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="阿里云 AccessKey ID 与 Secret 需同时填写或同时留空（留空则沿用已保存）/ Provide both AK fields or both empty to reuse saved keys",
+                )
+            if payload.record_failed_scanner_names:
+                raise HTTPException(
+                    status_code=400,
+                    detail="阿里云模式不支持记录 F5 scanner 名称 / Scanner-name recording is unavailable in Alicloud mode",
+                )
+        elif execution_mode == DATASET_EXEC_MODE_XIANGXIN:
+            xx_ep = str(payload.xiangxin_api_endpoint or "").strip() or DATASET_XIANGXIN_DEFAULT_ENDPOINT
+            if not re.match(r"^https?://", xx_ep, flags=re.IGNORECASE):
+                raise HTTPException(status_code=400, detail="象信 API Endpoint 必须是完整 URL（http/https 开头）")
+            rt2 = DATASET_TASK_RUNTIME_KEYS.get(state["task_id"]) or {}
+            xx_key = str(payload.xiangxin_api_key or "").strip()
+            saved_xx = str(rt2.get("xiangxin_api_key") or "").strip()
+            if not xx_key and not saved_xx:
+                raise HTTPException(status_code=400, detail="象信模式缺少 API Key / Missing Xiangxin API key")
+            if payload.record_failed_scanner_names:
+                raise HTTPException(
+                    status_code=400,
+                    detail="象信模式不支持记录 F5 scanner 名称 / Scanner-name recording is unavailable in Xiangxin mode",
+                )
+        else:
+            raise HTTPException(status_code=400, detail="未知的 execution_mode / Unknown execution_mode")
         if orig_status not in ("completed",):
             state["phase"] = "step2_configured"
         state["prompt_column"] = int(payload.prompt_column) - 1
@@ -4774,6 +5130,15 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
         segs_after = state.get("range_segments") or [{"start": row_start, "end": row_end}]
         union_size = _dataset_segments_union_size(segs_after)
         state["effective_rows"] = union_size if union_size > 0 else effective_rows
+        alicloud_region_resolved = str(payload.alicloud_region_id or "").strip() or DATASET_ALICLOUD_DEFAULT_REGION
+        alicloud_endpoint_resolved = str(payload.alicloud_endpoint or "").strip() or DATASET_ALICLOUD_DEFAULT_ENDPOINT
+        alicloud_service_resolved = str(payload.alicloud_service or "").strip() or DATASET_ALICLOUD_DEFAULT_SERVICE
+        alicloud_biz_resolved = str(payload.alicloud_biz_interface or "").strip() or DATASET_ALICLOUD_DEFAULT_BIZ_INTERFACE
+        alicloud_path_resolved = str(payload.alicloud_api_path or "").strip() or DATASET_ALICLOUD_DEFAULT_API_PATH
+        alicloud_ct_resolved = _dataset_clamp_timeout_ms(payload.alicloud_connect_timeout_ms, DATASET_ALICLOUD_DEFAULT_TIMEOUT_MS)
+        alicloud_rt_resolved = _dataset_clamp_timeout_ms(payload.alicloud_read_timeout_ms, DATASET_ALICLOUD_DEFAULT_TIMEOUT_MS)
+        xiangxin_endpoint_resolved = str(payload.xiangxin_api_endpoint or "").strip() or DATASET_XIANGXIN_DEFAULT_ENDPOINT
+        xiangxin_model_resolved = str(payload.xiangxin_model or "").strip() or DATASET_XIANGXIN_DEFAULT_MODEL
         state["execution_mode"] = execution_mode
         state["execution_mode_locked"] = mode_locked
         state["project_id"] = resolved_project_id if execution_mode == DATASET_EXEC_MODE_F5_SDK else ""
@@ -4784,6 +5149,15 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
         state["openai_block_json_path"] = openai_block_json_path if execution_mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE else ""
         state["openai_block_json_value"] = openai_block_json_value if execution_mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE else ""
         state["openai_block_payload_keywords"] = openai_block_payload_keywords if execution_mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE else ""
+        state["alicloud_region_id"] = alicloud_region_resolved if execution_mode == DATASET_EXEC_MODE_ALICLOUD else ""
+        state["alicloud_endpoint"] = alicloud_endpoint_resolved if execution_mode == DATASET_EXEC_MODE_ALICLOUD else ""
+        state["alicloud_service"] = alicloud_service_resolved if execution_mode == DATASET_EXEC_MODE_ALICLOUD else ""
+        state["alicloud_biz_interface"] = alicloud_biz_resolved if execution_mode == DATASET_EXEC_MODE_ALICLOUD else ""
+        state["alicloud_api_path"] = alicloud_path_resolved if execution_mode == DATASET_EXEC_MODE_ALICLOUD else ""
+        state["alicloud_connect_timeout_ms"] = int(alicloud_ct_resolved) if execution_mode == DATASET_EXEC_MODE_ALICLOUD else 0
+        state["alicloud_read_timeout_ms"] = int(alicloud_rt_resolved) if execution_mode == DATASET_EXEC_MODE_ALICLOUD else 0
+        state["xiangxin_api_endpoint"] = xiangxin_endpoint_resolved if execution_mode == DATASET_EXEC_MODE_XIANGXIN else ""
+        state["xiangxin_model"] = xiangxin_model_resolved if execution_mode == DATASET_EXEC_MODE_XIANGXIN else ""
         runtime = DATASET_TASK_RUNTIME_KEYS.get(state["task_id"]) or {}
         if execution_mode == DATASET_EXEC_MODE_F5_SDK:
             if provided_key:
@@ -4795,20 +5169,80 @@ async def api_dataset_test_configure(request: Request, payload: DatasetTaskConfi
                 state["api_key_masked"] = "***"
                 runtime.pop("api_key", None)
             runtime.pop("openai_api_key", None)
+            runtime.pop("alicloud_access_key_id", None)
+            runtime.pop("alicloud_access_key_secret", None)
+            runtime.pop("xiangxin_api_key", None)
             state["openai_api_key_source"] = "none"
             state["openai_api_key_masked"] = ""
-        else:
+            state["alicloud_access_key_id_source"] = "none"
+            state["alicloud_access_key_id_masked"] = ""
+            state["alicloud_access_key_secret_masked"] = ""
+            state["xiangxin_api_key_source"] = "none"
+            state["xiangxin_api_key_masked"] = ""
+        elif execution_mode == DATASET_EXEC_MODE_OPENAI_COMPATIBLE:
             state["api_key_source"] = "n/a"
             state["api_key_masked"] = ""
             runtime.pop("api_key", None)
+            runtime.pop("alicloud_access_key_id", None)
+            runtime.pop("alicloud_access_key_secret", None)
+            runtime.pop("xiangxin_api_key", None)
             if openai_key:
                 runtime["openai_api_key"] = openai_key
                 state["openai_api_key_source"] = "userProvided"
                 state["openai_api_key_masked"] = "*" * 6 + openai_key[-4:]
             else:
                 state["openai_api_key_source"] = "saved"
-                masked = str(state.get("openai_api_key_masked") or "")
-                state["openai_api_key_masked"] = masked or "***"
+                masked_o = str(state.get("openai_api_key_masked") or "")
+                state["openai_api_key_masked"] = masked_o or "***"
+            state["alicloud_access_key_id_source"] = "none"
+            state["alicloud_access_key_id_masked"] = ""
+            state["alicloud_access_key_secret_masked"] = ""
+            state["xiangxin_api_key_source"] = "none"
+            state["xiangxin_api_key_masked"] = ""
+            state["record_failed_scanner_names"] = False
+        elif execution_mode == DATASET_EXEC_MODE_ALICLOUD:
+            state["api_key_source"] = "n/a"
+            state["api_key_masked"] = ""
+            runtime.pop("api_key", None)
+            runtime.pop("openai_api_key", None)
+            runtime.pop("xiangxin_api_key", None)
+            new_aid = str(payload.alicloud_access_key_id or "").strip()
+            new_asec = str(payload.alicloud_access_key_secret or "").strip()
+            if new_aid and new_asec:
+                runtime["alicloud_access_key_id"] = new_aid
+                runtime["alicloud_access_key_secret"] = new_asec
+                state["alicloud_access_key_id_source"] = "userProvided"
+                state["alicloud_access_key_id_masked"] = _dataset_mask_credential_tail(new_aid)
+                state["alicloud_access_key_secret_masked"] = _dataset_mask_credential_tail(new_asec)
+            else:
+                state["alicloud_access_key_id_source"] = "saved"
+                state["alicloud_access_key_id_masked"] = str(state.get("alicloud_access_key_id_masked") or "") or "***"
+                state["alicloud_access_key_secret_masked"] = str(state.get("alicloud_access_key_secret_masked") or "") or "***"
+            state["openai_api_key_source"] = "none"
+            state["openai_api_key_masked"] = ""
+            state["xiangxin_api_key_source"] = "none"
+            state["xiangxin_api_key_masked"] = ""
+            state["record_failed_scanner_names"] = False
+        elif execution_mode == DATASET_EXEC_MODE_XIANGXIN:
+            state["api_key_source"] = "n/a"
+            state["api_key_masked"] = ""
+            runtime.pop("api_key", None)
+            runtime.pop("openai_api_key", None)
+            runtime.pop("alicloud_access_key_id", None)
+            runtime.pop("alicloud_access_key_secret", None)
+            xx_k = str(payload.xiangxin_api_key or "").strip()
+            if xx_k:
+                runtime["xiangxin_api_key"] = xx_k
+                state["xiangxin_api_key_source"] = "userProvided"
+                state["xiangxin_api_key_masked"] = _dataset_mask_credential_tail(xx_k)
+            else:
+                state["xiangxin_api_key_source"] = "saved"
+                state["xiangxin_api_key_masked"] = str(state.get("xiangxin_api_key_masked") or "") or "***"
+            state["openai_api_key_source"] = "none"
+            state["openai_api_key_masked"] = ""
+            state["alicloud_access_key_id_source"] = "none"
+            state["alicloud_access_key_id_masked"] = ""
+            state["alicloud_access_key_secret_masked"] = ""
             state["record_failed_scanner_names"] = False
         if runtime:
             DATASET_TASK_RUNTIME_KEYS[state["task_id"]] = runtime
@@ -4851,15 +5285,31 @@ async def api_dataset_test_start(request: Request, payload: DatasetTaskActionIn)
             return JSONResponse({"status": "ok", "already_running": True, "task": _dataset_to_status_payload(state)})
         if st not in ("draft", "failed", "paused"):
             raise HTTPException(status_code=400, detail="task cannot be started")
-        if _dataset_normalize_execution_mode(state.get("execution_mode")) == DATASET_EXEC_MODE_OPENAI_COMPATIBLE:
+        em0 = _dataset_normalize_execution_mode(state.get("execution_mode"))
+        runtime0 = DATASET_TASK_RUNTIME_KEYS.get(payload.task_id) or {}
+        if em0 == DATASET_EXEC_MODE_OPENAI_COMPATIBLE:
             endpoint = str(state.get("openai_api_endpoint") or "").strip()
             model = str(state.get("openai_model") or "").strip()
-            runtime = DATASET_TASK_RUNTIME_KEYS.get(payload.task_id) or {}
-            openai_key = str(runtime.get("openai_api_key") or "").strip()
+            openai_key = str(runtime0.get("openai_api_key") or "").strip()
             if not endpoint or not model or not openai_key:
                 raise HTTPException(
                     status_code=400,
                     detail="OpenAI 模式参数不完整：请在 Step2 重新填写 Endpoint / API Key / Model 并保存后再启动。",
+                )
+        elif em0 == DATASET_EXEC_MODE_ALICLOUD:
+            aid = str(runtime0.get("alicloud_access_key_id") or "").strip()
+            asec = str(runtime0.get("alicloud_access_key_secret") or "").strip()
+            if not aid or not asec:
+                raise HTTPException(
+                    status_code=400,
+                    detail="阿里云模式参数不完整：请在 Step2 填写 AccessKey ID/Secret 并保存后再启动。",
+                )
+        elif em0 == DATASET_EXEC_MODE_XIANGXIN:
+            xk = str(runtime0.get("xiangxin_api_key") or "").strip()
+            if not xk:
+                raise HTTPException(
+                    status_code=400,
+                    detail="象信模式参数不完整：请在 Step2 填写 API Key 并保存后再启动。",
                 )
         state["status"] = "queued"
         state["phase"] = "step3_confirmed"

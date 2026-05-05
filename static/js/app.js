@@ -79,6 +79,20 @@ const datasetOpenaiBlockJsonPath = document.getElementById("datasetOpenaiBlockJs
 const datasetOpenaiBlockJsonValue = document.getElementById("datasetOpenaiBlockJsonValue");
 const datasetOpenaiBlockPayloadKeywords = document.getElementById("datasetOpenaiBlockPayloadKeywords");
 const datasetOpenaiDetectSampleHint = document.getElementById("datasetOpenaiDetectSampleHint");
+const datasetAlicloudPanel = document.getElementById("datasetAlicloudPanel");
+const datasetAlicloudRegionId = document.getElementById("datasetAlicloudRegionId");
+const datasetAlicloudEndpoint = document.getElementById("datasetAlicloudEndpoint");
+const datasetAlicloudService = document.getElementById("datasetAlicloudService");
+const datasetAlicloudBizInterface = document.getElementById("datasetAlicloudBizInterface");
+const datasetAlicloudApiPath = document.getElementById("datasetAlicloudApiPath");
+const datasetAlicloudConnectMs = document.getElementById("datasetAlicloudConnectMs");
+const datasetAlicloudReadMs = document.getElementById("datasetAlicloudReadMs");
+const datasetAlicloudAccessKeyId = document.getElementById("datasetAlicloudAccessKeyId");
+const datasetAlicloudAccessKeySecret = document.getElementById("datasetAlicloudAccessKeySecret");
+const datasetXiangxinPanel = document.getElementById("datasetXiangxinPanel");
+const datasetXiangxinApiEndpoint = document.getElementById("datasetXiangxinApiEndpoint");
+const datasetXiangxinModel = document.getElementById("datasetXiangxinModel");
+const datasetXiangxinApiKey = document.getElementById("datasetXiangxinApiKey");
 const datasetConcurrency = document.getElementById("datasetConcurrency");
 const datasetGuardrailTimeout = document.getElementById("datasetGuardrailTimeout");
 const datasetInterval = document.getElementById("datasetInterval");
@@ -883,7 +897,10 @@ function datasetSetSelectedTestMode(mode){
 
 function datasetNormalizeExecutionMode(v){
   const mode = String(v || "").trim().toLowerCase();
-  return mode === "openai_compatible" ? "openai_compatible" : "f5_sdk";
+  if (mode === "openai_compatible") return "openai_compatible";
+  if (mode === "alicloud") return "alicloud";
+  if (mode === "xiangxin") return "xiangxin";
+  return "f5_sdk";
 }
 
 function datasetGetExecutionMode(){
@@ -907,13 +924,15 @@ function datasetSyncExecutionModeUi(task){
   if (datasetOpenAIBlockDetectRow) datasetOpenAIBlockDetectRow.style.display = mode === "openai_compatible" ? "" : "none";
   if (datasetOpenAIBlockDetectPayloadRow) datasetOpenAIBlockDetectPayloadRow.style.display = mode === "openai_compatible" ? "" : "none";
   if (datasetOpenaiDetectSampleHint) datasetOpenaiDetectSampleHint.style.display = mode === "openai_compatible" ? "" : "none";
+  if (datasetAlicloudPanel) datasetAlicloudPanel.style.display = mode === "alicloud" ? "" : "none";
+  if (datasetXiangxinPanel) datasetXiangxinPanel.style.display = mode === "xiangxin" ? "" : "none";
   if (datasetRecordFailedScanners) {
-    const shouldDisableScannerNames = mode === "openai_compatible";
+    const shouldDisableScannerNames = mode === "openai_compatible" || mode === "alicloud" || mode === "xiangxin";
     if (shouldDisableScannerNames) datasetRecordFailedScanners.checked = false;
     const ro = datasetIsViewingOthersPublicTask();
     datasetRecordFailedScanners.disabled = !!ro || shouldDisableScannerNames;
     datasetRecordFailedScanners.title = shouldDisableScannerNames
-      ? "OpenAI compatible mode does not support scanner-name recording."
+      ? "Only F5 SDK mode supports recording blocked scanner friendly names."
       : "";
   }
   const t = task && typeof task === "object" ? task : {};
@@ -982,6 +1001,18 @@ function datasetUpdateDatasetReadOnlyUi(task){
     datasetOpenaiBlockJsonPath,
     datasetOpenaiBlockJsonValue,
     datasetOpenaiBlockPayloadKeywords,
+    datasetAlicloudRegionId,
+    datasetAlicloudEndpoint,
+    datasetAlicloudService,
+    datasetAlicloudBizInterface,
+    datasetAlicloudApiPath,
+    datasetAlicloudConnectMs,
+    datasetAlicloudReadMs,
+    datasetAlicloudAccessKeyId,
+    datasetAlicloudAccessKeySecret,
+    datasetXiangxinApiEndpoint,
+    datasetXiangxinModel,
+    datasetXiangxinApiKey,
     datasetConcurrency,
     datasetGuardrailTimeout,
     datasetInterval,
@@ -5026,6 +5057,18 @@ function datasetResetNewTaskForm(){
   if (datasetOpenaiBlockJsonPath) datasetOpenaiBlockJsonPath.value = "";
   if (datasetOpenaiBlockJsonValue) datasetOpenaiBlockJsonValue.value = "";
   if (datasetOpenaiBlockPayloadKeywords) datasetOpenaiBlockPayloadKeywords.value = "";
+  if (datasetAlicloudRegionId) datasetAlicloudRegionId.value = "cn-shanghai";
+  if (datasetAlicloudEndpoint) datasetAlicloudEndpoint.value = "green-cip.cn-shanghai.aliyuncs.com";
+  if (datasetAlicloudService) datasetAlicloudService.value = "query_security_check";
+  if (datasetAlicloudBizInterface) datasetAlicloudBizInterface.value = "MultiModalGuard";
+  if (datasetAlicloudApiPath) datasetAlicloudApiPath.value = "/";
+  if (datasetAlicloudConnectMs) datasetAlicloudConnectMs.value = "10000";
+  if (datasetAlicloudReadMs) datasetAlicloudReadMs.value = "10000";
+  if (datasetAlicloudAccessKeyId) datasetAlicloudAccessKeyId.value = "";
+  if (datasetAlicloudAccessKeySecret) datasetAlicloudAccessKeySecret.value = "";
+  if (datasetXiangxinApiEndpoint) datasetXiangxinApiEndpoint.value = "https://api.xiangxinai.cn/v1/guardrails";
+  if (datasetXiangxinModel) datasetXiangxinModel.value = "OpenGuardrails-Text";
+  if (datasetXiangxinApiKey) datasetXiangxinApiKey.value = "";
   if (datasetConcurrency) datasetConcurrency.value = "1";
   if (datasetGuardrailTimeout) datasetGuardrailTimeout.value = "20";
   if (datasetInterval) datasetInterval.value = "1";
@@ -5186,6 +5229,38 @@ function datasetApplyTaskToForm(task){
   if (datasetOpenaiBlockPayloadKeywords && String(task.openai_block_payload_keywords || "").trim()) {
     datasetOpenaiBlockPayloadKeywords.value = String(task.openai_block_payload_keywords || "").trim();
   }
+  if (datasetAlicloudRegionId) {
+    datasetAlicloudRegionId.value = String(task.alicloud_region_id || "").trim() || "cn-shanghai";
+  }
+  if (datasetAlicloudEndpoint) {
+    datasetAlicloudEndpoint.value = String(task.alicloud_endpoint || "").trim() || "green-cip.cn-shanghai.aliyuncs.com";
+  }
+  if (datasetAlicloudService) {
+    datasetAlicloudService.value = String(task.alicloud_service || "").trim() || "query_security_check";
+  }
+  if (datasetAlicloudBizInterface) {
+    datasetAlicloudBizInterface.value = String(task.alicloud_biz_interface || "").trim() || "MultiModalGuard";
+  }
+  if (datasetAlicloudApiPath) {
+    datasetAlicloudApiPath.value = String(task.alicloud_api_path || "").trim() || "/";
+  }
+  if (datasetAlicloudConnectMs) {
+    const n = Number(task.alicloud_connect_timeout_ms);
+    datasetAlicloudConnectMs.value = Number.isFinite(n) && n > 0 ? String(n) : "10000";
+  }
+  if (datasetAlicloudReadMs) {
+    const n2 = Number(task.alicloud_read_timeout_ms);
+    datasetAlicloudReadMs.value = Number.isFinite(n2) && n2 > 0 ? String(n2) : "10000";
+  }
+  if (datasetAlicloudAccessKeyId) datasetAlicloudAccessKeyId.value = "";
+  if (datasetAlicloudAccessKeySecret) datasetAlicloudAccessKeySecret.value = "";
+  if (datasetXiangxinApiEndpoint) {
+    datasetXiangxinApiEndpoint.value = String(task.xiangxin_api_endpoint || "").trim() || "https://api.xiangxinai.cn/v1/guardrails";
+  }
+  if (datasetXiangxinModel) {
+    datasetXiangxinModel.value = String(task.xiangxin_model || "").trim() || "OpenGuardrails-Text";
+  }
+  if (datasetXiangxinApiKey) datasetXiangxinApiKey.value = "";
   if (task.max_concurrency_allowed != null && task.max_concurrency_allowed !== undefined) {
     datasetApplyConcurrencyUiMax(task.max_concurrency_allowed);
   }
@@ -5270,6 +5345,14 @@ async function datasetOpenTaskFromHistory(taskId){
   }
 }
 
+function datasetExecutionModeSummaryLabel(mode){
+  const m = datasetNormalizeExecutionMode(mode);
+  if (m === "openai_compatible") return "OpenAI Compatible API";
+  if (m === "alicloud") return "AliCloud AI Guard（阿里云）";
+  if (m === "xiangxin") return "象信 Guardrail";
+  return "F5 Guardrail SDK";
+}
+
 function datasetBuildSummary(){
   const card = document.getElementById("datasetSummaryCard");
   if (!card) return;
@@ -5280,39 +5363,82 @@ function datasetBuildSummary(){
   const exMode = datasetGetExplicitTestMode();
   const typeSummary = exMode ? datasetGetModeMeta(exMode).modeLabel : "未选择 / Not selected";
   const pubLine = datasetGetIsPublic() ? "是 · 所有登录用户可见 / Yes (all users)" : "否 · 仅本人与管理员 / No (owner & admin)";
+  const connLines = [];
+  if (executionMode === "openai_compatible") {
+    connLines.push(
+      datasetSummaryKV("OpenAI Endpoint / Model", (String(datasetOpenaiApiEndpoint?.value || "").trim() || "未填写 / Not set") + " / " + (String(datasetOpenaiModel?.value || "").trim() || "未填写 / Not set")),
+      datasetSummaryKV("OpenAI API Key", String(datasetOpenaiApiKey?.value || "").trim() ? "已填写（不回显） / Provided (masked)" : "未填写 / Not set"),
+      datasetSummaryKV("Blocked Detection Priority", "HTTP status > JSONPath(JSON) > Payload keywords"),
+      datasetSummaryKV(
+        "OpenAI Block Rules",
+        "status=" + (String(datasetOpenaiBlockHttpStatuses?.value || "").trim() || "403")
+          + " ; jsonpath=" + (String(datasetOpenaiBlockJsonPath?.value || "").trim() || "—")
+          + " ; value=" + (String(datasetOpenaiBlockJsonValue?.value || "").trim() || "—")
+          + " ; keywords=" + (String(datasetOpenaiBlockPayloadKeywords?.value || "").trim() || "—")
+      ),
+    );
+  } else if (executionMode === "alicloud") {
+    const akTyped = String(datasetAlicloudAccessKeyId?.value || "").trim() && String(datasetAlicloudAccessKeySecret?.value || "").trim();
+    const akSaved = String(datasetTaskSnapshot.alicloud_access_key_id_masked || "").trim();
+    connLines.push(
+      datasetSummaryKV(
+        "阿里云 Region / Endpoint",
+        (String(datasetAlicloudRegionId?.value || "").trim() || "—") + " / " + (String(datasetAlicloudEndpoint?.value || "").trim() || "—")
+      ),
+      datasetSummaryKV(
+        "Service / Biz / Path",
+        (String(datasetAlicloudService?.value || "").trim() || "—")
+          + " / " + (String(datasetAlicloudBizInterface?.value || "").trim() || "—")
+          + " / " + (String(datasetAlicloudApiPath?.value || "").trim() || "—")
+      ),
+      datasetSummaryKV(
+        "超时(ms) 连接/读",
+        (String(datasetAlicloudConnectMs?.value || "").trim() || "—") + " / " + (String(datasetAlicloudReadMs?.value || "").trim() || "—")
+      ),
+      datasetSummaryKV(
+        "AccessKey",
+        akTyped
+          ? "本次表单已填写（保存后生效，不回显） / Entered in form (not echoed)"
+          : (akSaved
+            ? "已保存掩码：ID " + String(datasetTaskSnapshot.alicloud_access_key_id_masked) + " · Secret " + String(datasetTaskSnapshot.alicloud_access_key_secret_masked || "—")
+            : "未填写；留空保存将失败 / Missing: fill both or save a pair first")
+      ),
+    );
+  } else if (executionMode === "xiangxin") {
+    connLines.push(
+      datasetSummaryKV(
+        "象信 Endpoint / Model",
+        (String(datasetXiangxinApiEndpoint?.value || "").trim() || "未填写 / Not set")
+          + " / "
+          + (String(datasetXiangxinModel?.value || "").trim() || "未填写 / Not set")
+      ),
+      datasetSummaryKV(
+        "象信 API Key",
+        String(datasetXiangxinApiKey?.value || "").trim()
+          ? "本次已填写（不回显保存） / Provided this save"
+          : (String(datasetTaskSnapshot.xiangxin_api_key_masked || "").trim() ? "已保存（掩码） / Saved (masked)" : "未填写 / Not set")
+      ),
+    );
+  } else {
+    connLines.push(
+      datasetSummaryKV("Project ID", (String(datasetProjectId?.value || "").trim() || "（系统缺省） / (Server default)")),
+      datasetSummaryKV("Provider", (String(datasetProvider?.value || "").trim() || "（系统缺省） / (Server default)")),
+      apiNote,
+    );
+  }
+  const scannerNote = executionMode === "f5_sdk"
+    ? (datasetRecordFailedScanners?.checked ? "是 / Yes" : "否 / No")
+    : "当前模式不支持 / Not supported in this mode";
   const html = [
     datasetSummaryKV("任务名称 / Task Name", datasetGetTaskName(datasetTaskSnapshot) || "未填写 / Not set"),
     datasetSummaryKV("任务ID / Task ID", datasetTaskId || "未创建 / Not created"),
     datasetSummaryKV("测试类型 / Test Type", typeSummary),
-    datasetSummaryKV("执行接口模式 / Execution Mode", executionMode === "openai_compatible" ? "OpenAI Compatible API" : "F5 Guardrail SDK"),
+    datasetSummaryKV("执行接口模式 / Execution Mode", datasetExecutionModeSummaryLabel(executionMode)),
     datasetSummaryKV("History 公开 / Public in History", pubLine),
     datasetSummaryKV("Prompt列(1基) / Prompt Col(1-based)", String(datasetPromptColumn?.value || "1")),
     datasetSummaryKV("第一行是标题 / Header Row", datasetHasHeader?.checked ? "是 / Yes" : "否 / No"),
     datasetSummaryKV("测试行范围 / Row Range", String(datasetRowStart?.value || "-") + " ~ " + String(datasetRowEnd?.value || "-")),
-    (executionMode === "openai_compatible")
-      ? datasetSummaryKV("OpenAI Endpoint / Model", (String(datasetOpenaiApiEndpoint?.value || "").trim() || "未填写 / Not set") + " / " + (String(datasetOpenaiModel?.value || "").trim() || "未填写 / Not set"))
-      : datasetSummaryKV("Project ID", (String(datasetProjectId?.value || "").trim() || "（系统缺省） / (Server default)")),
-    (executionMode === "openai_compatible")
-      ? datasetSummaryKV("OpenAI Provider", "OpenAI-compatible endpoint")
-      : datasetSummaryKV("Provider", (String(datasetProvider?.value || "").trim() || "（系统缺省） / (Server default)")),
-    (executionMode === "openai_compatible")
-      ? datasetSummaryKV("OpenAI API Key", String(datasetOpenaiApiKey?.value || "").trim() ? "已填写（不回显） / Provided (masked)" : "未填写 / Not set")
-      : apiNote,
-    (executionMode === "openai_compatible")
-      ? datasetSummaryKV(
-        "Blocked Detection Priority",
-        "HTTP status > JSONPath(JSON) > Payload keywords"
-      )
-      : "",
-    (executionMode === "openai_compatible")
-      ? datasetSummaryKV(
-        "OpenAI Block Rules",
-        "status=" + (String(datasetOpenaiBlockHttpStatuses?.value || "").trim() || "403")
-        + " ; jsonpath=" + (String(datasetOpenaiBlockJsonPath?.value || "").trim() || "—")
-        + " ; value=" + (String(datasetOpenaiBlockJsonValue?.value || "").trim() || "—")
-        + " ; keywords=" + (String(datasetOpenaiBlockPayloadKeywords?.value || "").trim() || "—")
-      )
-      : "",
+    ...connLines,
     datasetSummaryKV(
       "并发 / Guardrail超时 / 批次间隔",
       String(datasetConcurrency?.value || 1)
@@ -5324,9 +5450,7 @@ function datasetBuildSummary(){
     ),
     datasetSummaryKV(
       "记录阻挡Scanner名称 / Record Blocked Scanner Names",
-      executionMode === "openai_compatible"
-        ? "OpenAI 模式不支持 / Not supported in OpenAI mode"
-        : (datasetRecordFailedScanners?.checked ? "是 / Yes" : "否 / No")
+      scannerNote
     ),
     datasetSummaryKV("任务状态 / Task Status", String(datasetTaskSnapshot.status || "—") + " · " + String(datasetTaskSnapshot.phase || "—")),
   ].join("");
@@ -5525,6 +5649,28 @@ async function datasetSaveConfig(){
     if (!openaiBlockStatuses.length) openaiBlockStatuses = [403];
     if (datasetRecordFailedScanners) datasetRecordFailedScanners.checked = false;
   }
+  if (executionMode === "alicloud") {
+    const apiPath = String(datasetAlicloudApiPath?.value || "").trim() || "/";
+    if (!apiPath.startsWith("/")) {
+      showSyncNotice("阿里云 API Path 必须以 / 开头（例如 /）。 / Alicloud api_path must start with /.", "error");
+      return;
+    }
+    const rid = String(datasetAlicloudAccessKeyId?.value || "").trim();
+    const rsec = String(datasetAlicloudAccessKeySecret?.value || "").trim();
+    if ((rid && !rsec) || (!rid && rsec)) {
+      showSyncNotice("阿里云 AccessKey ID 与 Secret 需同时填写或同时留空（留空沿用已保存）。 / Provide both AK fields or both empty.", "error");
+      return;
+    }
+    if (datasetRecordFailedScanners) datasetRecordFailedScanners.checked = false;
+  }
+  if (executionMode === "xiangxin") {
+    const xxEp = String(datasetXiangxinApiEndpoint?.value || "").trim() || "https://api.xiangxinai.cn/v1/guardrails";
+    if (!/^https?:\/\//i.test(xxEp)) {
+      showSyncNotice("象信 Endpoint 须为完整 URL（http:// 或 https:// 开头）。 / Xiangxin endpoint must be a full URL.", "error");
+      return;
+    }
+    if (datasetRecordFailedScanners) datasetRecordFailedScanners.checked = false;
+  }
   const payload = {
     task_id: datasetTaskId,
     task_name: taskName,
@@ -5543,6 +5689,18 @@ async function datasetSaveConfig(){
     openai_block_json_path: String(datasetOpenaiBlockJsonPath?.value || "").trim() || null,
     openai_block_json_value: String(datasetOpenaiBlockJsonValue?.value || "").trim() || null,
     openai_block_payload_keywords: String(datasetOpenaiBlockPayloadKeywords?.value || "").trim() || null,
+    alicloud_region_id: String(datasetAlicloudRegionId?.value || "").trim() || null,
+    alicloud_endpoint: String(datasetAlicloudEndpoint?.value || "").trim() || null,
+    alicloud_service: String(datasetAlicloudService?.value || "").trim() || null,
+    alicloud_biz_interface: String(datasetAlicloudBizInterface?.value || "").trim() || null,
+    alicloud_api_path: String(datasetAlicloudApiPath?.value || "").trim() || null,
+    alicloud_connect_timeout_ms: Number(datasetAlicloudConnectMs?.value || 0) || null,
+    alicloud_read_timeout_ms: Number(datasetAlicloudReadMs?.value || 0) || null,
+    alicloud_access_key_id: String(datasetAlicloudAccessKeyId?.value || "").trim() || null,
+    alicloud_access_key_secret: String(datasetAlicloudAccessKeySecret?.value || "").trim() || null,
+    xiangxin_api_endpoint: String(datasetXiangxinApiEndpoint?.value || "").trim() || null,
+    xiangxin_model: String(datasetXiangxinModel?.value || "").trim() || null,
+    xiangxin_api_key: String(datasetXiangxinApiKey?.value || "").trim() || null,
     concurrency_per_batch: concVal,
     interval_seconds: Number(datasetInterval?.value || 1),
     guardrail_timeout_seconds: Number(datasetGuardrailTimeout?.value ?? 20),
@@ -6515,6 +6673,18 @@ datasetExecutionModeRadios.forEach((r) => r.addEventListener("change", () => {
   datasetOpenaiBlockJsonPath,
   datasetOpenaiBlockJsonValue,
   datasetOpenaiBlockPayloadKeywords,
+  datasetAlicloudRegionId,
+  datasetAlicloudEndpoint,
+  datasetAlicloudService,
+  datasetAlicloudBizInterface,
+  datasetAlicloudApiPath,
+  datasetAlicloudConnectMs,
+  datasetAlicloudReadMs,
+  datasetAlicloudAccessKeyId,
+  datasetAlicloudAccessKeySecret,
+  datasetXiangxinApiEndpoint,
+  datasetXiangxinModel,
+  datasetXiangxinApiKey,
 ].forEach((el) => {
   el?.addEventListener("input", () => datasetBuildSummary());
 });

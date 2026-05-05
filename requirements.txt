@@ -23,3 +23,5 @@ langgraph
 # --- Dataset Test (batch guardrail on uploaded prompts) ---
 # CSV: standard library only. Excel .xlsx uploads require openpyxl (legacy .xls is not supported).
 openpyxl
+# Aliyun AI Guard (Green 2022-03-02 RPC) — Dataset Test “alicloud” execution mode
+alibabacloud_green20220302==2.20.3
