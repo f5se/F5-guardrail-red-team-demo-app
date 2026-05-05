@@ -65,6 +65,10 @@
           <div class="agenticToolConfigBody">
             <div class="agenticToolConfigLeft">
               <div class="agenticToolConfigLabel">Tools</div>
+              <div class="agenticToolConfigHintActions" style="margin:6px 0 8px 0;">
+                <button id="btnInjectBadMcpTool" type="button">Inject bad tool into MCP server</button>
+              </div>
+              <div style="border-top:1px solid #e2e8f0;margin:8px 0 8px 0;"></div>
               <div id="agenticToolConfigList" class="agenticToolConfigList"></div>
             </div>
           </div>
@@ -226,6 +230,27 @@
                     恢复默认 · Reset Default
                   </button>
                 </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="settingsSection" aria-labelledby="settingsHdrAgentic">
+            <header class="settingsSectionHeader">
+              <h2 class="settingsSectionTitle" id="settingsHdrAgentic">Agentic Security</h2>
+              <p class="settingsSectionMeta">Agentic 调试与可观测性开关（仅管理员可修改） · Agentic debug/observability toggles (admin only)</p>
+            </header>
+            <div class="settingsSectionBody">
+              <div class="settingRow">
+                <div class="settingText">
+                  <div class="settingTitle">Record Agentic Guardrail Raw JSONL</div>
+                  <div class="settingDesc">
+                    Store Agentic OpenAI-compatible request/response raw payloads into <code>.cursor/agentic-guardrail-raw.jsonl</code> for debugging.
+                  </div>
+                </div>
+                <label class="switch" title="Enable/disable agentic raw Guardrail JSONL logging (admin only)">
+                  <input type="checkbox" id="toggleAgenticGuardrailRawDebug" />
+                  <span class="slider"></span>
+                </label>
               </div>
             </div>
           </section>
@@ -489,16 +514,26 @@
                 <option value="">Custom input (manual)</option>
                 <option value="__loading__">Loading templates...</option>
               </select>
+              <div id="agenticRiskTemplateDesc" class="settingDesc" style="display:none;margin:6px 0 8px 0;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;color:#475569;"></div>
               <label for="agenticPrompt">Prompt</label>
               <textarea id="agenticPrompt" rows="3" placeholder="Describe the task for the multi-agent workflow..."></textarea>
             </div>
             <div class="agenticControlGroup agenticRunControl">
+              <label for="agenticUserRole">Your Role</label>
+              <select id="agenticUserRole">
+                <option value="Admin" selected>Admin</option>
+                <option value="Operator">Operator</option>
+              </select>
               <label for="agenticToolProtocol">Tool Calling Mode</label>
               <select id="agenticToolProtocol">
                 <option value="openai_tool_calls_mcp_sim">OpenAI Completions Chat format + MCP</option>
                 <option value="legacy_json_prompt">Tools Json embedded in prompt mode</option>
               </select>
               <button id="btnRunAgentic" type="button">Run Agentic Test</button>
+              <label class="agenticBypassLabel" for="agenticA2AMaliciousToggle">
+                <input type="checkbox" id="agenticA2AMaliciousToggle">
+                A2A 恶意消息传递（Supervisor → Research）
+              </label>
               <label class="agenticBypassLabel" for="agenticBypassGuardrail">
                 <input type="checkbox" id="agenticBypassGuardrail">
                 Bypass F5 Guardrail (Direct OpenAI-compatible)

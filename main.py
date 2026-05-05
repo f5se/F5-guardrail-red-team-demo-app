@@ -310,6 +310,8 @@ class AgenticRunIn(BaseModel):
     bypass_f5_guardrail: bool = False
     session_id: Optional[str] = None
     tool_protocol: Optional[str] = None  # legacy_json_prompt | openai_tool_calls_mcp_sim
+    user_role: Optional[str] = "Admin"  # Admin | Operator
+    a2a_malicious_transfer: bool = False
 
 
 # -----------------------------
@@ -571,6 +573,7 @@ DEFAULT_SETTINGS = {
     "agent_skill_enabled": False,
     "f5_guardrail_only": False,
     "debug_guardrail_raw_enabled": False,
+    "debug_agentic_guardrail_raw_enabled": False,
     "guardrail_verbose": False,
     "guardrail_timeout_seconds": GUARDRAIL_TIMEOUT_SECONDS,
     "kb_dir": "./enterprise_kb",
@@ -1135,6 +1138,7 @@ def get_runtime_settings(raw: dict) -> dict:
         "agent_skill_enabled": to_bool(raw.get("agent_skill_enabled", False)),
         "f5_guardrail_only": to_bool(raw.get("f5_guardrail_only", False)),
         "debug_guardrail_raw_enabled": to_bool(raw.get("debug_guardrail_raw_enabled", False)),
+        "debug_agentic_guardrail_raw_enabled": to_bool(raw.get("debug_agentic_guardrail_raw_enabled", False)),
         "guardrail_verbose": to_bool(raw.get("guardrail_verbose", False)),
         "guardrail_timeout_seconds": to_float(raw.get("guardrail_timeout_seconds", GUARDRAIL_TIMEOUT_SECONDS), GUARDRAIL_TIMEOUT_SECONDS, 1.0, 120.0),
         "kb_dir": str(raw.get("kb_dir") or "./enterprise_kb"),
@@ -1871,6 +1875,39 @@ def _append_agentic_run_log(session_id: str, payload: dict):
         pass
 
 
+def _append_agentic_guardrail_raw_log(session_id: str, payload: dict):
+    """Temporary debug logger for Agentic OpenAI-compatible request/response."""
+    raw = get_effective_raw_settings(None)
+    if not to_bool(raw.get("debug_agentic_guardrail_raw_enabled", False)):
+        return
+    try:
+        out_path = os.path.join(BASE_DIR, ".cursor", "agentic-guardrail-raw.jsonl")
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        row = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "session_id": str(session_id or "").strip(),
+            **(payload if isinstance(payload, dict) else {}),
+        }
+        with open(out_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _sanitize_agentic_headers(headers: Dict[str, str]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for k, v in (headers or {}).items():
+        key = str(k)
+        val = str(v or "")
+        if key.lower() == "authorization":
+            if len(val) > 14:
+                val = val[:10] + "..."
+            else:
+                val = "***"
+        out[key] = val
+    return out
+
+
 def _read_agentic_run_trace(session_id: str) -> List[dict]:
     rows: List[dict] = []
     try:
@@ -1978,10 +2015,11 @@ def _load_agentic_risk_templates() -> List[dict]:
             t_id = str(item.get("id") or "").strip()
             label = str(item.get("label") or t_id or "Template").strip()
             prompt = str(item.get("prompt") or "").strip()
+            description = str(item.get("description") or "").strip()
             scenario = str(item.get("scenario") or "unsafe_procurement").strip() or "unsafe_procurement"
             if not t_id or not prompt:
                 continue
-            rows.append({"id": t_id, "label": label, "prompt": prompt, "scenario": scenario})
+            rows.append({"id": t_id, "label": label, "prompt": prompt, "scenario": scenario, "description": description})
         return rows or default_templates
     except Exception:
         return default_templates
@@ -2021,6 +2059,18 @@ async def _agentic_openai_chat(
         "messages": messages,
         "stream": False,
     }
+    _append_agentic_guardrail_raw_log(
+        session_id,
+        {
+            "api": "agentic_openai_chat",
+            "bypass_f5_guardrail": bool(bypass_f5_guardrail),
+            "request": {
+                "url": url,
+                "headers": _sanitize_agentic_headers(headers),
+                "body": body,
+            },
+        },
+    )
     req_timeout = httpx.Timeout(connect=15.0, read=timeout, write=30.0, pool=15.0)
     try:
         async with httpx.AsyncClient(timeout=req_timeout) as client:
@@ -2047,6 +2097,17 @@ async def _agentic_openai_chat(
         resp_data = resp.json()
     except Exception:
         resp_data = {"_raw_text": (resp.text or "")[:20000]}
+    _append_agentic_guardrail_raw_log(
+        session_id,
+        {
+            "api": "agentic_openai_chat",
+            "bypass_f5_guardrail": bool(bypass_f5_guardrail),
+            "response": {
+                "status_code": int(resp.status_code),
+                "body": resp_data if isinstance(resp_data, dict) else {"_raw_text": str(resp_data)[:20000]},
+            },
+        },
+    )
     if resp.status_code < 200 or resp.status_code >= 300:
         err_msg, failed_ids, failed_scanners = (
             _extract_agentic_error_info(resp_data)
@@ -2110,6 +2171,18 @@ async def _agentic_openai_chat_message(
         "thinking": {"type": "disabled"},
         "stream": False,
     }
+    _append_agentic_guardrail_raw_log(
+        session_id,
+        {
+            "api": "agentic_openai_chat_message",
+            "bypass_f5_guardrail": bool(bypass_f5_guardrail),
+            "request": {
+                "url": url,
+                "headers": _sanitize_agentic_headers(headers),
+                "body": body,
+            },
+        },
+    )
     req_timeout = httpx.Timeout(connect=15.0, read=timeout, write=30.0, pool=15.0)
     try:
         async with httpx.AsyncClient(timeout=req_timeout) as client:
@@ -2136,6 +2209,17 @@ async def _agentic_openai_chat_message(
         resp_data = resp.json()
     except Exception:
         resp_data = {"_raw_text": (resp.text or "")[:20000]}
+    _append_agentic_guardrail_raw_log(
+        session_id,
+        {
+            "api": "agentic_openai_chat_message",
+            "bypass_f5_guardrail": bool(bypass_f5_guardrail),
+            "response": {
+                "status_code": int(resp.status_code),
+                "body": resp_data if isinstance(resp_data, dict) else {"_raw_text": str(resp_data)[:20000]},
+            },
+        },
+    )
     if resp.status_code < 200 or resp.status_code >= 300:
         err_msg, failed_ids, failed_scanners = (
             _extract_agentic_error_info(resp_data)
@@ -2171,6 +2255,10 @@ async def api_agentic_run(request: Request, payload: AgenticRunIn):
     scenario = (payload.scenario or "unsafe_procurement").strip() or "unsafe_procurement"
     bypass_f5_guardrail = bool(payload.bypass_f5_guardrail)
     tool_protocol = str(payload.tool_protocol or "openai_tool_calls_mcp_sim").strip().lower()
+    user_role = str(payload.user_role or "Admin").strip()
+    a2a_malicious_transfer = bool(payload.a2a_malicious_transfer)
+    if user_role not in ("Admin", "Operator"):
+        user_role = "Admin"
     if tool_protocol not in ("legacy_json_prompt", "openai_tool_calls_mcp_sim"):
         raise HTTPException(status_code=400, detail="tool_protocol must be legacy_json_prompt or openai_tool_calls_mcp_sim")
     session_id = (payload.session_id or "").strip() or f"agentic-{int(time.time())}-{secrets.token_hex(4)}"
@@ -2199,6 +2287,8 @@ async def api_agentic_run(request: Request, payload: AgenticRunIn):
             tool_dispatch=lambda name, args, s, p: dispatch_agentic_tool(name, args, s, p),
             trace_logger=_trace_logger_runtime,
             tool_protocol=tool_protocol,
+            user_role=user_role,
+            a2a_malicious_transfer=a2a_malicious_transfer,
         )
     except Exception as e:
         raise HTTPException(
@@ -2792,6 +2882,7 @@ async def post_settings(request: Request, payload: dict = Body(default=None)):
         "kb_dir",
         "agent_max_steps",
         "dual_project_routing_enabled",
+        "debug_agentic_guardrail_raw_enabled",
         "dataset_max_running_tasks",
         "dataset_max_upload_mb",
         "dataset_max_concurrency",
@@ -2802,7 +2893,7 @@ async def post_settings(request: Request, payload: dict = Body(default=None)):
         if forbidden:
             raise HTTPException(
                 status_code=403,
-                detail="only admin can modify kb_dir, agent_max_steps, dual_project_routing_enabled, dataset_max_running_tasks, dataset_max_upload_mb, dataset_max_concurrency, or app_timezone",
+                detail="only admin can modify kb_dir, agent_max_steps, dual_project_routing_enabled, debug_agentic_guardrail_raw_enabled, dataset_max_running_tasks, dataset_max_upload_mb, dataset_max_concurrency, or app_timezone",
             )
     structured = load_structured_settings()
     if username not in structured["user_settings"]:
