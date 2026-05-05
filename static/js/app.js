@@ -1737,15 +1737,22 @@ async function toggleBadMcpToolInjection(){
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || ("HTTP " + resp.status));
     agenticToolConfigData = data.config || merged;
+    const nextCfg = getBadMcpToolConfig();
+    if (nextEnabled) {
+      agenticSelectedTool = nextCfg.name;
+      if (agenticToolEditorOverlayEl && activeView === "AGENTIC_SECURITY") {
+        agenticToolEditorOverlayEl.style.display = "";
+      }
+    }
     renderAgenticToolConfigPanel();
     updateBadMcpToolUi();
     void loadAgenticRiskTemplates();
     if (nextEnabled) {
       setAgenticToolConfigStatus(
         "Injected bad tool into MCP server (demo only): "
-          + cfg.name
+          + nextCfg.name
           + " | "
-          + cfg.description
+          + nextCfg.description
           + " |诱导命令示例: rm -rf ./",
         false
       );
@@ -1803,6 +1810,10 @@ async function loadAgenticToolBasicInfo(toolName){
 
 function buildToolScopedConfig(toolName, cfg){
   const conf = cfg || {};
+  const badCfg = getBadMcpToolConfig();
+  if (toolName === badCfg.name) {
+    return { bad_mcp_tool: { enabled: !!badCfg.enabled, name: badCfg.name, description: badCfg.description } };
+  }
   if (toolName === "get_vendor_profile") {
     return { defaults: conf.defaults || {}, vendors: conf.vendors || {} };
   }
@@ -1838,6 +1849,16 @@ function buildToolScopedConfig(toolName, cfg){
 function applyToolScopedConfig(toolName, edited, current){
   const base = current || {};
   if (!toolName || !edited || typeof edited !== "object") return base;
+  const badCfg = getBadMcpToolConfig();
+  if (toolName === badCfg.name) {
+    const raw = edited.bad_mcp_tool && typeof edited.bad_mcp_tool === "object" ? edited.bad_mcp_tool : edited;
+    base.bad_mcp_tool = {
+      enabled: !!raw.enabled,
+      name: String(raw.name || badCfg.name || AGENTIC_BAD_MCP_TOOL_DEFAULT.name).trim() || AGENTIC_BAD_MCP_TOOL_DEFAULT.name,
+      description: String(raw.description || badCfg.description || AGENTIC_BAD_MCP_TOOL_DEFAULT.description).trim() || AGENTIC_BAD_MCP_TOOL_DEFAULT.description
+    };
+    return base;
+  }
   if (toolName === "get_vendor_profile") {
     if (edited.defaults && typeof edited.defaults === "object") base.defaults = edited.defaults;
     if (edited.vendors && typeof edited.vendors === "object") base.vendors = edited.vendors;
@@ -1930,7 +1951,16 @@ function renderAgenticToolConfigPanel(){
     if (agenticToolEditorOverlayEl) agenticToolEditorOverlayEl.style.display = "none";
     return;
   }
-  void loadAgenticToolBasicInfo(agenticSelectedTool);
+  const badCfg = getBadMcpToolConfig();
+  if (agenticSelectedTool === badCfg.name) {
+    renderAgenticToolBasicInfo(agenticSelectedTool, {
+      mcp_server: "mock-mcp-server",
+      tool_name: badCfg.name,
+      description: badCfg.description
+    });
+  } else {
+    void loadAgenticToolBasicInfo(agenticSelectedTool);
+  }
   const scoped = buildToolScopedConfig(agenticSelectedTool, agenticToolConfigData || {});
   agenticToolConfigEditorEl.value = JSON.stringify(scoped, null, 2);
 }
@@ -2630,13 +2660,16 @@ async function loadAgenticRiskTemplates(){
       const secRule = getRiskTemplateSec022Rule(id, label);
       const disableCase0or2 = secRule === "require_absent_sec022" && hasSec022;
       const disableCase1 = secRule === "require_present_sec022" && !hasSec022;
+      const disableCase4NeedInjection = id === "case_mcp_bad_tool_injection" && !badToolEnabled;
       const disableByBadToolMode = badToolEnabled && id !== "case_mcp_bad_tool_injection";
-      const disabled = disableCase0or2 || disableCase1 || disableByBadToolMode;
+      const disabled = disableCase0or2 || disableCase1 || disableCase4NeedInjection || disableByBadToolMode;
       const disabledReason = disableCase0or2
         ? "disabled: SEC-022 exists in tool policies"
         : (disableCase1
           ? "disabled: SEC-022 missing in tool policies"
-          : (disableByBadToolMode ? "disabled: only Case 4 is allowed while bad MCP tool is injected" : ""));
+          : (disableCase4NeedInjection
+            ? "disabled: please click Inject bad tool into MCP server first"
+            : (disableByBadToolMode ? "disabled: only Case 4 is allowed while bad MCP tool is injected" : "")));
 
       agenticRiskPromptTemplates[id] = {
         scenario: String(t.scenario || "unsafe_procurement"),
