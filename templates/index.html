@@ -549,48 +549,78 @@
             <code id="agenticProvider">deepseek-JingLin-real-charge</code>
           </div>
           <div class="agenticFlowViz" id="agenticFlowViz" aria-label="Agent execution flow">
-            <div class="agenticFlowTop">
-              <div class="agenticFlowNode" data-node="supervisor" title="SupervisorAgent">
-                <span class="agenticFlowNodeTitle">Supervisor</span>
-                <span class="agenticFlowNodeSub">plan / finalize</span>
-              </div>
-              <div class="agenticFlowEdge agenticFlowEdge--h" data-edge="supervisor-hub" aria-hidden="true">
-                <span class="agenticFlowEdgeLine"></span>
-                <span class="agenticFlowEdgeDots"></span>
-              </div>
-              <div class="agenticFlowHub" data-node="hub" title="Model endpoint">
-                <span class="agenticFlowHubIcon">◇</span>
-                <span class="agenticFlowHubTitle" id="agenticFlowHubTitle">F5 CalypsoAI · Guardrail</span>
-                <span class="agenticFlowHubSub" id="agenticFlowHubSub">OpenAI-compatible · Calypso session</span>
-              </div>
-              <div class="agenticFlowEdge agenticFlowEdge--h" data-edge="hub-research" aria-hidden="true">
-                <span class="agenticFlowEdgeLine"></span>
-                <span class="agenticFlowEdgeDots"></span>
-              </div>
-              <div class="agenticFlowNode" data-node="research" title="ResearchAgent">
-                <span class="agenticFlowNodeTitle">Research</span>
-                <span class="agenticFlowNodeSub">gather evidence</span>
-              </div>
-            </div>
-            <div class="agenticFlowBottom agenticFlowBottom--split">
-              <div class="agenticFlowBranch">
-                <div class="agenticFlowEdge agenticFlowEdge--v" data-edge="hub-action" aria-hidden="true">
-                  <span class="agenticFlowEdgeLine"></span>
-                  <span class="agenticFlowEdgeDots"></span>
+            <div class="agenticFlowCanvas">
+              <svg class="agenticFlowLinkSvg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                <line class="agenticFlowBizLine" data-edge="user-supervisor"></line>
+                <line class="agenticFlowBizLine" data-edge="supervisor-research"></line>
+                <line class="agenticFlowBizLine" data-edge="supervisor-action"></line>
+                <line class="agenticFlowBizLine" data-edge="supervisor-legal"></line>
+                <path class="agenticFlowHubLine" data-edge="hub-supervisor"></path>
+                <path class="agenticFlowHubLine" data-edge="hub-research"></path>
+                <path class="agenticFlowHubLine" data-edge="hub-action"></path>
+                <path class="agenticFlowHubLine" data-edge="hub-legal"></path>
+              </svg>
+              <div class="agenticFlowPipeline">
+                <div class="agenticFlowLane agenticFlowLane--user">
+                  <div class="agenticFlowAgentWrap" data-wrap="user">
+                    <div class="agenticFlowNode agenticFlowNode--user" data-node="user" title="User interface">
+                      <span class="agenticFlowNodeBadge">0</span>
+                      <span class="agenticFlowNodeTitle">用户</span>
+                      <span class="agenticFlowNodeSub" data-base-sub="用户发起采购流程评估需求">用户发起采购流程评估需求</span>
+                    </div>
+                    <div class="agenticFlowMcpSatellite" data-mcp-satellite="user" aria-hidden="true"></div>
+                  </div>
                 </div>
-                <div class="agenticFlowNode" data-node="action" title="ActionAgent">
-                  <span class="agenticFlowNodeTitle">Action</span>
-                  <span class="agenticFlowNodeSub">tools / execute</span>
+                <div class="agenticFlowSupCluster">
+                  <div class="agenticFlowSupNode">
+                    <div class="agenticFlowAgentWrap" data-wrap="supervisor">
+                      <div class="agenticFlowNode agenticFlowNode--supervisor" data-node="supervisor" title="SupervisorAgent">
+                        <span class="agenticFlowNodeBadge">1</span>
+                        <span class="agenticFlowNodeTitle">Supervisor</span>
+                        <span class="agenticFlowNodeSub">plan / orchestrate</span>
+                      </div>
+                      <div class="agenticFlowMcpSatellite" data-mcp-satellite="supervisor" aria-hidden="true"></div>
+                    </div>
+                  </div>
+                  <div class="agenticFlowSupFan">
+                    <div class="agenticFlowDelegateRow">
+                      <div class="agenticFlowAgentWrap" data-wrap="research">
+                        <div class="agenticFlowNode" data-node="research" title="ResearchAgent">
+                          <span class="agenticFlowNodeBadge">2</span>
+                          <span class="agenticFlowNodeTitle">Research</span>
+                          <span class="agenticFlowNodeSub">gather evidence</span>
+                        </div>
+                        <div class="agenticFlowMcpSatellite" data-mcp-satellite="research" aria-hidden="true"></div>
+                      </div>
+                    </div>
+                    <div class="agenticFlowDelegateRow">
+                      <div class="agenticFlowAgentWrap" data-wrap="action">
+                        <div class="agenticFlowNode" data-node="action" title="ActionAgent">
+                          <span class="agenticFlowNodeBadge">3</span>
+                          <span class="agenticFlowNodeTitle">Action</span>
+                          <span class="agenticFlowNodeSub">tools / execute</span>
+                        </div>
+                        <div class="agenticFlowMcpSatellite" data-mcp-satellite="action" aria-hidden="true"></div>
+                      </div>
+                    </div>
+                    <div class="agenticFlowDelegateRow">
+                      <div class="agenticFlowAgentWrap" data-wrap="legal">
+                        <div class="agenticFlowNode" data-node="legal" title="LegalCounselAgent">
+                          <span class="agenticFlowNodeBadge">4</span>
+                          <span class="agenticFlowNodeTitle">Legal counsel</span>
+                          <span class="agenticFlowNodeSub">brief legal review</span>
+                        </div>
+                        <div class="agenticFlowMcpSatellite" data-mcp-satellite="legal" aria-hidden="true"></div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div class="agenticFlowBranch">
-                <div class="agenticFlowEdge agenticFlowEdge--v" data-edge="hub-legal" aria-hidden="true">
-                  <span class="agenticFlowEdgeLine"></span>
-                  <span class="agenticFlowEdgeDots"></span>
-                </div>
-                <div class="agenticFlowNode" data-node="legal" title="LegalCounselAgent">
-                  <span class="agenticFlowNodeTitle">Legal counsel</span>
-                  <span class="agenticFlowNodeSub">brief legal review</span>
+                <div class="agenticFlowLane agenticFlowLane--hub">
+                  <div class="agenticFlowHub" data-node="hub" title="Model endpoint">
+                    <span class="agenticFlowHubIcon">◇</span>
+                    <span class="agenticFlowHubTitle" id="agenticFlowHubTitle">F5 CalypsoAI · Guardrail</span>
+                    <span class="agenticFlowHubSub" id="agenticFlowHubSub">OpenAI-compatible · Calypso session</span>
+                  </div>
                 </div>
               </div>
             </div>

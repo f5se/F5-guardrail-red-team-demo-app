@@ -1449,6 +1449,47 @@ function renderAgenticRiskTemplateDescription(text){
 let agenticSelectedScenario = "unsafe_procurement";
 let agenticRunningAnimTimer = null;
 let agenticRunningAnimFrame = 0;
+let agenticFlowUserIntroTimer = null;
+let agenticFlowUserIntroActive = false;
+let agenticFlowLinkLayoutTimer = null;
+
+const AGENTIC_HUB_ROUTE_LANES = {
+  supervisor: { hubY: 0.08 },
+  research: { hubY: 0.22 },
+  action: { hubY: 0.52 },
+  legal: { hubY: 0.86 }
+};
+
+const AGENTIC_MCP_SERVER_DEFS = {
+  "procurement-data-mcp": {
+    label: "Procurement Data MCP",
+    sub: "vendor · price · policy",
+    shape: "hex",
+    color: "#0d9488",
+    bg: "#f0fdfa"
+  },
+  "workflow-mcp": {
+    label: "Workflow MCP",
+    sub: "approval · notify",
+    shape: "diamond",
+    color: "#ea580c",
+    bg: "#fff7ed"
+  },
+  "external-scan-mcp": {
+    label: "External Scan MCP",
+    sub: "third-party tool",
+    shape: "oct",
+    color: "#be123c",
+    bg: "#fff1f2"
+  },
+  "mock-mcp-server": {
+    label: "MCP Server",
+    sub: "tool runtime",
+    shape: "round",
+    color: "#7c3aed",
+    bg: "#f5f3ff"
+  }
+};
 
 let testGuideLoaded = false;
 
@@ -1470,6 +1511,7 @@ if (complianceReportFrame) {
   complianceReportFrame.addEventListener("load", resizeComplianceReportFrame);
   window.addEventListener("resize", () => {
     if (activeView === "COMPLIANCE_REPORT") resizeComplianceReportFrame();
+    if (activeView === "AGENTIC_SECURITY") scheduleAgenticFlowLinkLayout();
   });
 }
 
@@ -1514,6 +1556,267 @@ function agenticAgentNameToFlowNode(agentName){
   return null;
 }
 
+function agenticToolToMcpServer(toolName){
+  const t = String(toolName || "").trim().toLowerCase();
+  if (!t) return "mock-mcp-server";
+  if (t === "bulk_vendor_compliance_scan" || t.indexOf("bad_mcp") >= 0) return "external-scan-mcp";
+  if (t === "get_vendor_profile" || t === "get_price_history" || t === "search_policy_docs") return "procurement-data-mcp";
+  if (t === "create_risk_report" || t === "submit_approval_request" || t === "notify_procurement" || t === "send_email") return "workflow-mcp";
+  return "mock-mcp-server";
+}
+
+function clearAgenticMcpSatellites(){
+  if (!agenticFlowVizEl) return;
+  agenticFlowVizEl.querySelectorAll(".agenticFlowMcpSatellite").forEach(el => {
+    el.innerHTML = "";
+    el.setAttribute("aria-hidden", "true");
+  });
+}
+
+function renderAgenticMcpSatellite(flowNode, serverId, active){
+  if (!agenticFlowVizEl || !flowNode || !serverId) return;
+  const def = AGENTIC_MCP_SERVER_DEFS[serverId] || AGENTIC_MCP_SERVER_DEFS["mock-mcp-server"];
+  const satelliteEl = agenticFlowVizEl.querySelector(".agenticFlowMcpSatellite[data-mcp-satellite=\"" + flowNode + "\"]");
+  if (!satelliteEl) return;
+  const linkActive = active ? " agenticFlowMcpLink--active" : "";
+  const serverActive = active ? " agenticFlowMcpServer--active" : "";
+  satelliteEl.innerHTML =
+    "<div class=\"agenticFlowMcpLink" + linkActive + "\" aria-hidden=\"true\">" +
+      "<span class=\"agenticFlowMcpLinkLine\" style=\"background:" + escapeHtml(def.color) + "33\"></span>" +
+      "<span class=\"agenticFlowMcpLinkDots\"></span>" +
+    "</div>" +
+    "<div class=\"agenticFlowMcpServer agenticFlowMcpServer--" + escapeHtml(def.shape) + serverActive + "\" " +
+      "style=\"border-color:" + escapeHtml(def.color) + ";background:" + escapeHtml(def.bg) + ";\">" +
+      "<span class=\"agenticFlowMcpServerTitle\" style=\"color:" + escapeHtml(def.color) + ";\">" + escapeHtml(def.label) + "</span>" +
+      "<span class=\"agenticFlowMcpServerSub\" style=\"color:" + escapeHtml(def.color) + ";\">" + escapeHtml(def.sub) + "</span>" +
+    "</div>";
+  satelliteEl.setAttribute("aria-hidden", "false");
+}
+
+function startAgenticFlowUserIntro(bypass){
+  stopAgenticFlowUserIntro();
+  agenticFlowUserIntroActive = true;
+  updateAgenticFlowVisualization([], { running: true, userIntro: true, bypass: !!bypass });
+  agenticFlowUserIntroTimer = setTimeout(() => {
+    agenticFlowUserIntroTimer = null;
+    agenticFlowUserIntroActive = false;
+  }, 2200);
+}
+
+function stopAgenticFlowUserIntro(){
+  if (agenticFlowUserIntroTimer) {
+    clearTimeout(agenticFlowUserIntroTimer);
+    agenticFlowUserIntroTimer = null;
+  }
+  agenticFlowUserIntroActive = false;
+}
+
+function agenticFlowCanvasRect(){
+  if (!agenticFlowVizEl) return null;
+  const canvas = agenticFlowVizEl.querySelector(".agenticFlowCanvas");
+  if (!canvas) return null;
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  return rect;
+}
+
+function agenticFlowNodePoint(nodeKey, side, ratio){
+  if (!agenticFlowVizEl) return null;
+  const node = agenticFlowVizEl.querySelector(".agenticFlowNode[data-node=\"" + nodeKey + "\"]");
+  const canvasRect = agenticFlowCanvasRect();
+  if (!node || !canvasRect) return null;
+  const rect = node.getBoundingClientRect();
+  const t = typeof ratio === "number" ? Math.max(0, Math.min(1, ratio)) : 0.5;
+  const midY = rect.top + rect.height * t;
+  const toPct = (x, y) => ({
+    x: ((x - canvasRect.left) / canvasRect.width) * 100,
+    y: ((y - canvasRect.top) / canvasRect.height) * 100
+  });
+  if (side === "left") return toPct(rect.left, midY);
+  if (side === "right") return toPct(rect.right, midY);
+  if (side === "top") return toPct(rect.left + rect.width / 2, rect.top);
+  if (side === "bottom") return toPct(rect.left + rect.width / 2, rect.bottom);
+  return toPct(rect.left + rect.width / 2, midY);
+}
+
+function agenticFlowHubPoint(hubYRatio){
+  if (!agenticFlowVizEl) return null;
+  const hub = agenticFlowVizEl.querySelector(".agenticFlowHub");
+  const canvasRect = agenticFlowCanvasRect();
+  if (!hub || !canvasRect) return null;
+  const rect = hub.getBoundingClientRect();
+  const y = rect.top + rect.height * (typeof hubYRatio === "number" ? hubYRatio : 0.5);
+  return {
+    x: ((rect.left - canvasRect.left) / canvasRect.width) * 100,
+    y: ((y - canvasRect.top) / canvasRect.height) * 100
+  };
+}
+
+function agenticFlowSetLine(edgeId, from, to){
+  if (!agenticFlowVizEl || !from || !to) return;
+  const line = agenticFlowVizEl.querySelector(".agenticFlowBizLine[data-edge=\"" + edgeId + "\"]");
+  if (!line) return;
+  line.setAttribute("x1", String(from.x));
+  line.setAttribute("y1", String(from.y));
+  line.setAttribute("x2", String(to.x));
+  line.setAttribute("y2", String(to.y));
+}
+
+function agenticFlowAllocateHubBusColumns(){
+  const hubLeft = agenticFlowHubPoint(0.5);
+  const supRight = agenticFlowNodePoint("supervisor", "right", 0.5);
+  const resRight = agenticFlowNodePoint("research", "right", 0.5);
+  const actRight = agenticFlowNodePoint("action", "right", 0.5);
+  const legRight = agenticFlowNodePoint("legal", "right", 0.5);
+  if (!hubLeft) return null;
+  const rightMost = Math.max(
+    supRight ? supRight.x : 0,
+    resRight ? resRight.x : 0,
+    actRight ? actRight.x : 0,
+    legRight ? legRight.x : 0
+  );
+  const gap = hubLeft.x - rightMost;
+  const inset = Math.max(2.4, gap * 0.05);
+  const minBus = rightMost + Math.max(4, gap * 0.12);
+  const maxBus = hubLeft.x - inset;
+  const usable = Math.max(12, maxBus - minBus);
+  const step = usable / 3;
+  // 左→右：2 Research、1 Supervisor（在 2 右侧）、3 Action、4 Legal
+  return {
+    research: minBus,
+    supervisor: minBus + step * 1.15,
+    action: minBus + step * 2.1,
+    legal: minBus + step * 3
+  };
+}
+
+function agenticFlowSetDelegateHubPath(edgeId, fromNode, laneKey, busColumns){
+  if (!agenticFlowVizEl || !fromNode || !busColumns) return;
+  const lane = AGENTIC_HUB_ROUTE_LANES[laneKey];
+  if (!lane) return;
+  const path = agenticFlowVizEl.querySelector(".agenticFlowHubLine[data-edge=\"" + edgeId + "\"]");
+  const start = agenticFlowNodePoint(fromNode, "right", 0.5);
+  const end = agenticFlowHubPoint(lane.hubY);
+  const busX = busColumns[laneKey];
+  if (!path || !start || !end || typeof busX !== "number") return;
+  const d = "M " + start.x + " " + start.y +
+    " H " + busX +
+    " V " + end.y +
+    " H " + end.x;
+  path.setAttribute("d", d);
+}
+
+function agenticFlowSetSupervisorHubPath(busColumns){
+  if (!agenticFlowVizEl || !busColumns) return;
+  const path = agenticFlowVizEl.querySelector(".agenticFlowHubLine[data-edge=\"hub-supervisor\"]");
+  const lane = AGENTIC_HUB_ROUTE_LANES.supervisor;
+  const top = agenticFlowNodePoint("supervisor", "top", 0.5);
+  const end = agenticFlowHubPoint(lane.hubY);
+  const researchTop = agenticFlowNodePoint("research", "top", 0.5);
+  const actionTop = agenticFlowNodePoint("action", "top", 0.5);
+  const legalTop = agenticFlowNodePoint("legal", "top", 0.5);
+  const busResearch = busColumns.research;
+  let busX = busColumns.supervisor;
+  if (typeof busResearch === "number") busX = Math.max(busX, busResearch + 2.8);
+  if (!path || !top || !end || typeof busX !== "number") return;
+  let routeY = top.y - 8;
+  [researchTop, actionTop, legalTop].forEach(pt => {
+    if (pt) routeY = Math.min(routeY, pt.y - 12);
+  });
+  const resMid = agenticFlowNodePoint("research", "right", 0.5);
+  if (resMid) routeY = Math.min(routeY, resMid.y - 14);
+  routeY = Math.max(3, routeY);
+  const d = "M " + top.x + " " + top.y +
+    " V " + routeY +
+    " H " + busX +
+    " V " + end.y +
+    " H " + end.x;
+  path.setAttribute("d", d);
+}
+
+function layoutAgenticFlowLinks(){
+  if (!agenticFlowVizEl) return;
+  agenticFlowSetLine(
+    "user-supervisor",
+    agenticFlowNodePoint("user", "right", 0.5),
+    agenticFlowNodePoint("supervisor", "left", 0.5)
+  );
+  agenticFlowSetLine(
+    "supervisor-research",
+    agenticFlowNodePoint("supervisor", "right", 0.22),
+    agenticFlowNodePoint("research", "left", 0.5)
+  );
+  agenticFlowSetLine(
+    "supervisor-action",
+    agenticFlowNodePoint("supervisor", "right", 0.5),
+    agenticFlowNodePoint("action", "left", 0.5)
+  );
+  agenticFlowSetLine(
+    "supervisor-legal",
+    agenticFlowNodePoint("supervisor", "right", 0.78),
+    agenticFlowNodePoint("legal", "left", 0.5)
+  );
+  const busColumns = agenticFlowAllocateHubBusColumns();
+  if (busColumns) {
+    agenticFlowSetSupervisorHubPath(busColumns);
+    agenticFlowSetDelegateHubPath("hub-research", "research", "research", busColumns);
+    agenticFlowSetDelegateHubPath("hub-action", "action", "action", busColumns);
+    agenticFlowSetDelegateHubPath("hub-legal", "legal", "legal", busColumns);
+  }
+}
+
+function scheduleAgenticFlowLinkLayout(){
+  if (agenticFlowLinkLayoutTimer) clearTimeout(agenticFlowLinkLayoutTimer);
+  agenticFlowLinkLayoutTimer = setTimeout(() => {
+    agenticFlowLinkLayoutTimer = null;
+    layoutAgenticFlowLinks();
+  }, 30);
+}
+
+function agenticActivateBizEdge(edgeId, mode){
+  if (!agenticFlowVizEl || !edgeId) return;
+  const el = agenticFlowVizEl.querySelector(".agenticFlowBizLine[data-edge=\"" + edgeId + "\"]");
+  if (!el || el.classList.contains("agenticFlowBizLine--blocked")) return;
+  if (mode === "orchestrate") el.classList.add("agenticFlowBizLine--orchestrate");
+  else el.classList.add("agenticFlowBizLine--active");
+}
+
+function agenticActivateHubEdge(edgeId){
+  if (!agenticFlowVizEl || !edgeId) return;
+  const el = agenticFlowVizEl.querySelector(".agenticFlowHubLine[data-edge=\"" + edgeId + "\"]");
+  if (el && !el.classList.contains("agenticFlowHubLine--blocked")) el.classList.add("agenticFlowHubLine--active");
+}
+
+function agenticSetSupervisorOrchestrating(on){
+  if (!agenticFlowVizEl) return;
+  const sup = agenticFlowVizEl.querySelector(".agenticFlowNode[data-node=\"supervisor\"]");
+  if (!sup) return;
+  sup.classList.toggle("agenticFlowNode--orchestrating", !!on);
+}
+
+function agenticActivateAgentFlowEdges(active){
+  agenticSetSupervisorOrchestrating(false);
+  if (active === "supervisor") {
+    agenticActivateBizEdge("user-supervisor");
+    agenticActivateHubEdge("hub-supervisor");
+  } else if (active === "research") {
+    agenticSetSupervisorOrchestrating(true);
+    agenticActivateBizEdge("supervisor-research");
+    agenticActivateBizEdge("user-supervisor", "orchestrate");
+    agenticActivateHubEdge("hub-research");
+  } else if (active === "action") {
+    agenticSetSupervisorOrchestrating(true);
+    agenticActivateBizEdge("supervisor-action");
+    agenticActivateBizEdge("user-supervisor", "orchestrate");
+    agenticActivateHubEdge("hub-action");
+  } else if (active === "legal") {
+    agenticSetSupervisorOrchestrating(true);
+    agenticActivateBizEdge("supervisor-legal");
+    agenticActivateBizEdge("user-supervisor", "orchestrate");
+    agenticActivateHubEdge("hub-legal");
+  }
+}
+
 function computeAgenticFlowCompletedNodes(trace){
   const rows = Array.isArray(trace) ? trace : [];
   const isBlocked = item => String(item.guardrail_outcome || "").toLowerCase() === "blocked";
@@ -1543,6 +1846,7 @@ function computeAgenticFlowCompletedNodes(trace){
 function updateAgenticFlowVisualization(trace, options){
   const bypass = !!(options && options.bypass);
   const running = !!(options && options.running);
+  const userIntro = !!(options && options.userIntro) || agenticFlowUserIntroActive;
   if (!agenticFlowVizEl) return;
   if (agenticFlowHubTitleEl) {
     agenticFlowHubTitleEl.textContent = bypass ? "LLM" : "F5 CalypsoAI · Guardrail";
@@ -1551,18 +1855,31 @@ function updateAgenticFlowVisualization(trace, options){
     agenticFlowHubSubEl.textContent = bypass ? "OpenAI-compatible · direct" : "OpenAI-compatible · Calypso session";
   }
   agenticFlowVizEl.querySelectorAll(".agenticFlowNode").forEach(el => {
-    el.classList.remove("agenticFlowNode--active", "agenticFlowNode--blocked", "agenticFlowNode--done", "agenticFlowNode--tooling");
+    el.classList.remove(
+      "agenticFlowNode--active",
+      "agenticFlowNode--blocked",
+      "agenticFlowNode--done",
+      "agenticFlowNode--tooling",
+      "agenticFlowNode--userFlash",
+      "agenticFlowNode--orchestrating"
+    );
   });
   agenticFlowVizEl.querySelectorAll(".agenticFlowNodeSub").forEach(el => {
     const base = el.getAttribute("data-base-sub");
     if (!base) el.setAttribute("data-base-sub", String(el.textContent || ""));
     el.textContent = base || String(el.textContent || "");
+    el.removeAttribute("title");
   });
   const hubEl = agenticFlowVizEl.querySelector(".agenticFlowHub");
   if (hubEl) hubEl.classList.remove("agenticFlowHub--blocked", "agenticFlowHub--comm", "agenticFlowHub--done");
-  agenticFlowVizEl.querySelectorAll(".agenticFlowEdge").forEach(el => {
-    el.classList.remove("agenticFlowEdge--active", "agenticFlowEdge--blocked");
+  agenticFlowVizEl.querySelectorAll(".agenticFlowBizLine").forEach(el => {
+    el.classList.remove("agenticFlowBizLine--active", "agenticFlowBizLine--orchestrate", "agenticFlowBizLine--blocked");
   });
+  agenticFlowVizEl.querySelectorAll(".agenticFlowHubLine").forEach(el => {
+    el.classList.remove("agenticFlowHubLine--active", "agenticFlowHubLine--blocked");
+  });
+  layoutAgenticFlowLinks();
+  clearAgenticMcpSatellites();
 
   const rows = Array.isArray(trace) ? trace : [];
   let hubBlocked = false;
@@ -1580,8 +1897,11 @@ function updateAgenticFlowVisualization(trace, options){
     if (el) el.classList.add("agenticFlowNode--blocked");
   });
   if (hubBlocked) {
-    agenticFlowVizEl.querySelectorAll(".agenticFlowEdge").forEach(el => {
-      el.classList.add("agenticFlowEdge--blocked");
+    agenticFlowVizEl.querySelectorAll(".agenticFlowBizLine").forEach(el => {
+      el.classList.add("agenticFlowBizLine--blocked");
+    });
+    agenticFlowVizEl.querySelectorAll(".agenticFlowHubLine").forEach(el => {
+      el.classList.add("agenticFlowHubLine--blocked");
     });
   }
 
@@ -1593,11 +1913,24 @@ function updateAgenticFlowVisualization(trace, options){
     if (el && completedNodes.has(key)) el.classList.add("agenticFlowNode--done");
   });
 
+  const userEl = agenticFlowVizEl.querySelector(".agenticFlowNode[data-node=\"user\"]");
+  const userDone = !userIntro && (running || rows.length > 0);
+  if (userEl && userDone && !blockedAgents.has("user")) userEl.classList.add("agenticFlowNode--done");
+
   if (hubEl && !running && !hubBlocked && flowNodeKeys.every(k => completedNodes.has(k))) {
     hubEl.classList.add("agenticFlowHub--done");
   }
 
   if (!running) return;
+
+  if (userIntro) {
+    if (userEl) userEl.classList.add("agenticFlowNode--userFlash");
+    return;
+  }
+
+  if (userEl && !userEl.classList.contains("agenticFlowNode--blocked")) {
+    userEl.classList.add("agenticFlowNode--done");
+  }
 
   let active = "supervisor";
   let lastRow = null;
@@ -1606,12 +1939,14 @@ function updateAgenticFlowVisualization(trace, options){
     const mapped = agenticAgentNameToFlowNode(lastRow.agent_name);
     if (mapped) active = mapped;
   }
+
   const activeNode = agenticFlowVizEl.querySelector(".agenticFlowNode[data-node=\"" + active + "\"]");
   if (activeNode && !activeNode.classList.contains("agenticFlowNode--blocked")) {
     activeNode.classList.remove("agenticFlowNode--done");
     activeNode.classList.add("agenticFlowNode--active");
   }
   const isToolStep = lastRow && String(lastRow.action_type || "").toLowerCase() === "tool_call";
+  const hasMcpCall = isToolStep && !!String(lastRow.mcp_request_id || "").trim();
   if (isToolStep) {
     if (activeNode && !activeNode.classList.contains("agenticFlowNode--blocked")) {
       activeNode.classList.add("agenticFlowNode--tooling");
@@ -1623,25 +1958,30 @@ function updateAgenticFlowVisualization(trace, options){
         subEl.textContent = "calling " + shortTool;
         subEl.setAttribute("title", (base ? (base + " | ") : "") + "calling " + shortTool);
       }
+      if (hasMcpCall) {
+        const mcpServerId = agenticToolToMcpServer(String(lastRow.tool_name || ""));
+        renderAgenticMcpSatellite(active, mcpServerId, true);
+      }
     }
+  } else {
+    rows.forEach(item => {
+      if (String(item.action_type || "").toLowerCase() !== "tool_call") return;
+      if (!String(item.mcp_request_id || "").trim()) return;
+      const node = agenticAgentNameToFlowNode(item.agent_name);
+      if (!node || node !== active) return;
+      const mcpServerId = agenticToolToMcpServer(String(item.tool_name || ""));
+      renderAgenticMcpSatellite(node, mcpServerId, false);
+    });
   }
-  if (active === "supervisor") {
-    const e = agenticFlowVizEl.querySelector(".agenticFlowEdge[data-edge=\"supervisor-hub\"]");
-    if (e && !e.classList.contains("agenticFlowEdge--blocked")) e.classList.add("agenticFlowEdge--active");
-  } else if (active === "research") {
-    const e = agenticFlowVizEl.querySelector(".agenticFlowEdge[data-edge=\"hub-research\"]");
-    if (e && !e.classList.contains("agenticFlowEdge--blocked")) e.classList.add("agenticFlowEdge--active");
-  } else if (active === "action") {
-    const e = agenticFlowVizEl.querySelector(".agenticFlowEdge[data-edge=\"hub-action\"]");
-    if (e && !e.classList.contains("agenticFlowEdge--blocked")) e.classList.add("agenticFlowEdge--active");
-  } else if (active === "legal") {
-    const e = agenticFlowVizEl.querySelector(".agenticFlowEdge[data-edge=\"hub-legal\"]");
-    if (e && !e.classList.contains("agenticFlowEdge--blocked")) e.classList.add("agenticFlowEdge--active");
-  }
+
+  agenticActivateAgentFlowEdges(active);
+  layoutAgenticFlowLinks();
   if (hubEl && !hubBlocked) {
-    const anyComm = !!agenticFlowVizEl.querySelector(".agenticFlowEdge--active");
-    if (anyComm) hubEl.classList.add("agenticFlowHub--comm");
+    const anyBiz = !!agenticFlowVizEl.querySelector(".agenticFlowBizLine--active, .agenticFlowBizLine--orchestrate");
+    const anyHub = !!agenticFlowVizEl.querySelector(".agenticFlowHubLine--active");
+    if (anyBiz || anyHub) hubEl.classList.add("agenticFlowHub--comm");
   }
+  scheduleAgenticFlowLinkLayout();
 }
 
 function startAgenticRunningStatusAnimation(baseText){
@@ -2165,6 +2505,7 @@ async function runAgenticSecurity(){
   btnRunAgenticEl.disabled = true;
   if (agenticSessionIdEl) agenticSessionIdEl.textContent = sessionId;
   startAgenticRunningStatusAnimation("Running agentic simulation");
+  startAgenticFlowUserIntro(bypassF5Guardrail);
   renderAgenticFinalReply("");
   let poller = null;
   let lastPolledTrace = [];
@@ -2177,7 +2518,7 @@ async function runAgenticSecurity(){
       lastPolledTrace = trace;
       renderAgenticTimeline(trace);
       renderAgenticToolPanel(trace);
-      updateAgenticFlowVisualization(trace, { running: !flowDone, bypass: bypassF5Guardrail });
+      updateAgenticFlowVisualization(trace, { running: !flowDone, bypass: bypassF5Guardrail, userIntro: agenticFlowUserIntroActive });
     } catch (_e) {
       // ignore transient polling errors
     }
@@ -2225,6 +2566,7 @@ async function runAgenticSecurity(){
     renderAgenticFinalReply("");
   } finally {
     stopAgenticRunningStatusAnimation();
+    stopAgenticFlowUserIntro();
     if (poller) clearInterval(poller);
     await pollTrace(true);
     btnRunAgenticEl.disabled = false;
@@ -2546,6 +2888,7 @@ function setActiveView(view){
       void loadAgenticToolConfig();
       void loadAgenticRiskTemplates();
       updateAgenticFlowVisualization([], { running: false, bypass: !!agenticBypassGuardrailEl?.checked });
+      scheduleAgenticFlowLinkLayout();
     } else if (view === "DATASET_TEST"){
       chatTitleEl.textContent = "Dataset Test";
       if (datasetTestView) datasetTestView.style.display = "";

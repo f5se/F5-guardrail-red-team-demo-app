@@ -1,6 +1,7 @@
 import asyncio
 import csv
 import os
+from contextlib import asynccontextmanager
 import time
 import json
 import re
@@ -179,7 +180,14 @@ if HF_PROXY:
 
 print("ML engines loaded.")
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await dataset_test_startup_recover()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 # 静态资源挂载（使用项目根路径，避免工作目录变化导致 404）
 app.mount(
@@ -4896,7 +4904,6 @@ def _dataset_schedule_task(task_id: str):
     t.add_done_callback(_cleanup)
 
 
-@app.on_event("startup")
 async def dataset_test_startup_recover():
     _dataset_ensure_dirs()
     try:
